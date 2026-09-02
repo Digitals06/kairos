@@ -213,6 +213,59 @@ input {
 }
 
 /* ===========================================================================
+   Weakness coach (Task 2.4)
+   =========================================================================== */
+
+.weakness-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  background: rgba(255, 46, 136, 0.08);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 0 12px rgba(255, 46, 136, 0.25);
+}
+
+.weakness-banner .wk-label {
+  font-size: 13px;
+}
+
+.weakness-banner .wk-label strong {
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.weakness-banner .wk-suggestion {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.radar-box {
+  height: 280px;
+}
+
+.cat-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cat-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* ===========================================================================
    Benchmark detail view (Task 2.3)
    =========================================================================== */
 
