@@ -9,6 +9,22 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Serde helper: the webapp-backend emits explicit `null` for rank/id/threshold
+/// fields on never-played scenarios (e.g. `"leaderboard_rank": null` with
+/// `"score": 0`). Decode those as `T::default()` (0 / empty vec) instead of
+/// failing the whole payload.
+pub(crate) mod null_default {
+    use serde::{Deserialize, Deserializer};
+
+    pub fn deserialize<'de, D, T>(d: D) -> Result<T, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de> + Default,
+    {
+        Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+    }
+}
+
 /// Current progress on one benchmark for one player (public
 /// `benchmark-progress-rank-benchmark` payload).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -42,17 +58,29 @@ pub struct CategoryProgress {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioEntry {
     pub score: f64,
-    /// Position on the scenario's public leaderboard.
-    #[serde(rename = "leaderboard_rank")]
+    /// Position on the scenario's public leaderboard; `0` when the payload
+    /// reports `null` (never played / unranked).
+    #[serde(
+        rename = "leaderboard_rank",
+        deserialize_with = "null_default::deserialize"
+    )]
     pub leaderboard_rank: u64,
-    /// 1-based tier index for this scenario (index into `rank_colors`).
-    #[serde(rename = "scenario_rank")]
+    /// 1-based tier index for this scenario (index into `rank_colors`); `0`
+    /// when unplayed, mirroring the API's own `scenario_rank: 0` convention.
+    #[serde(
+        rename = "scenario_rank",
+        deserialize_with = "null_default::deserialize"
+    )]
     pub scenario_rank: u32,
     /// Scenario score thresholds, ascending, one per rank tier.
-    #[serde(rename = "rank_maxes")]
+    #[serde(rename = "rank_maxes", deserialize_with = "null_default::deserialize")]
     pub rank_maxes: Vec<f64>,
-    /// KovaaK's leaderboard id for pulling the global scores list.
-    #[serde(rename = "leaderboard_id")]
+    /// KovaaK's leaderboard id for pulling the global scores list; `0` when
+    /// the payload reports `null`.
+    #[serde(
+        rename = "leaderboard_id",
+        deserialize_with = "null_default::deserialize"
+    )]
     pub leaderboard_id: u64,
 }
 
@@ -247,6 +275,52 @@ mod tests {
         assert_eq!(pasu.score, 128161.0);
         assert_eq!(pasu.leaderboard_id, 98059);
         assert_eq!(pasu.scenario_rank, 4);
+    }
+
+    /// The live API emits explicit `null` rank/id/threshold fields for
+    /// never-played scenarios inside an otherwise-played benchmark (observed
+    /// live 2026-09-02, e.g. benchmark 227 → "SYV Altered POV Easy Slow"):
+    /// `"score": 0, "leaderboard_rank": null, "scenario_rank": 0`. The whole
+    /// payload must still decode.
+    #[test]
+    fn null_rank_fields_for_unplayed_scenarios_decode_as_zero() {
+        const NULL_RANK_SAMPLE: &str = r#"{
+            "benchmark_progress": 110000,
+            "overall_rank": 4,
+            "categories": {
+                "Vertical": {
+                    "benchmark_progress": 20000,
+                    "category_rank": 3,
+                    "rank_maxes": [6000, 12000, 18000, 24000, 30000],
+                    "scenarios": {
+                        "SYV Altered POV Easy Slow": {
+                            "score": 0,
+                            "leaderboard_rank": null,
+                            "scenario_rank": 0,
+                            "rank_maxes": [3500, 4500, 5500, 6000, 6300],
+                            "leaderboard_id": 47632
+                        },
+                        "SYV Altered POV Slow": {
+                            "score": 484800,
+                            "leaderboard_rank": null,
+                            "scenario_rank": 5,
+                            "rank_maxes": null,
+                            "leaderboard_id": null
+                        }
+                    }
+                }
+            }
+        }"#;
+        let p: BenchmarkProgress =
+            serde_json::from_str(NULL_RANK_SAMPLE).expect("null ranks must decode");
+        let unplayed = &p.categories["Vertical"].scenarios["SYV Altered POV Easy Slow"];
+        assert_eq!(unplayed.score, 0.0);
+        assert_eq!(unplayed.leaderboard_rank, 0);
+        assert_eq!(unplayed.scenario_rank, 0);
+        let partially_null = &p.categories["Vertical"].scenarios["SYV Altered POV Slow"];
+        assert_eq!(partially_null.leaderboard_rank, 0);
+        assert!(partially_null.rank_maxes.is_empty());
+        assert_eq!(partially_null.leaderboard_id, 0);
     }
 
     #[test]

@@ -10,6 +10,7 @@ pub mod kovaaks;
 pub mod registry;
 pub mod steam;
 pub mod store;
+pub mod sync;
 pub mod types;
 
 pub use error::{Error, Result};
@@ -18,6 +19,7 @@ pub use kovaaks::KovaaksClient;
 pub use registry::Registry;
 pub use steam::EvxlClient;
 pub use store::{SnapshotWrite, Store, StoredScenario, StoredSnapshot};
+pub use sync::{ProgressSource, SyncEngine, SyncReport};
 pub use types::{
     BenchmarkDef, BenchmarkProgress, CategoryProgress, Difficulty, PlayRecord, PlayerProfile,
     RankTier, ScenarioEntry,

@@ -11,6 +11,7 @@ license.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true }
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
