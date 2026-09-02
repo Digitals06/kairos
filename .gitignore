@@ -1,0 +1,10 @@
+# Rust
+/target
+
+# Node / Tauri UI (Task 2.x)
+node_modules/
+dist/
+
+# Misc
+*.log
+.DS_Store

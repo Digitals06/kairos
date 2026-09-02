@@ -1,0 +1,6 @@
+[package]
+name = "kovaaks-tauri"
+description = "Placeholder for the Tauri v2 app (src-tauri + Svelte 5 UI scaffolded in Task 2.x)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true

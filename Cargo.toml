@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+# NOTE: `crates/kovaaks-tauri/src-tauri` joins `members` when the Tauri v2 app
+# is scaffolded (Task 2.x). Until then `crates/kovaaks-tauri` is an empty
+# placeholder lib crate so the workspace builds without npm/tauri scaffolding.
+members = ["crates/kovaaks-core", "crates/kovaaks-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+# reqwest 0.13 renamed `rustls-tls` to `rustls`; 0.12 is pinned because the
+# plan specifies the `rustls-tls` feature and its ring-based provider builds
+# cleanly on Windows without NASM/cmake (aws-lc-rs, 0.13's default, does not).
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
