@@ -4,6 +4,7 @@
 //! No UI dependencies; consumed by the Tauri app crate. Offline-first: the
 //! evxl benchmark registry is embedded at compile time.
 
+pub mod csv_ingest;
 pub mod error;
 pub mod http;
 pub mod kovaaks;
