@@ -9,8 +9,18 @@ license.workspace = true
 name = "kovaaks_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "kovaaks-companion"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[features]
+# Embeds the built frontend (ui/dist) into the binary via tauri::generate_context!.
+# Production builds MUST enable this (tauri build does it automatically; plain
+# `cargo build` does not — see build.rs/tauri.conf devUrl for the dev-server path).
+custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
 kovaaks-core = { workspace = true }
