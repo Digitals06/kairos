@@ -6,12 +6,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@tauri-apps/cli": "^2.11.4",
+    "@tsconfig/svelte": "^5.0.4",
     "svelte": "^5.56.10",
+    "svelte-check": "^4.3.2",
+    "typescript": "^5.9.3",
     "vite": "^8.2.2"
   },
   "dependencies": {
