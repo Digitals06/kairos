@@ -1,9 +1,6 @@
 [workspace]
 resolver = "2"
-# NOTE: `crates/kovaaks-tauri/src-tauri` joins `members` when the Tauri v2 app
-# is scaffolded (Task 2.x). Until then `crates/kovaaks-tauri` is an empty
-# placeholder lib crate so the workspace builds without npm/tauri scaffolding.
-members = ["crates/kovaaks-core", "crates/kovaaks-tauri"]
+members = ["crates/kovaaks-core", "crates/kovaaks-tauri/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +8,7 @@ edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
+kovaaks-core = { path = "crates/kovaaks-core" }
 tokio = { version = "1", features = ["full"] }
 # reqwest 0.13 renamed `rustls-tls` to `rustls`; 0.12 is pinned because the
 # plan specifies the `rustls-tls` feature and its ring-based provider builds

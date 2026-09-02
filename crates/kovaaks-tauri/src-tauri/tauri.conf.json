@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "kovaaks-companion",
+  "version": "0.1.0",
+  "identifier": "com.kovaaks.companion",
+  "build": {
+    "frontendDist": "../ui/dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev --prefix ../ui",
+    "beforeBuildCommand": "npm run build --prefix ../ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Kairos — KovaaK's Companion",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.ico"]
+  }
+}

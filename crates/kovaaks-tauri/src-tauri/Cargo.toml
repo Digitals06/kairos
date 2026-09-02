@@ -1,0 +1,20 @@
+[package]
+name = "kovaaks-tauri"
+description = "Kairos — KovaaK's Companion desktop app (Tauri v2 shell + commands bridge)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "kovaaks_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+kovaaks-core = { workspace = true }
+tauri = { version = "2", features = [] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
