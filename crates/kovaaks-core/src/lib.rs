@@ -5,10 +5,14 @@
 //! evxl benchmark registry is embedded at compile time.
 
 pub mod error;
+pub mod http;
+pub mod kovaaks;
 pub mod registry;
 pub mod types;
 
 pub use error::{Error, Result};
+pub use http::USER_AGENT;
+pub use kovaaks::KovaaksClient;
 pub use registry::Registry;
 pub use types::{
     BenchmarkDef, BenchmarkProgress, CategoryProgress, Difficulty, PlayRecord, PlayerProfile,

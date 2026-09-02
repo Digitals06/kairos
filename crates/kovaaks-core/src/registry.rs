@@ -172,9 +172,7 @@ mod tests {
     #[test]
     fn by_id_finds_difficulty_459() {
         let reg = registry();
-        let (bench, d) = reg
-            .by_id(459)
-            .expect("id 459 must resolve to VT S5 Novice");
+        let (bench, d) = reg.by_id(459).expect("id 459 must resolve to VT S5 Novice");
         assert_eq!(bench.name, "Voltaic S5");
         assert_eq!(d.kovaaks_benchmark_id, 459);
         assert!(reg.by_id(0).is_none());

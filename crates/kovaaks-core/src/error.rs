@@ -13,6 +13,11 @@ pub enum Error {
     #[error("invalid API response: {0}")]
     ApiShape(String),
 
+    /// A remote endpoint answered 2xx but its JSON body failed to
+    /// deserialize into the expected type.
+    #[error("json decoding failed: {0}")]
+    Json(#[from] serde_json::Error),
+
     /// A Steam identifier did not resolve to a player.
     #[error("steam identifier not found: {0}")]
     SteamNotFound(String),
