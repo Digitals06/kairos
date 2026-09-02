@@ -5,9 +5,11 @@
 //! evxl benchmark registry is embedded at compile time.
 
 pub mod error;
+pub mod registry;
 pub mod types;
 
 pub use error::{Error, Result};
+pub use registry::Registry;
 pub use types::{
     BenchmarkDef, BenchmarkProgress, CategoryProgress, Difficulty, PlayRecord, PlayerProfile,
     RankTier, ScenarioEntry,
