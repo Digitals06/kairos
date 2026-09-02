@@ -53,6 +53,9 @@ pub struct BenchmarkCard {
     pub high_improvement_pct: Option<f64>,
     pub samples: usize,
     pub last_synced: Option<String>,
+    /// Full snapshot history so the UI can draw sparklines without an N+1 of
+    /// per-card detail calls (those starve the main thread on 70-card grids).
+    pub snapshot_history: Vec<SnapshotPoint>,
 }
 
 /// One scenario row in the benchmark detail view.
@@ -75,7 +78,7 @@ pub struct CategoryCard {
 }
 
 /// One snapshot-history point.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotPoint {
     pub captured_at: String,
@@ -219,6 +222,7 @@ fn next_rank_from_ladder(
 /// Shared app state handed to every command. The async runtime is Tauri's
 /// global `tauri::async_runtime` (tokio multi-thread), so no handle field
 /// is needed; `Store` is `Clone` (connection behind a mutex) and `Send + Sync`.
+#[derive(Clone)]
 pub struct AppState {
     pub store: Store,
     pub registry: &'static Registry,
@@ -390,10 +394,11 @@ pub mod commands {
         let Some((bench, difficulty)) = state.registry.by_id(benchmark_id as u64) else {
             return Ok(None); // snapshot for a difficulty no longer in the registry
         };
-        let latest = state.store.latest(steam_id, benchmark_id)?;
+        let history = state.store.history(steam_id, benchmark_id)?;
+        let latest = history.last();
         let metrics = metrics_for_benchmark(&state.store, steam_id, benchmark_id)?;
-        let progress = latest.as_ref().map(|s| s.benchmark_progress).unwrap_or(0);
-        let ladder = overall_ladder(latest.as_ref());
+        let progress = latest.map(|s| s.benchmark_progress).unwrap_or(0);
+        let ladder = overall_ladder(latest);
         let (next_name, next_delta) = next_rank_from_ladder(progress, &ladder, &difficulty);
         Ok(Some(BenchmarkCard {
             benchmark_id,
@@ -409,127 +414,157 @@ pub mod commands {
             avg_improvement_pct: metrics.avg_improvement_pct,
             high_improvement_pct: metrics.high_improvement_pct,
             samples: metrics.samples,
-            last_synced: latest.as_ref().map(|s| s.captured_at.to_rfc3339()),
+            last_synced: latest.map(|s| s.captured_at.to_rfc3339()),
+            snapshot_history: history
+                .iter()
+                .map(|s| SnapshotPoint {
+                    captured_at: s.captured_at.to_rfc3339(),
+                    benchmark_progress: s.benchmark_progress,
+                })
+                .collect(),
         }))
     }
 
     /// Overview grid: one card per played benchmark, sorted by benchmark name.
+    /// Sync commands run on a thread-pool thread (not the main thread) so a
+    /// wide card grid never blocks the webview event loop.
     #[tauri::command]
-    pub fn get_overview(state: State<'_, AppState>) -> Result<Vec<BenchmarkCard>, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
-        let mut cards = Vec::new();
-        for benchmark_id in state
-            .store
-            .played_benchmarks(&steam_id)
-            .map_err(|e| e.to_string())?
-        {
-            if let Some(card) = build_card(&state, &steam_id, benchmark_id).map_err(|e| e.to_string())? {
-                cards.push(card);
+    pub async fn get_overview(state: State<'_, AppState>) -> Result<Vec<BenchmarkCard>, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let steam_id = state
+                .profile()
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "no profile connected".to_string())?
+                .steam_id;
+            let mut cards = Vec::new();
+            for benchmark_id in state
+                .store
+                .played_benchmarks(&steam_id)
+                .map_err(|e| e.to_string())?
+            {
+                if let Some(card) =
+                    build_card(&state, &steam_id, benchmark_id).map_err(|e| e.to_string())?
+                {
+                    cards.push(card);
+                }
             }
-        }
-        cards.sort_by(|a, b| a.benchmark_name.cmp(&b.benchmark_name));
-        Ok(cards)
+            cards.sort_by(|a, b| a.benchmark_name.cmp(&b.benchmark_name));
+            Ok(cards)
+        })
+        .await
+        .map_err(|e| format!("overview join error: {e}"))?
     }
 
     /// Full detail for one benchmark: card + snapshot history + CSV plays +
     /// scenario tiers + per-category progress from the newest snapshot.
     #[tauri::command]
-    pub fn get_benchmark_detail(
+    pub async fn get_benchmark_detail(
         state: State<'_, AppState>,
         benchmark_id: i64,
     ) -> Result<BenchmarkDetail, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
-        let card = build_card(&state, &steam_id, benchmark_id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("unknown benchmark id {benchmark_id}"))?;
-        let (_, difficulty) = state
-            .registry
-            .by_id(benchmark_id as u64)
-            .ok_or_else(|| format!("unknown benchmark id {benchmark_id}"))?;
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let steam_id = state
+                .profile()
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "no profile connected".to_string())?
+                .steam_id;
+            let card = build_card(&state, &steam_id, benchmark_id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("unknown benchmark id {benchmark_id}"))?;
+            let (_, difficulty) = state
+                .registry
+                .by_id(benchmark_id as u64)
+                .ok_or_else(|| format!("unknown benchmark id {benchmark_id}"))?;
 
-        let history = state
-            .store
-            .history(&steam_id, benchmark_id)
-            .map_err(|e| e.to_string())?;
-        let snapshot_history: Vec<SnapshotPoint> = history
-            .iter()
-            .map(|s| SnapshotPoint {
-                captured_at: s.captured_at.to_rfc3339(),
-                benchmark_progress: s.benchmark_progress,
-            })
-            .collect();
+            let history = state
+                .store
+                .history(&steam_id, benchmark_id)
+                .map_err(|e| e.to_string())?;
+            let snapshot_history: Vec<SnapshotPoint> = history
+                .iter()
+                .map(|s| SnapshotPoint {
+                    captured_at: s.captured_at.to_rfc3339(),
+                    benchmark_progress: s.benchmark_progress,
+                })
+                .collect();
 
-        let latest = history.last();
-        let scenario_ranks: Vec<ScenarioRank> = latest
-            .map(|s| s.scenarios.clone())
-            .unwrap_or_default()
-            .into_iter()
-            .map(|row| ScenarioRank {
-                tier: kovaaks_core::scenario_rank_tier(row.scenario_rank.max(0) as usize, &difficulty),
-                scenario: row.scenario,
-                score: row.score,
-                leaderboard_rank: row.leaderboard_rank,
-            })
-            .collect();
+            let latest = history.last();
+            let scenario_ranks: Vec<ScenarioRank> = latest
+                .map(|s| s.scenarios.clone())
+                .unwrap_or_default()
+                .into_iter()
+                .map(|row| ScenarioRank {
+                    tier: kovaaks_core::scenario_rank_tier(
+                        row.scenario_rank.max(0) as usize,
+                        &difficulty,
+                    ),
+                    scenario: row.scenario,
+                    score: row.score,
+                    leaderboard_rank: row.leaderboard_rank,
+                })
+                .collect();
 
-        // CSV plays for every scenario of the newest snapshot, merged + sorted.
-        let mut plays: Vec<(chrono::DateTime<chrono::Utc>, f64)> = Vec::new();
-        if let Some(snapshot) = latest {
-            let mut scenarios: Vec<&str> =
-                snapshot.scenarios.iter().map(|s| s.scenario.as_str()).collect();
-            scenarios.sort_unstable();
-            scenarios.dedup();
-            for scenario in scenarios {
-                for play in state
-                    .store
-                    .plays_history(&steam_id, scenario)
-                    .map_err(|e| e.to_string())?
-                {
-                    plays.push((play.played_at, play.score));
-                }
-            }
-        }
-        plays.sort_by(|a, b| a.0.cmp(&b.0));
-        let plays: Vec<PlayPoint> = plays
-            .into_iter()
-            .map(|(played_at, score)| PlayPoint { played_at: played_at.to_rfc3339(), score })
-            .collect();
-
-        // Per-category progress: sum of that category's scenario scores in the
-        // newest snapshot, tiered against the category's own ladder.
-        let mut per_category: BTreeMap<String, Vec<&kovaaks_core::store::StoredScenario>> =
-            BTreeMap::new();
-        if let Some(snapshot) = latest {
-            for row in &snapshot.scenarios {
-                per_category.entry(row.category.clone()).or_default().push(row);
-            }
-        }
-        let categories: Vec<CategoryCard> = per_category
-            .into_iter()
-            .map(|(name, rows)| {
-                let progress: i64 = rows.iter().map(|r| r.score).sum();
-                let ladder = rows
+            // CSV plays for every scenario of the newest snapshot, merged + sorted.
+            let mut plays: Vec<(chrono::DateTime<chrono::Utc>, f64)> = Vec::new();
+            if let Some(snapshot) = latest {
+                let mut scenarios: Vec<&str> = snapshot
+                    .scenarios
                     .iter()
-                    .find(|r| !r.rank_maxes.is_empty())
-                    .map(|r| ladder_from_rows(&r.rank_maxes))
-                    .unwrap_or_default();
-                CategoryCard {
-                    name,
-                    progress,
-                    rank_tier: rank_for(progress, &ladder, &difficulty),
+                    .map(|s| s.scenario.as_str())
+                    .collect();
+                scenarios.sort_unstable();
+                scenarios.dedup();
+                for scenario in scenarios {
+                    for play in state
+                        .store
+                        .plays_history(&steam_id, scenario)
+                        .map_err(|e| e.to_string())?
+                    {
+                        plays.push((play.played_at, play.score));
+                    }
                 }
-            })
-            .collect();
+            }
+            plays.sort_by(|a, b| a.0.cmp(&b.0));
+            let plays: Vec<PlayPoint> = plays
+                .into_iter()
+                .map(|(played_at, score)| PlayPoint {
+                    played_at: played_at.to_rfc3339(),
+                    score,
+                })
+                .collect();
 
-        Ok(BenchmarkDetail { card, snapshot_history, plays, scenario_ranks, categories })
+            // Per-category progress: sum of that category's scenario scores in the
+            // newest snapshot, tiered against the category's own ladder.
+            let mut per_category: BTreeMap<String, Vec<&kovaaks_core::store::StoredScenario>> =
+                BTreeMap::new();
+            if let Some(snapshot) = latest {
+                for row in &snapshot.scenarios {
+                    per_category.entry(row.category.clone()).or_default().push(row);
+                }
+            }
+            let categories: Vec<CategoryCard> = per_category
+                .into_iter()
+                .map(|(name, rows)| {
+                    let progress: i64 = rows.iter().map(|r| r.score).sum();
+                    let ladder = rows
+                        .iter()
+                        .find(|r| !r.rank_maxes.is_empty())
+                        .map(|r| ladder_from_rows(&r.rank_maxes))
+                        .unwrap_or_default();
+                    CategoryCard {
+                        name,
+                        progress,
+                        rank_tier: rank_for(progress, &ladder, &difficulty),
+                    }
+                })
+                .collect();
+
+            Ok(BenchmarkDetail { card, snapshot_history, plays, scenario_ranks, categories })
+        })
+        .await
+        .map_err(|e| format!("detail join error: {e}"))?
     }
 
     /// CSV ingest counters from the last scan + last sync timestamp.

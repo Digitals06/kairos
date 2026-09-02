@@ -26,6 +26,7 @@ export interface BenchmarkCard {
   high_improvement_pct: number | null
   samples: number
   last_synced: string | null
+  snapshot_history: SnapshotPoint[]
 }
 
 export interface SyncReport {

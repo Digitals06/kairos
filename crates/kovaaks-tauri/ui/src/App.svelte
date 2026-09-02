@@ -128,24 +128,17 @@
     try {
       cards = await getOverview()
       cards.sort((a, b) => a.benchmark_name.localeCompare(b.benchmark_name))
-      // Sparkline history: fetch details for cards with >1 sample lazily; a
-      // card only shows a sparkline when its snapshot history has >1 point.
+      // Sparkline history ships INSIDE each card (snapshot_history) — no
+      // per-card detail calls (70 IPC round-trips starved the main thread).
       historyByBenchmark = {}
-      await Promise.all(
-        cards.map(async (c) => {
-          try {
-            const d = await getBenchmarkDetail(c.benchmark_id)
-            if (d.snapshot_history.length > 1) {
-              historyByBenchmark = {
-                ...historyByBenchmark,
-                [c.benchmark_id]: d.snapshot_history,
-              }
-            }
-          } catch {
-            /* sparkline is optional decoration; ignore detail failures */
+      for (const c of cards) {
+        if (c.snapshot_history && c.snapshot_history.length > 1) {
+          historyByBenchmark = {
+            ...historyByBenchmark,
+            [c.benchmark_id]: c.snapshot_history,
           }
-        }),
-      )
+        }
+      }
     } catch (err) {
       showError(`Failed to load overview: ${String(err)}`)
     } finally {
