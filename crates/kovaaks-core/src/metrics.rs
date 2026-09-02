@@ -59,7 +59,7 @@ pub fn compute_window(
     if in_window.is_empty() {
         return Metrics::default();
     }
-    in_window.sort_by(|(a, _), (b, _)| a.cmp(b));
+    in_window.sort_by_key(|(t, _)| *t);
     Metrics {
         avg_score: mean(in_window.iter().map(|(_, s)| *s)),
         high_score: in_window

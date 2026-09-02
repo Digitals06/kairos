@@ -8,7 +8,7 @@
 //! (`first_run_csv_cutoff`, set to "now" on first app run) guarantees the
 //! pre-existing backlog (1,031+ files on this machine) is never backfilled.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 
@@ -256,6 +256,7 @@ struct ParsedFilename {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use std::path::PathBuf;
 
     // ---------- temp helpers (std only) ----------
 
