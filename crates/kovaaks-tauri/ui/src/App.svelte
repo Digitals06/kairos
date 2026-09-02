@@ -15,6 +15,7 @@
   } from './lib/api'
   import Setup from './lib/Setup.svelte'
   import BenchmarkCardView from './lib/BenchmarkCardView.svelte'
+  import Detail from './lib/Detail.svelte'
 
   // --- app flow state --------------------------------------------------------
   type Screen = 'loading' | 'setup' | 'overview'
@@ -174,6 +175,17 @@
     refreshLastSynced()
     loadOverview()
   }
+
+  // --- detail drill-down (client-side state, no router lib) -------------------
+  let selectedBenchmarkId = $state<number | null>(null)
+
+  function openDetail(id: number) {
+    selectedBenchmarkId = id
+  }
+
+  function closeDetail() {
+    selectedBenchmarkId = null
+  }
 </script>
 
 <svelte:window onclick={onWindowClick} />
@@ -235,7 +247,9 @@
     </header>
 
     <main>
-      {#if loadingOverview && cards.length === 0}
+      {#if selectedBenchmarkId !== null}
+        <Detail benchmarkId={selectedBenchmarkId} onback={closeDetail} />
+      {:else if loadingOverview && cards.length === 0}
         <div class="grid">
           {#each Array(6) as _, i (i)}
             <div class="skeleton"></div>
@@ -249,7 +263,11 @@
       {:else}
         <div class="grid">
           {#each cards as card (card.benchmark_id)}
-            <BenchmarkCardView {card} history={historyByBenchmark[card.benchmark_id] ?? []} />
+            <BenchmarkCardView
+              {card}
+              history={historyByBenchmark[card.benchmark_id] ?? []}
+              onclick={() => openDetail(card.benchmark_id)}
+            />
           {/each}
         </div>
       {/if}

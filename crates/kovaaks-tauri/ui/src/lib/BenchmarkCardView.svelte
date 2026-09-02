@@ -5,9 +5,11 @@
   let {
     card,
     history = [],
+    onclick,
   }: {
     card: BenchmarkCard
     history?: SnapshotPoint[]
+    onclick?: () => void
   } = $props()
 
   // Progress-to-next-rank as a bar fraction: the previous rung is derived from
@@ -59,7 +61,12 @@
   })
 </script>
 
-<article class="panel card">
+<article class="panel card" role="button" tabindex="0" onclick={onclick} onkeydown={(e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    onclick?.()
+  }
+}}>
   <header>
     <div class="names">
       <h3 title={card.benchmark_name}>{card.benchmark_name}</h3>
@@ -121,6 +128,7 @@
     flex-direction: column;
     gap: 12px;
     padding: 16px;
+    cursor: pointer;
     transition: border-color 0.15s, box-shadow 0.15s;
   }
 
