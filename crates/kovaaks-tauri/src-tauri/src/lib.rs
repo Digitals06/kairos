@@ -32,12 +32,15 @@ const DEFAULT_STATS_DIR: &str = "C:\\Program Files (x86)\\Steam\\steamapps\\comm
 const SYNC_MAX_AGE_HOURS: u64 = 2;
 
 // ---------------------------------------------------------------------------
-// UI-facing DTOs (serde-camelCase mirrors of the TypeScript interfaces)
+// UI-facing DTOs (serde snake_case mirrors of the TypeScript interfaces in
+// ui/src/lib/api.ts — the whole frontend reads snake_case fields; camelCase
+// here once crashed every card render with `undefined.toLocaleString`).
+// REGRESSION: dto_wire_format_is_snake_case guards this.
 // ---------------------------------------------------------------------------
 
 /// One benchmark row on the overview grid.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct BenchmarkCard {
     pub benchmark_id: i64,
     pub benchmark_name: String,
@@ -60,7 +63,7 @@ pub struct BenchmarkCard {
 
 /// One scenario row in the benchmark detail view.
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ScenarioRank {
     pub scenario: String,
     pub score: i64,
@@ -70,7 +73,7 @@ pub struct ScenarioRank {
 
 /// One category row in the benchmark detail view.
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct CategoryCard {
     pub name: String,
     pub progress: i64,
@@ -79,7 +82,7 @@ pub struct CategoryCard {
 
 /// One snapshot-history point.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SnapshotPoint {
     pub captured_at: String,
     pub benchmark_progress: i64,
@@ -87,7 +90,7 @@ pub struct SnapshotPoint {
 
 /// One CSV play point.
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PlayPoint {
     pub played_at: String,
     pub score: f64,
@@ -95,7 +98,7 @@ pub struct PlayPoint {
 
 /// Full detail payload for one benchmark.
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct BenchmarkDetail {
     pub card: BenchmarkCard,
     pub snapshot_history: Vec<SnapshotPoint>,
@@ -110,7 +113,7 @@ pub struct BenchmarkDetail {
 /// overview top bar uses it for the last-synced display and the 12h stale
 /// badge without a dedicated extra command.
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct IngestStatus {
     pub csv_seen: u64,
     pub csv_inserted: u64,
@@ -120,7 +123,7 @@ pub struct IngestStatus {
 /// Wire mirror of `kovaaks_core::SyncReport` (core types stay serde-free
 /// of UI concerns; core's struct does not derive Serialize).
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SyncReportDto {
     pub ok: usize,
     pub failed: usize,
@@ -135,7 +138,7 @@ impl From<SyncReport> for SyncReportDto {
 
 /// App settings (persisted as a JSON blob in the store's meta table).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "snake_case", default)]
 pub struct AppSettings {
     /// Stats dir override; empty string = auto-detect (default Steam path).
     pub stats_dir: String,
@@ -608,6 +611,72 @@ pub mod commands {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// REGRESSION (skeleton-forever bug): the frontend reads snake_case fields
+    /// (benchmark_progress, next_rank_delta, …). camelCase wire output made
+    /// every card render throw `undefined.toLocaleString` and the overview
+    /// froze on skeletons. If this test fails, the DTO serde casing drifted
+    /// from ui/src/lib/api.ts again.
+    #[test]
+    fn dto_wire_format_is_snake_case() {
+        let card = BenchmarkCard {
+            benchmark_id: 459,
+            benchmark_name: "Voltaic S5".into(),
+            abbreviation: "VT".into(),
+            difficulty_name: "Novice".into(),
+            rank: Some(RankTier { name: "Gold".into(), color: "#CAB148".into() }),
+            benchmark_progress: 180000,
+            next_rank_name: None,
+            next_rank_delta: None,
+            avg_score: 1.0,
+            high_score: 1.0,
+            avg_improvement_pct: None,
+            high_improvement_pct: None,
+            samples: 1,
+            last_synced: None,
+            snapshot_history: vec![],
+        };
+        let json = serde_json::to_string(&card).unwrap();
+        for key in [
+            "\"benchmark_id\"",
+            "\"benchmark_name\"",
+            "\"difficulty_name\"",
+            "\"benchmark_progress\"",
+            "\"next_rank_name\"",
+            "\"next_rank_delta\"",
+            "\"avg_score\"",
+            "\"high_score\"",
+            "\"avg_improvement_pct\"",
+            "\"high_improvement_pct\"",
+            "\"last_synced\"",
+            "\"snapshot_history\"",
+        ] {
+            assert!(json.contains(key), "missing {key} in {json}");
+        }
+        assert!(!json.contains("benchmarkId"), "camelCase leaked into wire format: {json}");
+
+        let detail = BenchmarkDetail {
+            card: card.clone(),
+            snapshot_history: vec![],
+            plays: vec![],
+            scenario_ranks: vec![ScenarioRank {
+                scenario: "VT Pasu Novice S5".into(),
+                score: 128161,
+                leaderboard_rank: 169,
+                tier: None,
+            }],
+            categories: vec![CategoryCard {
+                name: "Clicking".into(),
+                progress: 60000,
+                rank_tier: None,
+            }],
+        };
+        let json = serde_json::to_string(&detail).unwrap();
+        for key in ["\"scenario_ranks\"", "\"leaderboard_rank\"", "\"rank_tier\"", "\"snapshot_history\""] {
+            assert!(json.contains(key), "missing {key} in {json}");
+        }
+        assert!(!json.contains("leaderboardRank"), "camelCase leaked: {json}");
+    }
 
     #[test]
     fn settings_roundtrip_with_defaults() {
