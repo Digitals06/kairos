@@ -2,6 +2,8 @@
   import { getProfile, resolveProfile } from './api'
   import type { PlayerProfile } from './api'
 
+  import { humanError } from './errors'
+
   let { onconnected }: { onconnected: (p: PlayerProfile) => void } = $props()
 
   let identifier = $state('')
@@ -18,7 +20,8 @@
       const profile = await resolveProfile(id)
       onconnected(profile)
     } catch (err) {
-      error = String(err)
+      // Stay on Setup — the message renders inline below the field.
+      error = humanError(err)
     } finally {
       connecting = false
     }

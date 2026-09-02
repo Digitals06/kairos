@@ -16,6 +16,7 @@
   import Setup from './lib/Setup.svelte'
   import BenchmarkCardView from './lib/BenchmarkCardView.svelte'
   import Detail from './lib/Detail.svelte'
+  import { humanError } from './lib/errors'
 
   // --- app flow state --------------------------------------------------------
   type Screen = 'loading' | 'setup' | 'overview'
@@ -78,7 +79,7 @@
         showError(`Sync finished with ${report.failed} failure(s): ${report.errors[0] ?? ''}`)
       }
     } catch (err) {
-      showError(`Sync failed: ${String(err)}`)
+      showError(humanError(err))
     } finally {
       syncing = false
     }
