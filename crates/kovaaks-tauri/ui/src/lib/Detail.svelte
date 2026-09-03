@@ -41,10 +41,8 @@
     return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   }
 
-  // --- scenario table: score sort toggle -------------------------------------
-  let scoreDesc = $state(true)
-
-  // --- per-scenario history picker -------------------------------------------
+  // --- scenario table (API document order — same as evxl) ---------------------
+  const scenarios = $derived(detail?.scenario_ranks ?? [])
   // One scenario is ALWAYS selected (defaults to the first with data); the
   // chart and the stat cards both reflect it. When the payload changes
   // (different benchmark), reset to that benchmark's first scenario.
@@ -75,11 +73,6 @@
   const activeMetrics = $derived.by(() => {
     if (!detail || !chartScope) return null
     return detail.scenario_metrics?.[chartScope] ?? null
-  })
-
-  const scenarios = $derived.by(() => {
-    const rows = detail?.scenario_ranks ?? []
-    return [...rows].sort((a, b) => (scoreDesc ? b.score - a.score : a.score - b.score))
   })
 
   // --- evxl-style rank threshold matrix ---------------------------------------
@@ -231,87 +224,6 @@
       lineChart = undefined
     }
   })
-  // --- weakness coach: radar + weakest-category banner (Task 2.4) -------------
-  // The wire DTO (`CategoryCard`) ships only { name, progress, rank_tier } —
-  // no per-category tier ladder or thresholds — so absolute normalization
-  // (progress / max tier threshold) is not derivable client-side and the
-  // backend does not pre-normalize. Normalize relatively instead: each value
-  // is progress / max(progress across categories), a presentation-only series
-  // exactly like the chart's running-high / rolling-average lines.
-  const radarData = $derived.by(() => {
-    const cats = detail?.categories ?? []
-    const max = Math.max(0, ...cats.map((c) => c.progress))
-    return cats.map((c) => (max > 0 ? c.progress / max : 0))
-  })
-
-  // Weakest = lowest tier. The payload has no numeric tier index, so progress
-  // stands in as the tier proxy (spec: rank_tier *or* progress).
-  const weakest = $derived.by(() => {
-    const cats = detail?.categories ?? []
-    if (cats.length < 2) return null
-    return cats.reduce((min, c) => (c.progress < min.progress ? c : min))
-  })
-
-  let radarCanvas: HTMLCanvasElement | undefined = $state()
-  let radarChart: Chart | undefined
-
-  $effect(() => {
-    const d = detail
-    // A radar polygon needs >= 3 axes; 1-2 categories fall back to a list.
-    if (!d || !radarCanvas || d.categories.length < 3) return
-
-    radarChart = new Chart(radarCanvas, {
-      type: 'radar',
-      data: {
-        labels: d.categories.map((c) => c.name),
-        datasets: [
-          {
-            label: 'category progress (normalized)',
-            data: radarData,
-            borderColor: CYAN,
-            backgroundColor: 'rgba(0, 229, 255, 0.12)',
-            borderWidth: 2,
-            pointBackgroundColor: CYAN,
-            pointRadius: 3,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        color: GREY,
-        scales: {
-          r: {
-            min: 0,
-            max: 1,
-            grid: { color: GRID },
-            angleLines: { color: GRID },
-            pointLabels: { color: '#e5e7eb', font: { size: 11 } },
-            ticks: {
-              color: GREY,
-              backdropColor: 'transparent',
-              callback: (v) => `${Math.round(Number(v) * 100)}%`,
-            },
-          },
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (item) => {
-                const cat = d.categories[item.dataIndex]
-                return `${Math.round(item.parsed.r * 100)}% · ${cat.progress.toLocaleString()} pts`
-              },
-            },
-          },
-        },
-      },
-    })
-    return () => {
-      radarChart?.destroy()
-      radarChart = undefined
-    }
-  })
 </script>
 
 <div class="detail">
@@ -335,13 +247,6 @@
       </div>
       <RankBadge tier={detail.card.rank} />
     </header>
-
-    {#if weakest}
-      <div class="weakness-banner" role="status">
-        <span class="wk-label">Weakest category: <strong>{weakest.name}</strong></span>
-        <span class="wk-suggestion">Prioritize {weakest.name} drills this week</span>
-      </div>
-    {/if}
 
     <div class="stat-row">
       {#if activeMetrics}
@@ -415,33 +320,9 @@
       </section>
     {/if}
 
-    {#if detail.categories.length >= 3}
-      <section class="panel chart-panel">
-        <h3>Category radar</h3>
-        <div class="chart-box radar-box">
-          <canvas bind:this={radarCanvas}></canvas>
-        </div>
-      </section>
-    {:else if detail.categories.length > 0}
-      <section class="panel chart-panel">
-        <h3>Categories</h3>
-        <ul class="cat-list">
-          {#each detail.categories as c (c.name)}
-            <li>
-              <span>{c.name}</span>
-              <span class="num">{c.progress.toLocaleString()} pts</span>
-            </li>
-          {/each}
-        </ul>
-      </section>
-    {/if}
-
     <section class="panel table-panel">
       <div class="table-head">
         <h3>Scenarios</h3>
-        <button class="btn btn-small num" onclick={() => (scoreDesc = !scoreDesc)}>
-          score {scoreDesc ? '↓' : '↑'}
-        </button>
       </div>
       {#if scenarios.length === 0}
         <p class="muted">No scenarios in the latest snapshot.</p>

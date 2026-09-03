@@ -238,15 +238,13 @@ mod tests {
     #[test]
     fn normalize_scale_converts_centi_to_display() {
         use crate::types::{BenchmarkProgress, CategoryProgress, ScenarioEntry};
-        use std::collections::HashMap;
-        let mut cats = HashMap::new();
-        cats.insert(
+        let cats = vec![(
             "Clicking".to_string(),
             CategoryProgress {
                 benchmark_progress: 60000.0,
                 category_rank: 4,
                 rank_maxes: vec![15000.0, 30000.0, 45000.0, 60000.0],
-                scenarios: HashMap::from([(
+                scenarios: vec![(
                     "VT Pasu Novice S5".to_string(),
                     ScenarioEntry {
                         score: 128161.0,
@@ -256,9 +254,9 @@ mod tests {
                         rank_maxes: vec![555.0, 660.0, 745.0, 800.0],
                         leaderboard_id: 98059,
                     },
-                )]),
+                )],
             },
-        );
+        )];
         let mut p = BenchmarkProgress {
             benchmark_progress: 180000.0,
             overall_rank: 4,
@@ -266,10 +264,20 @@ mod tests {
         };
         p.normalize_scale();
         assert_eq!(p.benchmark_progress, 1800.0);
-        let cat = &p.categories["Clicking"];
+        let cat = &p
+            .categories
+            .iter()
+            .find(|(n, _)| n == "Clicking")
+            .unwrap()
+            .1;
         assert_eq!(cat.benchmark_progress, 600.0);
         assert_eq!(cat.rank_maxes, vec![150.0, 300.0, 450.0, 600.0]);
-        let scen = &cat.scenarios["VT Pasu Novice S5"];
+        let scen = &cat
+            .scenarios
+            .iter()
+            .find(|(n, _)| n == "VT Pasu Novice S5")
+            .unwrap()
+            .1;
         assert_eq!(scen.score, 1281.61);
         // Scenario thresholds untouched.
         assert_eq!(scen.rank_maxes, vec![555.0, 660.0, 745.0, 800.0]);

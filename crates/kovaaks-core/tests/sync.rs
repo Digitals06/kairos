@@ -81,8 +81,7 @@ fn some_non_major_id() -> i64 {
 /// Benchmark progress with a single Tracking scenario scoring `scen_score`.
 fn prog(overall: f64, scen_score: f64) -> BenchmarkProgress {
     let scenarios = if scen_score > 0.0 {
-        let mut m = HashMap::new();
-        m.insert(
+        vec![(
             "VT Pasu Novice S5".to_string(),
             kovaaks_core::ScenarioEntry {
                 score: scen_score,
@@ -91,15 +90,14 @@ fn prog(overall: f64, scen_score: f64) -> BenchmarkProgress {
                 rank_maxes: vec![40000.0, 80000.0, 120000.0, 160000.0],
                 leaderboard_id: 98059,
             },
-        );
-        m
+        )]
     } else {
-        HashMap::new()
+        Vec::new()
     };
     BenchmarkProgress {
         benchmark_progress: overall,
         overall_rank: 1,
-        categories: HashMap::from([(
+        categories: vec![(
             "Tracking".to_string(),
             kovaaks_core::CategoryProgress {
                 benchmark_progress: overall,
@@ -107,7 +105,7 @@ fn prog(overall: f64, scen_score: f64) -> BenchmarkProgress {
                 rank_maxes: vec![40000.0, 80000.0, 120000.0, 160000.0],
                 scenarios,
             },
-        )]),
+        )],
     }
 }
 

@@ -17,7 +17,7 @@ use crate::error::Result;
 use crate::types::{BenchmarkProgress, PlayRecord, PlayerProfile};
 
 /// Schema version this build writes; `PRAGMA user_version` gates migrations.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// Result of [`Store::record_snapshot`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +43,9 @@ pub struct StoredScenario {
     /// (0 when the payload omitted it) — ranks come from the API's own
     /// per-benchmark rules, not threshold recomputation.
     pub category_rank: i64,
+    /// API document order (author/evxl ordering): category index × 10 000 +
+    /// scenario index. Ordering for tables/pickers must sort by this.
+    pub api_order: i64,
     /// Scenario rank thresholds (JSON array column round-tripped via serde_json).
     pub rank_maxes: Vec<f64>,
 }
@@ -70,12 +73,12 @@ pub struct Store {
 /// Internal (category, scenario, score, leaderboard_rank, scenario_rank,
 /// category_rank, rank_maxes-json) tuple used for dedup comparison; sorted so
 /// HashMap iteration order never affects equality.
-type ScenarioRow = (String, String, i64, i64, i64, i64, String);
+type ScenarioRow = (String, String, i64, i64, i64, i64, i64, String);
 
 fn scenario_rows_from_progress(progress: &BenchmarkProgress) -> Result<Vec<ScenarioRow>> {
     let mut rows: Vec<ScenarioRow> = Vec::new();
-    for (cat_name, cat) in &progress.categories {
-        for (scen_name, scen) in &cat.scenarios {
+    for (cat_idx, (cat_name, cat)) in progress.categories.iter().enumerate() {
+        for (scen_idx, (scen_name, scen)) in cat.scenarios.iter().enumerate() {
             rows.push((
                 cat_name.clone(),
                 scen_name.clone(),
@@ -83,23 +86,23 @@ fn scenario_rows_from_progress(progress: &BenchmarkProgress) -> Result<Vec<Scena
                 scen.leaderboard_rank.min(i64::MAX as u64) as i64,
                 scen.scenario_rank as i64,
                 cat.category_rank as i64,
+                (cat_idx * 10_000 + scen_idx) as i64, // API document order
                 serde_json::to_string(&scen.rank_maxes)?,
             ));
         }
     }
-    rows.sort();
     Ok(rows)
 }
 
 fn scenario_rows_from_conn(conn: &Connection, snapshot_id: i64) -> Result<Vec<StoredScenario>> {
     let mut stmt = conn.prepare(
-        "SELECT scenario, category, score, leaderboard_rank, scenario_rank, category_rank, rank_maxes
+        "SELECT scenario, category, score, leaderboard_rank, scenario_rank, category_rank, order_idx, rank_maxes
          FROM scenario_scores WHERE snapshot_id = ?1
-         ORDER BY category, scenario",
+         ORDER BY order_idx, scenario",
     )?;
     let rows = stmt
         .query_map(params![snapshot_id], |row| {
-            let maxes: String = row.get(6)?;
+            let maxes: String = row.get(7)?;
             Ok(StoredScenario {
                 scenario: row.get(0)?,
                 category: row.get(1)?,
@@ -107,9 +110,10 @@ fn scenario_rows_from_conn(conn: &Connection, snapshot_id: i64) -> Result<Vec<St
                 leaderboard_rank: row.get(3)?,
                 scenario_rank: row.get(4)?,
                 category_rank: row.get(5)?,
+                api_order: row.get(6)?,
                 rank_maxes: serde_json::from_str(&maxes).map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        6,
+                        7,
                         rusqlite::types::Type::Text,
                         Box::new(e),
                     )
@@ -121,20 +125,21 @@ fn scenario_rows_from_conn(conn: &Connection, snapshot_id: i64) -> Result<Vec<St
 }
 
 fn scenario_row_tuples(stored: &[StoredScenario]) -> Result<Vec<ScenarioRow>> {
-    stored
-        .iter()
-        .map(|s| {
-            Ok((
-                s.category.clone(),
-                s.scenario.clone(),
-                s.score,
-                s.leaderboard_rank,
-                s.scenario_rank,
-                s.category_rank,
-                serde_json::to_string(&s.rank_maxes)?,
-            ))
-        })
-        .collect()
+    let mut rows: Vec<ScenarioRow> = Vec::with_capacity(stored.len());
+    for s in stored {
+        rows.push((
+            s.category.clone(),
+            s.scenario.clone(),
+            s.score,
+            s.leaderboard_rank,
+            s.scenario_rank,
+            s.category_rank,
+            s.api_order,
+            serde_json::to_string(&s.rank_maxes)?,
+        ));
+    }
+    rows.sort();
+    Ok(rows)
 }
 
 /// Parse an RFC3339 TEXT column into a UTC timestamp, surfacing failures as
@@ -197,6 +202,41 @@ impl Store {
             // Snapshots are gone; force the next sync to re-pull everything.
             conn.execute("DELETE FROM benchmarks_playing", [])?;
         }
+        if version < 3 {
+            // v3: preserve the API's scenario ordering (author/evxl order).
+            // Snapshot cache is re-fetchable — same rebuild strategy as v2.
+            conn.execute_batch(
+                "BEGIN;
+                 DROP TABLE scenario_scores;
+                 DROP TABLE snapshots;
+                 CREATE TABLE snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    steam_id TEXT NOT NULL,
+                    benchmark_id INTEGER NOT NULL,
+                    captured_at TEXT NOT NULL,
+                    benchmark_progress INTEGER NOT NULL,
+                    overall_rank INTEGER NOT NULL,
+                    UNIQUE (steam_id, benchmark_id, captured_at)
+                 );
+                 CREATE TABLE scenario_scores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+                    scenario TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    score INTEGER NOT NULL,
+                    leaderboard_rank INTEGER NOT NULL,
+                    scenario_rank INTEGER NOT NULL,
+                    category_rank INTEGER NOT NULL DEFAULT 0,
+                    order_idx INTEGER NOT NULL DEFAULT 0,
+                    rank_maxes TEXT NOT NULL,
+                    UNIQUE (snapshot_id, scenario, category)
+                 );
+                 CREATE INDEX idx_snapshots_player ON snapshots(steam_id, benchmark_id, captured_at);
+                 CREATE INDEX idx_scenario_scores_snapshot ON scenario_scores(snapshot_id);
+                 COMMIT;",
+            )?;
+            conn.execute("DELETE FROM benchmarks_playing", [])?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -240,8 +280,10 @@ impl Store {
             )?;
             let stored = scenario_rows_from_conn(&conn, newest_id)?;
             let stored_rows = scenario_row_tuples(&stored)?;
+            let mut new_sorted = new_rows.clone();
+            new_sorted.sort();
             if stored_progress == progress.benchmark_progress.round() as i64
-                && stored_rows == new_rows
+                && stored_rows == new_sorted
             {
                 conn.execute(
                     "UPDATE snapshots SET captured_at = ?1 WHERE id = ?2",
@@ -265,12 +307,12 @@ impl Store {
             ],
         )?;
         let snapshot_id = conn.last_insert_rowid();
-        for (category, scenario, score, lrank, srank, crank, maxes) in &new_rows {
+        for (category, scenario, score, lrank, srank, crank, oidx, maxes) in &new_rows {
             conn.execute(
                 "INSERT INTO scenario_scores
-                 (snapshot_id, scenario, category, score, leaderboard_rank, scenario_rank, category_rank, rank_maxes)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![snapshot_id, scenario, category, score, lrank, srank, crank, maxes],
+                 (snapshot_id, scenario, category, score, leaderboard_rank, scenario_rank, category_rank, order_idx, rank_maxes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![snapshot_id, scenario, category, score, lrank, srank, crank, oidx, maxes],
             )?;
         }
         tx.commit()?;

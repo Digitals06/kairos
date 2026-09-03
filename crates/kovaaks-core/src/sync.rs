@@ -233,9 +233,9 @@ impl<S: ProgressSource> SyncEngine<S> {
                             let played = progress.benchmark_progress > 0.0
                                 || progress
                                     .categories
-                                    .values()
-                                    .flat_map(|c| c.scenarios.values())
-                                    .any(|s| s.score > 0.0);
+                                    .iter()
+                                    .flat_map(|(_, c)| c.scenarios.iter())
+                                    .any(|(_, s)| s.score > 0.0);
                             self.store
                                 .upsert_played(steam_id, benchmark_id, played, Utc::now())
                                 .expect("store write must succeed");

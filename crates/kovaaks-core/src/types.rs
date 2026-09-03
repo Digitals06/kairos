@@ -25,6 +25,43 @@ pub(crate) mod null_default {
     }
 }
 
+/// Serde helper: decode a JSON object into an order-preserving `Vec<(String, T)>`.
+/// `serde_json`'s default map is a BTreeMap (alphabetical), which would lose the
+/// API's scenario ordering (author/evxl order). `MapAccess` yields entries in
+/// document order, so this keeps it.
+pub(crate) mod ordered_map {
+    use serde::{Deserialize, Deserializer};
+    use std::marker::PhantomData;
+
+    pub fn deserialize<'de, D, T>(d: D) -> Result<Vec<(String, T)>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        struct VM<T>(PhantomData<T>);
+        impl<'de, T> serde::de::Visitor<'de> for VM<T>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = Vec<(String, T)>;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON object")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut access: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut v = Vec::new();
+                while let Some((k, val)) = access.next_entry::<String, T>()? {
+                    v.push((k, val));
+                }
+                Ok(v)
+            }
+        }
+        d.deserialize_map(VM(PhantomData))
+    }
+}
+
 /// Current progress on one benchmark for one player (public
 /// `benchmark-progress-rank-benchmark` payload).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -36,8 +73,10 @@ pub struct BenchmarkProgress {
     /// 1-based rank index into the benchmark's difficulty `rank_colors`.
     #[serde(rename = "overall_rank")]
     pub overall_rank: u32,
-    /// Per-category progress keyed by category name (Clicking, Tracking, ...).
-    pub categories: HashMap<String, CategoryProgress>,
+    /// Per-category progress in API document order (Clicking, Tracking, ... —
+    /// the order the benchmark author defined, which evxl displays).
+    #[serde(rename = "categories", deserialize_with = "ordered_map::deserialize")]
+    pub categories: Vec<(String, CategoryProgress)>,
 }
 
 impl BenchmarkProgress {
@@ -56,12 +95,12 @@ impl BenchmarkProgress {
     pub fn normalize_scale(&mut self) {
         const CENTI: f64 = 100.0;
         self.benchmark_progress /= CENTI;
-        for cat in self.categories.values_mut() {
+        for (_, cat) in self.categories.iter_mut() {
             cat.benchmark_progress /= CENTI;
             for max in &mut cat.rank_maxes {
                 *max /= CENTI;
             }
-            for scen in cat.scenarios.values_mut() {
+            for (_, scen) in cat.scenarios.iter_mut() {
                 scen.score /= CENTI;
                 // scen.rank_maxes already display-scale — deliberately untouched.
             }
@@ -80,8 +119,9 @@ pub struct CategoryProgress {
     /// Category score thresholds, ascending, one per rank tier.
     #[serde(rename = "rank_maxes")]
     pub rank_maxes: Vec<f64>,
-    /// Scenario results keyed by scenario name.
-    pub scenarios: HashMap<String, ScenarioEntry>,
+    /// Scenario results in API document order (author/evxl ordering).
+    #[serde(rename = "scenarios", deserialize_with = "ordered_map::deserialize")]
+    pub scenarios: Vec<(String, ScenarioEntry)>,
 }
 
 /// One played scenario inside a category.
@@ -301,7 +341,17 @@ mod tests {
             serde_json::from_str(VT_S5_NOVICE_PROGRESS).expect("sample must parse");
         assert_eq!(p.benchmark_progress, 180000.0);
         assert_eq!(p.overall_rank, 4);
-        let pasu = &p.categories["Tracking"].scenarios["VT Pasu Novice S5"];
+        let pasu = &p
+            .categories
+            .iter()
+            .find(|(n, _)| n == "Tracking")
+            .unwrap()
+            .1
+            .scenarios
+            .iter()
+            .find(|(n, _)| n == "VT Pasu Novice S5")
+            .unwrap()
+            .1;
         assert_eq!(pasu.score, 128161.0);
         assert_eq!(pasu.leaderboard_id, 98059);
         assert_eq!(pasu.scenario_rank, 4);
@@ -343,11 +393,31 @@ mod tests {
         }"#;
         let p: BenchmarkProgress =
             serde_json::from_str(NULL_RANK_SAMPLE).expect("null ranks must decode");
-        let unplayed = &p.categories["Vertical"].scenarios["SYV Altered POV Easy Slow"];
+        let unplayed = &p
+            .categories
+            .iter()
+            .find(|(n, _)| n == "Vertical")
+            .unwrap()
+            .1
+            .scenarios
+            .iter()
+            .find(|(n, _)| n == "SYV Altered POV Easy Slow")
+            .unwrap()
+            .1;
         assert_eq!(unplayed.score, 0.0);
         assert_eq!(unplayed.leaderboard_rank, 0);
         assert_eq!(unplayed.scenario_rank, 0);
-        let partially_null = &p.categories["Vertical"].scenarios["SYV Altered POV Slow"];
+        let partially_null = &p
+            .categories
+            .iter()
+            .find(|(n, _)| n == "Vertical")
+            .unwrap()
+            .1
+            .scenarios
+            .iter()
+            .find(|(n, _)| n == "SYV Altered POV Slow")
+            .unwrap()
+            .1;
         assert_eq!(partially_null.leaderboard_rank, 0);
         assert!(partially_null.rank_maxes.is_empty());
         assert_eq!(partially_null.leaderboard_id, 0);

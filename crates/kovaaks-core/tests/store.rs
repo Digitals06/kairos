@@ -122,7 +122,7 @@ fn open_creates_schema_v1_and_reopen_preserves_data() {
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert_eq!(
-        version, 2,
+        version, 3,
         "migration must set user_version to current schema"
     );
     for table in [
@@ -310,11 +310,34 @@ fn dedup_is_insensitive_to_scenario_map_iteration_order() {
         .record_snapshot(SID, 459, &make(true), ts(1_700_000_500))
         .unwrap();
     assert!(matches!(first, SnapshotWrite::Inserted { .. }));
+    // v3: scenario order is meaningful (API document order is preserved), so
+    // a reordered payload is a genuinely different snapshot, not a duplicate.
     assert!(
-        matches!(second, SnapshotWrite::Deduplicated { .. }),
-        "same score set in different map order must dedup"
+        matches!(second, SnapshotWrite::Inserted { .. }),
+        "reordered scenarios are a different payload (order is preserved now)"
     );
-    assert_eq!(store.history(SID, 459).unwrap().len(), 1);
+    assert_eq!(store.history(SID, 459).unwrap().len(), 2);
+
+    // Identical to the FIRST payload, but dedup only compares the NEWEST
+    // snapshot (the reversed one) — so this inserts too.
+    let third = store
+        .record_snapshot(SID, 459, &make(false), ts(1_700_001_000))
+        .unwrap();
+    assert!(
+        matches!(third, SnapshotWrite::Inserted { .. }),
+        "dedup compares only the newest snapshot, which differs in order"
+    );
+    assert_eq!(store.history(SID, 459).unwrap().len(), 3);
+
+    // An exact repeat of the newest payload still dedups.
+    let fourth = store
+        .record_snapshot(SID, 459, &make(false), ts(1_700_001_500))
+        .unwrap();
+    assert!(
+        matches!(fourth, SnapshotWrite::Deduplicated { .. }),
+        "identical payloads must dedup"
+    );
+    assert_eq!(store.history(SID, 459).unwrap().len(), 3);
     cleanup_db(&path);
 }
 

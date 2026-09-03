@@ -394,14 +394,13 @@ mod tests {
             .record_play("76561190000000001", &play, "C:/fake/play-1.csv")
             .expect("record play");
 
-        let mut categories = std::collections::HashMap::new();
-        categories.insert(
+        let mut categories = vec![(
             "Clicking".to_string(),
             crate::types::CategoryProgress {
                 benchmark_progress: 30000.0,
                 category_rank: 3,
                 rank_maxes: vec![10000.0, 20000.0, 30000.0, 40000.0],
-                scenarios: std::collections::HashMap::from([(
+                scenarios: vec![(
                     "VT 1w4ts Novice S5".to_string(),
                     crate::types::ScenarioEntry {
                         score: 300.0,
@@ -410,9 +409,9 @@ mod tests {
                         rank_maxes: vec![250.0, 275.0, 290.0, 310.0],
                         leaderboard_id: 98059,
                     },
-                )]),
+                )],
             },
-        );
+        )];
         let progress = crate::types::BenchmarkProgress {
             benchmark_progress: 30000.0,
             overall_rank: 3,
