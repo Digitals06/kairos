@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { RankTier } from '../lib/api'
 
-  let { tier, progress }: { tier: RankTier | null; progress: number } = $props()
+  let { tier, progress = null }: { tier: RankTier | null; progress?: number | null } = $props()
 
   // Decode a tier hex color and return readable text (black/white) + a dim
   // variant for the badge background wash.
@@ -28,7 +28,11 @@
 </script>
 
 {#if tier}
-  <span class="badge num" style={style} title={`Progress ${progress.toLocaleString()}`}>
+  <span
+    class="badge num"
+    style={style}
+    title={progress !== null ? `Progress ${progress.toLocaleString()}` : tier.name}
+  >
     {tier.name}
   </span>
 {:else}
