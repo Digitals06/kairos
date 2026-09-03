@@ -107,6 +107,32 @@ pub fn metrics_for_scenario_plays(
     Ok(compute(&series))
 }
 
+/// Metrics over one scenario's combined score history: CSV plays AND
+/// per-snapshot scenario scores merged into one series (snapshot rows fill
+/// the gaps where no local play was recorded — the displayed value must be
+/// absolute, from whichever source observed it).
+pub fn metrics_for_scenario_combined(
+    store: &Store,
+    steam_id: &str,
+    benchmark_id: i64,
+    scenario: &str,
+) -> Result<Metrics> {
+    let mut series: Vec<(DateTime<Utc>, f64)> = store
+        .plays_history(steam_id, scenario)?
+        .into_iter()
+        .map(|rec| (rec.played_at, rec.score))
+        .collect();
+    for snap in store.history(steam_id, benchmark_id)? {
+        if let Some(row) = snap.scenarios.iter().find(|r| r.scenario == scenario) {
+            if row.score > 0 {
+                series.push((snap.captured_at, row.score as f64));
+            }
+        }
+    }
+    series.sort_by_key(|(t, _)| *t);
+    Ok(compute(&series))
+}
+
 // ---------- internals ----------
 
 fn mean(values: impl Iterator<Item = f64>) -> f64 {
@@ -341,5 +367,75 @@ mod tests {
             m.high_improvement_pct, None,
             "first-bucket high of 0 must be None, never 0/NaN"
         );
+    }
+
+    /// REGRESSION (stat cards showed 0 while the chart had snapshot scores):
+    /// per-scenario metrics must merge CSV plays AND snapshot scenario rows —
+    /// the absolute value comes from whichever source observed it.
+    #[test]
+    fn combined_metrics_merge_plays_and_snapshots() {
+        let path = std::env::temp_dir().join(format!(
+            "kovaaks-comb-metrics-{}-{}.db",
+            std::process::id(),
+            ts(2026, 1, 1, 0).timestamp_micros()
+        ));
+        let store = Store::open(&path).expect("temp store");
+
+        // One CSV play (score 100) and one snapshot observation (score 300).
+        let play = crate::types::PlayRecord {
+            scenario: "VT 1w4ts Novice S5".to_string(),
+            played_at: ts(2026, 1, 5, 12),
+            score: 100.0,
+            hit_count: 50,
+            avg_fps: 240.0,
+            source: "csv".to_string(),
+        };
+        store
+            .record_play("76561190000000001", &play, "C:/fake/play-1.csv")
+            .expect("record play");
+
+        let mut categories = std::collections::HashMap::new();
+        categories.insert(
+            "Clicking".to_string(),
+            crate::types::CategoryProgress {
+                benchmark_progress: 30000.0,
+                category_rank: 3,
+                rank_maxes: vec![10000.0, 20000.0, 30000.0, 40000.0],
+                scenarios: std::collections::HashMap::from([(
+                    "VT 1w4ts Novice S5".to_string(),
+                    crate::types::ScenarioEntry {
+                        score: 300.0,
+                        leaderboard_rank: 42,
+                        scenario_rank: 3,
+                        rank_maxes: vec![250.0, 275.0, 290.0, 310.0],
+                        leaderboard_id: 98059,
+                    },
+                )]),
+            },
+        );
+        let progress = crate::types::BenchmarkProgress {
+            benchmark_progress: 30000.0,
+            overall_rank: 3,
+            categories,
+        };
+        store
+            .record_snapshot("76561190000000001", 459, &progress, ts(2026, 2, 5, 12))
+            .expect("record snapshot");
+
+        let m =
+            metrics_for_scenario_combined(&store, "76561190000000001", 459, "VT 1w4ts Novice S5")
+                .expect("combined metrics");
+
+        assert_eq!(m.samples, 2, "play + snapshot must both count");
+        approx(m.avg_score, 200.0);
+        approx(m.high_score, 300.0);
+        assert!(m.avg_improvement_pct.is_some(), "2 buckets -> Some");
+
+        // Sanity: plays-only metrics ignore the snapshot (the old behavior).
+        let plays_only =
+            metrics_for_scenario_plays(&store, "76561190000000001", "VT 1w4ts Novice S5").unwrap();
+        assert_eq!(plays_only.samples, 1);
+
+        let _ = std::fs::remove_file(&path);
     }
 }

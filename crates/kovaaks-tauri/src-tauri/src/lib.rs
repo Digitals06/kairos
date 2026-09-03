@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use kovaaks_core::{
-    csv_ingest, metrics_for_benchmark, metrics_for_scenario_plays,
+    csv_ingest, metrics_for_benchmark, metrics_for_scenario_combined,
     store::StoredSnapshot,
     types::{Difficulty, RankTier},
     EvxlClient, KovaaksClient, Registry, Store, SyncEngine, SyncReport,
@@ -661,13 +661,19 @@ pub mod commands {
                 rank_tiers: difficulty.rank_colors.clone(),
                 scenario_metrics: {
                     let mut map = std::collections::BTreeMap::new();
-                    let latest_rows =
-                        latest.map(|snap| snap.scenarios.clone()).unwrap_or_default();
+                    let latest_rows = latest
+                        .map(|snap| snap.scenarios.clone())
+                        .unwrap_or_default();
                     for s in &latest_rows {
                         map.insert(
                             s.scenario.clone(),
-                            metrics_for_scenario_plays(&state.store, &steam_id, &s.scenario)
-                                .unwrap_or_default(),
+                            metrics_for_scenario_combined(
+                                &state.store,
+                                &steam_id,
+                                benchmark_id,
+                                &s.scenario,
+                            )
+                            .unwrap_or_default(),
                         );
                     }
                     map
@@ -801,10 +807,22 @@ mod tests {
                 }],
             }],
             rank_tiers: vec![
-                RankTier { name: "Iron".into(), color: "#999999".into() },
-                RankTier { name: "Bronze".into(), color: "#FF9900".into() },
-                RankTier { name: "Silver".into(), color: "#CBD9E6".into() },
-                RankTier { name: "Gold".into(), color: "#CAB148".into() },
+                RankTier {
+                    name: "Iron".into(),
+                    color: "#999999".into(),
+                },
+                RankTier {
+                    name: "Bronze".into(),
+                    color: "#FF9900".into(),
+                },
+                RankTier {
+                    name: "Silver".into(),
+                    color: "#CBD9E6".into(),
+                },
+                RankTier {
+                    name: "Gold".into(),
+                    color: "#CAB148".into(),
+                },
             ],
             scenario_metrics: std::collections::BTreeMap::from([(
                 "VT Pasu Novice S5".to_string(),
