@@ -659,6 +659,9 @@ pub mod commands {
 
             // Per-scenario score history across ALL snapshots of this
             // benchmark (issue #3: history was benchmark-aggregate only).
+            // Stale repeats are skipped: a snapshot that doesn't set a new
+            // high means the scenario wasn't replayed (local plays cover
+            // the average when it was).
             let scenario_history: Vec<ScenarioHistorySeries> = latest
                 .map(|snap| {
                     snap.scenarios
@@ -666,17 +669,24 @@ pub mod commands {
                         .map(|row| ScenarioHistorySeries {
                             scenario: row.scenario.clone(),
                             category: row.category.clone(),
-                            points: history
-                                .iter()
-                                .filter_map(|s| {
-                                    s.scenarios.iter().find(|r| r.scenario == row.scenario).map(
-                                        |r| ScenarioHistoryPoint {
-                                            captured_at: s.captured_at.to_rfc3339(),
-                                            score: r.score,
-                                        },
-                                    )
-                                })
-                                .collect(),
+                            points: {
+                                let raw: Vec<(chrono::DateTime<chrono::Utc>, f64)> = history
+                                    .iter()
+                                    .filter_map(|s| {
+                                        s.scenarios
+                                            .iter()
+                                            .find(|r| r.scenario == row.scenario)
+                                            .map(|r| (s.captured_at, r.score as f64))
+                                    })
+                                    .collect();
+                                kovaaks_core::improving_only(&raw)
+                                    .into_iter()
+                                    .map(|(captured_at, score)| ScenarioHistoryPoint {
+                                        captured_at: captured_at.to_rfc3339(),
+                                        score: score as i64,
+                                    })
+                                    .collect()
+                            },
                         })
                         .collect()
                 })

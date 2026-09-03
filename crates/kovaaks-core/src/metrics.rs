@@ -114,6 +114,10 @@ pub fn metrics_for_scenario_plays(
 /// per-snapshot scenario scores merged into one series (snapshot rows fill
 /// the gaps where no local play was recorded — the displayed value must be
 /// absolute, from whichever source observed it).
+///
+/// Snapshots that don't set a new high are skipped (see [`improving_only`]):
+/// a stale repeat usually means the scenario wasn't replayed, and when it
+/// was, the local CSV plays already carry the average.
 pub fn metrics_for_scenario_combined(
     store: &Store,
     steam_id: &str,
@@ -125,15 +129,42 @@ pub fn metrics_for_scenario_combined(
         .into_iter()
         .map(|rec| (rec.played_at, rec.score))
         .collect();
-    for snap in store.history(steam_id, benchmark_id)? {
-        if let Some(row) = snap.scenarios.iter().find(|r| r.scenario == scenario) {
-            if row.score > 0 {
-                series.push((snap.captured_at, row.score as f64));
-            }
-        }
-    }
+    let snapshots: Vec<(DateTime<Utc>, f64)> = store
+        .history(steam_id, benchmark_id)?
+        .iter()
+        .filter_map(|snap| {
+            snap.scenarios
+                .iter()
+                .find(|r| r.scenario == scenario)
+                .map(|row| (snap.captured_at, row.score as f64))
+        })
+        .collect();
+    series.extend(improving_only(&snapshots));
     series.sort_by_key(|(t, _)| *t);
     Ok(compute(&series))
+}
+
+/// Keep only the snapshots that set a new high for a scenario, in order.
+///
+/// A sync snapshot that doesn't improve the score almost always means the
+/// scenario wasn't replayed since the previous sync — recording it would
+/// drag averages toward stale data and spray flat dots across the chart.
+/// When the scenario WAS replayed without a new high, the local CSV plays
+/// already describe the average, so the snapshot adds nothing.
+///
+/// The running max seeds at `0.0`: an all-zero (never-played) series
+/// contributes nothing. Input must be chronological (as `Store::history`
+/// returns); output preserves order.
+pub fn improving_only(series: &[(DateTime<Utc>, f64)]) -> Vec<(DateTime<Utc>, f64)> {
+    let mut best = 0.0f64;
+    let mut kept = Vec::new();
+    for &(at, score) in series {
+        if score > best && score.is_finite() {
+            best = score;
+            kept.push((at, score));
+        }
+    }
+    kept
 }
 
 // ---------- internals ----------
@@ -461,6 +492,89 @@ mod tests {
         let plays_only =
             metrics_for_scenario_plays(&store, "76561190000000001", "VT 1w4ts Novice S5").unwrap();
         assert_eq!(plays_only.samples, 1);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn improving_only_keeps_strict_highs_in_order() {
+        let day = |d: u32| ts(2026, 1, d, 12);
+        let series = vec![
+            (day(1), 0.0),    // unplayed: never a data point
+            (day(2), 500.0),  // baseline high: kept
+            (day(3), 500.0),  // stale repeat: dropped
+            (day(4), 400.0),  // below high: dropped
+            (day(5), 450.0),  // partial recovery, still stale: dropped
+            (day(6), 600.0),  // new high: kept
+            (day(7), 600.0),  // stale repeat: dropped
+        ];
+        let kept = improving_only(&series);
+        assert_eq!(
+            kept,
+            vec![(day(2), 500.0), (day(6), 600.0)],
+            "only new highs survive, in order"
+        );
+        assert!(improving_only(&[]).is_empty());
+        assert_eq!(
+            improving_only(&[(day(1), 300.0)]),
+            vec![(day(1), 300.0)],
+            "a lone baseline is informative"
+        );
+        assert!(
+            improving_only(&[(day(1), 0.0), (day(2), 0.0)]).is_empty(),
+            "all-zero series contributes nothing"
+        );
+    }
+
+    /// REGRESSION (flat cyan dots + stale averages): a snapshot that repeats
+    /// the previous high must not count as a new sample in combined metrics.
+    #[test]
+    fn combined_metrics_skip_stale_snapshot_repeats() {
+        let path = std::env::temp_dir().join(format!(
+            "kovaaks-comb-stale-{}-{}.db",
+            std::process::id(),
+            ts(2026, 3, 1, 0).timestamp_micros()
+        ));
+        let store = Store::open(&path).expect("temp store");
+
+        let scenario = "VT 1w4ts Novice S5".to_string();
+        let entry = |score: f64| crate::types::ScenarioEntry {
+            score,
+            leaderboard_rank: 42,
+            scenario_rank: 3,
+            rank_maxes: vec![250.0, 275.0, 290.0, 310.0],
+            leaderboard_id: 98059,
+        };
+        let snapshot_at = |score: f64, day: u32| {
+            let progress = crate::types::BenchmarkProgress {
+                benchmark_progress: 30000.0,
+                overall_rank: 3,
+                categories: vec![(
+                    "Clicking".to_string(),
+                    crate::types::CategoryProgress {
+                        benchmark_progress: 30000.0,
+                        category_rank: 3,
+                        rank_maxes: vec![10000.0, 20000.0, 30000.0, 40000.0],
+                        scenarios: vec![(scenario.clone(), entry(score))],
+                    },
+                )],
+            };
+            store
+                .record_snapshot("76561190000000001", 459, &progress, ts(2026, 3, day, 12))
+                .expect("record snapshot")
+        };
+        // Baseline high, stale repeat, dip, new high.
+        snapshot_at(300.0, 5);
+        snapshot_at(300.0, 6);
+        snapshot_at(250.0, 7);
+        snapshot_at(350.0, 8);
+
+        let m =
+            metrics_for_scenario_combined(&store, "76561190000000001", 459, "VT 1w4ts Novice S5")
+                .expect("combined metrics");
+        assert_eq!(m.samples, 2, "only the 300 baseline + 350 high count");
+        approx(m.avg_score, 325.0);
+        approx(m.high_score, 350.0);
 
         let _ = std::fs::remove_file(&path);
     }
