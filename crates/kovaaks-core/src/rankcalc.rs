@@ -208,6 +208,10 @@ pub fn energy_of(rank: &PreciseRank, thresholds: &[f64], fake_lower: u32, fake_u
         let over = rank.precise - count as f64;
         let over = over.clamp(0.0, fake_upper);
         top + over * top_band
+    } else if (rank.base as usize) >= count {
+        // Saturated the ladder: treat like is_maxed (guard the OOB index).
+        let over = (rank.precise - count as f64).clamp(0.0, fake_upper);
+        top + over * top_band
     } else {
         let low = thresholds[rank.base as usize - 1];
         let high = thresholds[rank.base as usize];

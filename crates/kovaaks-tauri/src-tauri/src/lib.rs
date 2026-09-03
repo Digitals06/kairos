@@ -468,9 +468,10 @@ pub mod commands {
         // Stored rows are ordered by (category, order_idx); rebuild the API's
         // per-category scenario maps in that same document order.
         for row in &snap.scenarios {
-            let score_centi = (row.score as f64 * 100.0).round();
+            // Stored scores and rank_maxes are display units (already ÷100
+            // from the API); the engine works in display units too — no scaling.
             let entry = ScenarioEntry {
-                score: score_centi,
+                score: row.score as f64,
                 leaderboard_rank: row.leaderboard_rank.max(0) as u64,
                 scenario_rank: row.scenario_rank.max(0) as u32,
                 rank_maxes: row.rank_maxes.clone(),
@@ -513,8 +514,7 @@ pub mod commands {
         let progress = latest.map(|s| s.benchmark_progress).unwrap_or(0);
         let overall_rank = latest.map(|s| s.overall_rank).unwrap_or(0).max(0) as u32;
         // v0.2 rank engine: recompute the rank the way evxl does. Stored
-        // scenario scores are display units; the engine expects centi-scale
-        // API units, so scale back up before dispatching.
+        // snapshots and the engine both work in display units — no rescaling.
         let rank_tier = latest
             .and_then(|snap| {
                 let api_progress = stored_to_progress(snap);
