@@ -10,7 +10,6 @@
     getBenchmarkDetail,
     type BenchmarkCard,
     type PlayerProfile,
-    type SnapshotPoint,
     type AppSettings,
   } from './lib/api'
   import Setup from './lib/Setup.svelte'
@@ -24,7 +23,6 @@
 
   let profile = $state<PlayerProfile | null>(null)
   let cards = $state<BenchmarkCard[]>([])
-  let historyByBenchmark = $state<Record<number, SnapshotPoint[]>>({})
   let loadingOverview = $state(false)
   let toast = $state<string | null>(null)
   let toastTimer: ReturnType<typeof setTimeout> | undefined
@@ -128,17 +126,6 @@
     try {
       cards = await getOverview()
       cards.sort((a, b) => a.benchmark_name.localeCompare(b.benchmark_name))
-      // Sparkline history ships INSIDE each card (snapshot_history) — no
-      // per-card detail calls (70 IPC round-trips starved the main thread).
-      historyByBenchmark = {}
-      for (const c of cards) {
-        if (c.snapshot_history && c.snapshot_history.length > 1) {
-          historyByBenchmark = {
-            ...historyByBenchmark,
-            [c.benchmark_id]: c.snapshot_history,
-          }
-        }
-      }
     } catch (err) {
       showError(`Failed to load overview: ${String(err)}`)
     } finally {
@@ -259,7 +246,6 @@
           {#each cards as card (card.benchmark_id)}
             <BenchmarkCardView
               {card}
-              history={historyByBenchmark[card.benchmark_id] ?? []}
               onclick={() => openDetail(card.benchmark_id)}
             />
           {/each}
