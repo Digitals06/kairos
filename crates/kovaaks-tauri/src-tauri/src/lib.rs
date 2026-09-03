@@ -70,6 +70,10 @@ pub struct ScenarioRank {
     pub score: i64,
     pub leaderboard_rank: i64,
     pub tier: Option<RankTier>,
+    /// 1-based achieved tier index from the API (0 = unplayed).
+    pub scenario_rank: i64,
+    /// This scenario's tier thresholds (display units), ascending.
+    pub rank_maxes: Vec<f64>,
 }
 
 /// One scenario's score history across snapshots (per-scenario trends).
@@ -90,7 +94,7 @@ pub struct ScenarioHistoryPoint {
 }
 
 /// One category row in the benchmark detail view.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CategoryCard {
     pub name: String,
@@ -116,8 +120,9 @@ pub struct PlayPoint {
     pub score: f64,
 }
 
-/// Full detail payload for one benchmark.
-#[derive(Debug, Clone, Serialize)]
+/// Full detail for one benchmark: card + snapshot history + CSV plays +
+/// scenario tiers + per-category progress from the newest snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct BenchmarkDetail {
     pub card: BenchmarkCard,
@@ -127,6 +132,9 @@ pub struct BenchmarkDetail {
     pub categories: Vec<CategoryCard>,
     /// Per-scenario score history across snapshots (scenario-scoped trends).
     pub scenario_history: Vec<ScenarioHistorySeries>,
+    /// The difficulty's rank ladder (name + color, worst → best) for the
+    /// evxl-style per-tier threshold matrix.
+    pub rank_tiers: Vec<RankTier>,
 }
 
 /// Counters from the last CSV ingest scan + last sync time.
@@ -548,6 +556,8 @@ pub mod commands {
                     scenario: row.scenario,
                     score: row.score,
                     leaderboard_rank: row.leaderboard_rank,
+                    scenario_rank: row.scenario_rank,
+                    rank_maxes: row.rank_maxes.clone(),
                 })
                 .collect();
 
@@ -644,6 +654,7 @@ pub mod commands {
                 scenario_ranks,
                 categories,
                 scenario_history,
+                rank_tiers: difficulty.rank_colors.clone(),
             })
         })
         .await
@@ -756,6 +767,8 @@ mod tests {
                 score: 128161,
                 leaderboard_rank: 169,
                 tier: None,
+                scenario_rank: 4,
+                rank_maxes: vec![555.0, 660.0, 745.0, 800.0],
             }],
             categories: vec![CategoryCard {
                 name: "Clicking".into(),
@@ -770,6 +783,12 @@ mod tests {
                     score: 1282,
                 }],
             }],
+            rank_tiers: vec![
+                RankTier { name: "Iron".into(), color: "#999999".into() },
+                RankTier { name: "Bronze".into(), color: "#FF9900".into() },
+                RankTier { name: "Silver".into(), color: "#CBD9E6".into() },
+                RankTier { name: "Gold".into(), color: "#CAB148".into() },
+            ],
         };
         let json = serde_json::to_string(&detail).unwrap();
         for key in [

@@ -47,6 +47,10 @@ export interface ScenarioRank {
   score: number
   leaderboard_rank: number
   tier: RankTier | null
+  /** 1-based achieved tier index from the API (0 = unplayed). */
+  scenario_rank: number
+  /** This scenario's tier thresholds (display units), ascending. */
+  rank_maxes: number[]
 }
 
 export interface CategoryCard {
@@ -84,6 +88,8 @@ export interface BenchmarkDetail {
   scenario_ranks: ScenarioRank[]
   categories: CategoryCard[]
   scenario_history: ScenarioHistorySeries[]
+  /** Rank ladder for the difficulty (name + color, worst → best). */
+  rank_tiers: RankTier[]
 }
 
 export interface IngestStatus {

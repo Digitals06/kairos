@@ -84,6 +84,32 @@
     return [...rows].sort((a, b) => (scoreDesc ? b.score - a.score : a.score - b.score))
   })
 
+  // --- evxl-style rank threshold matrix ---------------------------------------
+  // Each scenario row shows the score thresholds for every tier (from the
+  // scenario's rank_maxes), colored by tier, with the achieved tiers shaded;
+  // the score cell renders "score / top-threshold" like evxl's table.
+  function wordWrap(name: string): string[] {
+    const i = name.lastIndexOf(' ')
+    return i > 0 ? [name.slice(0, i), name.slice(i + 1)] : [name]
+  }
+
+  function thresholdFor(rankMaxes: number[] | undefined, tierIdx: number): number | null {
+    if (!rankMaxes || rankMaxes.length === 0) return null
+    return tierIdx < rankMaxes.length ? rankMaxes[tierIdx] : null
+  }
+
+  function achievedIdx(row: { scenario_rank: number }): number {
+    return row.scenario_rank - 1
+  }
+
+  async function copyName(name: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(name)
+    } catch {
+      /* clipboard unavailable in some webviews; non-fatal */
+    }
+  }
+
   // --- main progress chart ----------------------------------------------------
   // Datasets: local CSV plays as an underlay scatter (magenta), then the
   // running-high step line, the 7-day rolling average, and the raw snapshot
@@ -414,32 +440,79 @@
       {#if scenarios.length === 0}
         <p class="muted">No scenarios in the latest snapshot.</p>
       {:else}
-        <table class="detail-table">
-          <thead>
-            <tr>
-              <th>Scenario</th>
-              <th class="r">Score</th>
-              <th class="r">Leaderboard</th>
-              <th>Tier</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each scenarios as s (s.scenario)}
+        <div class="table-scroll">
+          <table class="detail-table bench-table">
+            <thead>
               <tr>
-                <td>{s.scenario}</td>
-                <td class="r num">{s.score.toLocaleString()}</td>
-                <td class="r num">#{s.leaderboard_rank.toLocaleString()}</td>
-                <td>
-                  {#if s.tier}
-                    <RankBadge tier={s.tier} progress={s.score} />
-                  {:else}
-                    <span class="muted">—</span>
-                  {/if}
-                </td>
+                <th class="scenario-col">Scenario</th>
+                <th class="score-col">Score</th>
+                <th class="lb-col r num">#</th>
+                {#each detail.rank_tiers as tier, i (tier.name)}
+                  <th
+                    class="rank-col num"
+                    style={`color: ${tier.color};`}
+                    title={`${tier.name} — score needed`}
+                  >
+                    {#each wordWrap(tier.name) as line, li (li)}
+                      <span class="rank-header-line">{line}</span>
+                    {/each}
+                  </th>
+                {/each}
               </tr>
-            {/each}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {#each scenarios as s (s.scenario)}
+                {@const achieved = achievedIdx(s)}
+                {@const top = thresholdFor(s.rank_maxes, s.rank_maxes.length - 1)}
+                <tr>
+                  <td class="scenario-col">
+                    <button
+                      class="scenario-name"
+                      title="Click to copy scenario name"
+                      onclick={() => copyName(s.scenario)}
+                    >{s.scenario}</button>
+                  </td>
+                  <td class="score-col num">
+                    {#if s.score > 0}
+                      <span class="score-pair">
+                        <span class="score-value">{s.score.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                        {#if top !== null}
+                          <span class="slash">&nbsp;/&nbsp;</span>
+                          <span class="num muted">{top.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                        {/if}
+                      </span>
+                    {:else}
+                      <span class="muted">—</span>
+                    {/if}
+                  </td>
+                  <td class="lb-col r num">
+                    {#if s.leaderboard_rank > 0}
+                      #{s.leaderboard_rank.toLocaleString()}
+                    {:else}
+                      <span class="muted">—</span>
+                    {/if}
+                  </td>
+                  {#each detail.rank_tiers as tier, i (tier.name)}
+                    {@const thr = thresholdFor(s.rank_maxes, i)}
+                    {@const isAchieved = achieved >= i}
+                    <td
+                      class="rank-col num rank-cell"
+                      class:achieved={isAchieved}
+                      style={`color: ${tier.color}; ${isAchieved && thr !== null ? `background: ${tier.color}22;` : ''}`}
+                      title={thr !== null ? `${tier.name}: ${thr.toLocaleString()}+ points` : `${tier.name}: no threshold`}
+                    >
+                      {#if thr !== null}
+                        {thr.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      {:else}
+                        <span class="muted">·</span>
+                      {/if}
+                    </td>
+                  {/each}
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
       {/if}
     </section>
   {/if}

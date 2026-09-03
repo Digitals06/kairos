@@ -426,6 +426,117 @@ input {
   height: 300px;
 }
 
+/* --- evxl-style rank threshold matrix ------------------------------------- */
+.table-scroll {
+  overflow-x: auto;
+  max-height: 480px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #1f2937 transparent;
+}
+
+.bench-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.bench-table thead th {
+  background: var(--panel, #111827);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 0.75rem 0.5rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.7rem;
+  border-bottom: 1px solid var(--border, #1f2937);
+  vertical-align: bottom;
+}
+
+.bench-table .rank-header-line {
+  display: block;
+  line-height: 1.05;
+}
+
+.bench-table .scenario-col {
+  text-align: left;
+  min-width: 180px;
+  max-width: 280px;
+}
+
+.bench-table .score-col {
+  text-align: right;
+  min-width: 110px;
+  white-space: nowrap;
+}
+
+.bench-table .lb-col {
+  min-width: 56px;
+  color: var(--muted, #9ca3af);
+}
+
+.bench-table .rank-col {
+  min-width: 74px;
+  text-align: center;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.bench-table tbody td {
+  padding: 0.5rem 0.5rem;
+  border-bottom: 1px solid #1f2937;
+  transition: background 0.15s ease;
+}
+
+.bench-table tbody tr:hover td {
+  background: rgba(0, 229, 255, 0.05);
+}
+
+.scenario-name {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text, #e5e7eb);
+  font: inherit;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  cursor: copy;
+  text-align: left;
+  max-width: 270px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.scenario-name:hover {
+  color: var(--accent-2, #00e5ff);
+}
+
+.score-pair {
+  display: inline-flex;
+  white-space: nowrap;
+  align-items: center;
+}
+
+.score-value {
+  display: inline-block;
+  text-align: right;
+  min-width: 50px;
+  font-weight: 600;
+  color: var(--text, #e5e7eb);
+}
+
+.score-pair .slash {
+  color: var(--muted, #9ca3af);
+}
+
+.rank-cell.achieved {
+  border-radius: 4px;
+}
+
 .table-panel {
   display: flex;
   flex-direction: column;
