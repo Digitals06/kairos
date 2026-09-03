@@ -334,8 +334,9 @@ pub struct PlayerProfile {
     /// Full avatar URL (may be empty).
     #[serde(rename = "avatar_url", alias = "avatarfull")]
     pub avatar_url: String,
-    /// ISO country code (e.g. "FR"); empty when unknown.
-    #[serde(rename = "country", alias = "loccountrycode")]
+    /// ISO country code (e.g. "FR"); defaults to empty when the profile has
+    /// no country set (evxl omits the key entirely in that case).
+    #[serde(rename = "country", alias = "loccountrycode", default)]
     pub country: String,
 }
 
@@ -487,6 +488,20 @@ mod tests {
         assert_eq!(partially_null.leaderboard_id, 0);
     }
 
+    /// REGRESSION: profiles with no country set omit the key entirely —
+    /// connect must not fail on them.
+    #[test]
+    fn profile_without_country_decodes_to_empty() {
+        let raw = r#"{
+            "steamid": "76561199000000001",
+            "personaname": "NoCountry",
+            "avatarfull": "https://avatars.steamstatic.com/39bd99b50b945f092592f3671b52dabf877372bc_full.jpg"
+        }"#;
+        let p: PlayerProfile = serde_json::from_str(raw).expect("missing country must default");
+        assert_eq!(p.steam_id, "76561199000000001");
+        assert_eq!(p.persona, "NoCountry");
+        assert_eq!(p.country, "");
+    }
     /// REGRESSION (deep sweep 2026-09-03): benchmarks 2108/2487 report
     /// `"score": "3750.00"` as a string. That must decode instead of killing
     /// the whole benchmark payload.
