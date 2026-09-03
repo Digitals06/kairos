@@ -123,11 +123,24 @@
   }
 
   // --- data loading ----------------------------------------------------------
+
+  // Card order: favorited benchmarks pinned on top, then alphabetical.
+  // Single comparator shared by initial load and local favorite toggles
+  // so a reload can never silently drop pins to the bottom of the list.
+  function sortCards<T extends { is_favorite: boolean; benchmark_name: string }>(
+    list: T[],
+  ): T[] {
+    return [...list].sort(
+      (a, b) =>
+        (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0) ||
+        a.benchmark_name.localeCompare(b.benchmark_name),
+    )
+  }
+
   async function loadOverview() {
     loadingOverview = true
     try {
-      cards = await getOverview()
-      cards.sort((a, b) => a.benchmark_name.localeCompare(b.benchmark_name))
+      cards = sortCards(await getOverview())
     } catch (err) {
       showError(`Failed to load overview: ${String(err)}`)
     } finally {
@@ -175,11 +188,7 @@
       const card = cards.find((c) => c.benchmark_id === benchmarkId)
       if (card) card.is_favorite = nowFavorite
       // Re-sort locally to match the backend ordering (favorites on top).
-      cards = [...cards].sort(
-        (a, b) =>
-          (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0) ||
-          a.benchmark_name.localeCompare(b.benchmark_name),
-      )
+      cards = sortCards(cards)
     } catch (err) {
       showError(humanError(err))
     }
