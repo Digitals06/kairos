@@ -9184,7 +9184,7 @@
   ]
  },
  {
-  "benchmarkName": "Pasu Track DOJO 道場",
+  "benchmarkName": "Pasu Track DOJO \u9053\u5834",
   "rankCalculation": "dojo",
   "abbreviation": "xyz",
   "color": "#999999",
@@ -9196,15 +9196,15 @@
     "kovaaksBenchmarkId": 880,
     "sharecode": "KovaaKsSensing360Button",
     "rankColors": {
-     "White Belt|白帯": "#FFFFFF",
-     "Yellow Belt|黄帯": "#E4E428",
-     "Orange Belt|橙帯": "#D89925",
-     "Green Belt|緑帯": "#13A513",
-     "Blue Belt|青帯": "#4176CB",
-     "Purple Belt|紫帯": "#5E259B",
-     "Brown Belt|茶帯": "#964B00",
-     "Red Belt|赤帯": "#9B1B0A",
-     "Black Belt|黒帯": "#434343"
+     "White Belt|\u767d\u5e2f": "#FFFFFF",
+     "Yellow Belt|\u9ec4\u5e2f": "#E4E428",
+     "Orange Belt|\u6a59\u5e2f": "#D89925",
+     "Green Belt|\u7dd1\u5e2f": "#13A513",
+     "Blue Belt|\u9752\u5e2f": "#4176CB",
+     "Purple Belt|\u7d2b\u5e2f": "#5E259B",
+     "Brown Belt|\u8336\u5e2f": "#964B00",
+     "Red Belt|\u8d64\u5e2f": "#9B1B0A",
+     "Black Belt|\u9ed2\u5e2f": "#434343"
     },
     "categories": [
      {
@@ -9212,7 +9212,7 @@
       "color": "#7300ff",
       "subcategories": [
        {
-        "subcategoryName": "Pasu Track DOJO 道場",
+        "subcategoryName": "Pasu Track DOJO \u9053\u5834",
         "scenarioCount": 8,
         "color": "#ECECEC"
        }
@@ -9223,7 +9223,7 @@
   ]
  },
  {
-  "benchmarkName": "Ground Track DOJO 道場",
+  "benchmarkName": "Ground Track DOJO \u9053\u5834",
   "rankCalculation": "dojo2",
   "abbreviation": "xyz",
   "color": "#999999",
@@ -9235,15 +9235,15 @@
     "kovaaksBenchmarkId": 977,
     "sharecode": "KovaaKsBouncingPrismaticCamper",
     "rankColors": {
-     "White Belt|白帯": "#FFFFFF",
-     "Yellow Belt|黄帯": "#E4E428",
-     "Orange Belt|橙帯": "#D89925",
-     "Green Belt|緑帯": "#13A513",
-     "Blue Belt|青帯": "#4176CB",
-     "Purple Belt|紫帯": "#5E259B",
-     "Brown Belt|茶帯": "#964B00",
-     "Red Belt|赤帯": "#9B1B0A",
-     "Black Belt|黒帯": "#434343"
+     "White Belt|\u767d\u5e2f": "#FFFFFF",
+     "Yellow Belt|\u9ec4\u5e2f": "#E4E428",
+     "Orange Belt|\u6a59\u5e2f": "#D89925",
+     "Green Belt|\u7dd1\u5e2f": "#13A513",
+     "Blue Belt|\u9752\u5e2f": "#4176CB",
+     "Purple Belt|\u7d2b\u5e2f": "#5E259B",
+     "Brown Belt|\u8336\u5e2f": "#964B00",
+     "Red Belt|\u8d64\u5e2f": "#9B1B0A",
+     "Black Belt|\u9ed2\u5e2f": "#434343"
     },
     "categories": [
      {
@@ -9251,7 +9251,7 @@
       "color": "#7300ff",
       "subcategories": [
        {
-        "subcategoryName": "Ground Track DOJO 道場",
+        "subcategoryName": "Ground Track DOJO \u9053\u5834",
         "scenarioCount": 6,
         "color": "#ECECEC"
        }
@@ -9262,7 +9262,7 @@
   ]
  },
  {
-  "benchmarkName": "Control Track Dojo 道場",
+  "benchmarkName": "Control Track Dojo \u9053\u5834",
   "rankCalculation": "dojo3",
   "abbreviation": "xyz",
   "color": "#999999",
@@ -9274,15 +9274,15 @@
     "kovaaksBenchmarkId": 2819,
     "sharecode": "KovaaKsJumpingCobaltBsp",
     "rankColors": {
-     "White Belt|白帯": "#FFFFFF",
-     "Yellow Belt|黄帯": "#E4E428",
-     "Orange Belt|橙帯": "#D89925",
-     "Green Belt|緑帯": "#13A513",
-     "Blue Belt|青帯": "#4176CB",
-     "Purple Belt|紫帯": "#5E259B",
-     "Brown Belt|茶帯": "#964B00",
-     "Red Belt|赤帯": "#9B1B0A",
-     "Black Belt|黒帯": "#434343"
+     "White Belt|\u767d\u5e2f": "#FFFFFF",
+     "Yellow Belt|\u9ec4\u5e2f": "#E4E428",
+     "Orange Belt|\u6a59\u5e2f": "#D89925",
+     "Green Belt|\u7dd1\u5e2f": "#13A513",
+     "Blue Belt|\u9752\u5e2f": "#4176CB",
+     "Purple Belt|\u7d2b\u5e2f": "#5E259B",
+     "Brown Belt|\u8336\u5e2f": "#964B00",
+     "Red Belt|\u8d64\u5e2f": "#9B1B0A",
+     "Black Belt|\u9ed2\u5e2f": "#434343"
     },
     "categories": [
      {
@@ -9290,7 +9290,7 @@
       "color": "#7300ff",
       "subcategories": [
        {
-        "subcategoryName": "Control Track Dojo 道場",
+        "subcategoryName": "Control Track Dojo \u9053\u5834",
         "scenarioCount": 10,
         "color": "#ECECEC"
        }
@@ -9423,7 +9423,7 @@
   ]
  },
  {
-  "benchmarkName": "✯ Stellar - Speed Clicking Benchmarks",
+  "benchmarkName": "\u272f Stellar - Speed Clicking Benchmarks",
   "rankCalculation": "generic-energy",
   "abbreviation": "STR",
   "color": "#4631ff",
@@ -11276,7 +11276,7 @@
   ]
  },
  {
-  "benchmarkName": "773TS Main β3.0",
+  "benchmarkName": "773TS Main \u03b23.0",
   "rankCalculation": "complete",
   "abbreviation": "773TS",
   "color": "#C493ff",
@@ -13871,117 +13871,117 @@
   ]
  },
  {
-  "benchmarkName": "二三的三角洲行动瞄准基准测试",
+  "benchmarkName": "\u4e8c\u4e09\u7684\u4e09\u89d2\u6d32\u884c\u52a8\u7784\u51c6\u57fa\u51c6\u6d4b\u8bd5",
   "rankCalculation": "basic",
-  "abbreviation": "二三",
+  "abbreviation": "\u4e8c\u4e09",
   "color": "#ebbeff",
   "spreadsheetURL": "https://my.feishu.cn/wiki/CdfnwYJcOiL2f1k6Dv0cwlLXn1b?sheet=6E2ZJ5",
   "dateAdded": "2026-08-21",
   "difficulties": [
    {
-    "difficultyName": "简单",
+    "difficultyName": "\u7b80\u5355",
     "kovaaksBenchmarkId": 2885,
     "sharecode": "KovaaKsPerfectingVividtangerineCd",
     "rankColors": {
-     "白银": "#7d7d7d",
-     "白银Ⅱ": "#a9a7a7",
-     "黄金": "#d69f6b",
-     "黄金Ⅱ": "#e29750",
-     "铂金": "#5782cb",
-     "铂金Ⅱ": "#417ce1",
-     "翡翠": "#5bbe91",
-     "翡翠Ⅱ": "#39db92"
+     "\u767d\u94f6": "#7d7d7d",
+     "\u767d\u94f6\u2161": "#a9a7a7",
+     "\u9ec4\u91d1": "#d69f6b",
+     "\u9ec4\u91d1\u2161": "#e29750",
+     "\u94c2\u91d1": "#5782cb",
+     "\u94c2\u91d1\u2161": "#417ce1",
+     "\u7fe1\u7fe0": "#5bbe91",
+     "\u7fe1\u7fe0\u2161": "#39db92"
     },
     "categories": [
      {
-      "categoryName": "定位",
+      "categoryName": "\u5b9a\u4f4d",
       "color": "#151547",
       "subcategories": [
        {
-        "subcategoryName": "速度",
+        "subcategoryName": "\u901f\u5ea6",
         "scenarioCount": 2,
         "color": "#404074"
        },
        {
-        "subcategoryName": "微调",
+        "subcategoryName": "\u5fae\u8c03",
         "scenarioCount": 2,
         "color": "#404074"
        },
        {
-        "subcategoryName": "确认",
+        "subcategoryName": "\u786e\u8ba4",
         "scenarioCount": 2,
         "color": "#404074"
        },
        {
-        "subcategoryName": "终极目标",
+        "subcategoryName": "\u7ec8\u6781\u76ee\u6807",
         "scenarioCount": 3,
         "color": "#404074"
        }
       ]
      },
      {
-      "categoryName": "跟枪",
+      "categoryName": "\u8ddf\u67aa",
       "color": "#151547",
       "subcategories": [
        {
-        "subcategoryName": "平滑",
+        "subcategoryName": "\u5e73\u6ed1",
         "scenarioCount": 2,
         "color": "#404074"
        },
        {
-        "subcategoryName": "精准度",
+        "subcategoryName": "\u7cbe\u51c6\u5ea6",
         "scenarioCount": 2,
         "color": "#404074"
        },
        {
-        "subcategoryName": "终极目标",
+        "subcategoryName": "\u7ec8\u6781\u76ee\u6807",
         "scenarioCount": 2,
         "color": "#404074"
        }
       ]
      },
      {
-      "categoryName": "动态点击",
+      "categoryName": "\u52a8\u6001\u70b9\u51fb",
       "color": "#151547",
       "subcategories": [
        {
-        "subcategoryName": "速度",
+        "subcategoryName": "\u901f\u5ea6",
         "scenarioCount": 2,
         "color": "#404074"
        },
        {
-        "subcategoryName": "确认感",
+        "subcategoryName": "\u786e\u8ba4\u611f",
         "scenarioCount": 2,
         "color": "#404074"
        },
        {
-        "subcategoryName": "跟踪",
+        "subcategoryName": "\u8ddf\u8e2a",
         "scenarioCount": 2,
         "color": "#404074"
        },
        {
-        "subcategoryName": "终极目标",
+        "subcategoryName": "\u7ec8\u6781\u76ee\u6807",
         "scenarioCount": 2,
         "color": "#404074"
        }
       ]
      },
      {
-      "categoryName": "转火",
+      "categoryName": "\u8f6c\u706b",
       "color": "#151547",
       "subcategories": [
        {
-        "subcategoryName": "速度",
+        "subcategoryName": "\u901f\u5ea6",
         "scenarioCount": 2,
         "color": "#404074"
        },
        {
-        "subcategoryName": "精准度",
+        "subcategoryName": "\u7cbe\u51c6\u5ea6",
         "scenarioCount": 2,
         "color": "#404074"
        },
        {
-        "subcategoryName": "终极目标",
+        "subcategoryName": "\u7ec8\u6781\u76ee\u6807",
         "scenarioCount": 3,
         "color": "#404074"
        }
@@ -13990,109 +13990,109 @@
     ]
    },
    {
-    "difficultyName": "中等",
+    "difficultyName": "\u4e2d\u7b49",
     "kovaaksBenchmarkId": 2886,
     "sharecode": "KovaaKsPickingVividtangerineValue",
     "rankColors": {
-     "铂金": "#5782cb",
-     "铂金Ⅱ": "#417ce1",
-     "翡翠": "#5bbe91",
-     "翡翠Ⅱ": "#39db92",
-     "钻石": "#2cc8e8",
-     "钻石Ⅱ": "#18c9ec",
-     "大师": "#9337be",
-     "大师Ⅱ": "#a026d9"
+     "\u94c2\u91d1": "#5782cb",
+     "\u94c2\u91d1\u2161": "#417ce1",
+     "\u7fe1\u7fe0": "#5bbe91",
+     "\u7fe1\u7fe0\u2161": "#39db92",
+     "\u94bb\u77f3": "#2cc8e8",
+     "\u94bb\u77f3\u2161": "#18c9ec",
+     "\u5927\u5e08": "#9337be",
+     "\u5927\u5e08\u2161": "#a026d9"
     },
     "categories": [
      {
-      "categoryName": "定位",
+      "categoryName": "\u5b9a\u4f4d",
       "color": "#434343",
       "subcategories": [
        {
-        "subcategoryName": "速度",
+        "subcategoryName": "\u901f\u5ea6",
         "scenarioCount": 2,
         "color": "#666666"
        },
        {
-        "subcategoryName": "微调",
+        "subcategoryName": "\u5fae\u8c03",
         "scenarioCount": 2,
         "color": "#666666"
        },
        {
-        "subcategoryName": "确认",
+        "subcategoryName": "\u786e\u8ba4",
         "scenarioCount": 2,
         "color": "#666666"
        },
        {
-        "subcategoryName": "终极目标",
+        "subcategoryName": "\u7ec8\u6781\u76ee\u6807",
         "scenarioCount": 3,
         "color": "#666666"
        }
       ]
      },
      {
-      "categoryName": "跟枪",
+      "categoryName": "\u8ddf\u67aa",
       "color": "#434343",
       "subcategories": [
        {
-        "subcategoryName": "平滑",
+        "subcategoryName": "\u5e73\u6ed1",
         "scenarioCount": 2,
         "color": "#666666"
        },
        {
-        "subcategoryName": "精准度",
+        "subcategoryName": "\u7cbe\u51c6\u5ea6",
         "scenarioCount": 2,
         "color": "#666666"
        },
        {
-        "subcategoryName": "变向",
+        "subcategoryName": "\u53d8\u5411",
         "scenarioCount": 2,
         "color": "#666666"
        },
        {
-        "subcategoryName": "终极目标",
+        "subcategoryName": "\u7ec8\u6781\u76ee\u6807",
         "scenarioCount": 3,
         "color": "#EEEEEE"
        }
       ]
      },
      {
-      "categoryName": "动态点击",
+      "categoryName": "\u52a8\u6001\u70b9\u51fb",
       "color": "#434343",
       "subcategories": [
        {
-        "subcategoryName": "速度",
+        "subcategoryName": "\u901f\u5ea6",
         "scenarioCount": 2,
         "color": "#666666"
        },
        {
-        "subcategoryName": "确认",
+        "subcategoryName": "\u786e\u8ba4",
         "scenarioCount": 2,
         "color": "#666666"
        },
        {
-        "subcategoryName": "终极目标",
+        "subcategoryName": "\u7ec8\u6781\u76ee\u6807",
         "scenarioCount": 3,
         "color": "#666666"
        }
       ]
      },
      {
-      "categoryName": "转火",
+      "categoryName": "\u8f6c\u706b",
       "color": "#434343",
       "subcategories": [
        {
-        "subcategoryName": "速度",
+        "subcategoryName": "\u901f\u5ea6",
         "scenarioCount": 2,
         "color": "#666666"
        },
        {
-        "subcategoryName": "精准",
+        "subcategoryName": "\u7cbe\u51c6",
         "scenarioCount": 2,
         "color": "#666666"
        },
        {
-        "subcategoryName": "终极目标",
+        "subcategoryName": "\u7ec8\u6781\u76ee\u6807",
         "scenarioCount": 3,
         "color": "#666666"
        }
@@ -14101,105 +14101,105 @@
     ]
    },
    {
-    "difficultyName": "困难",
+    "difficultyName": "\u56f0\u96be",
     "kovaaksBenchmarkId": 2887,
     "sharecode": "KovaaKsPingingWeeklyMouse",
     "rankColors": {
-     "翡翠": "#36a673",
-     "翡翠Ⅱ": "#23e78e",
-     "钻石": "#2cc8e8",
-     "钻石Ⅱ": "#18c9ec",
-     "大师": "#6f2790",
-     "大师Ⅱ": "#8f1cc4",
-     "宗师": "#a43269",
-     "最强王者": "#dd7631",
+     "\u7fe1\u7fe0": "#36a673",
+     "\u7fe1\u7fe0\u2161": "#23e78e",
+     "\u94bb\u77f3": "#2cc8e8",
+     "\u94bb\u77f3\u2161": "#18c9ec",
+     "\u5927\u5e08": "#6f2790",
+     "\u5927\u5e08\u2161": "#8f1cc4",
+     "\u5b97\u5e08": "#a43269",
+     "\u6700\u5f3a\u738b\u8005": "#dd7631",
      "TOP": "#931a1a"
     },
     "categories": [
      {
-      "categoryName": "定位",
+      "categoryName": "\u5b9a\u4f4d",
       "color": "#9ED3FF",
       "subcategories": [
        {
-        "subcategoryName": "速度",
+        "subcategoryName": "\u901f\u5ea6",
         "scenarioCount": 2,
         "color": "#9EB3BD"
        },
        {
-        "subcategoryName": "微调",
+        "subcategoryName": "\u5fae\u8c03",
         "scenarioCount": 2,
         "color": "#9EB3BD"
        },
        {
-        "subcategoryName": "确认",
+        "subcategoryName": "\u786e\u8ba4",
         "scenarioCount": 2,
         "color": "#9EB3BD"
        },
        {
-        "subcategoryName": "终极目标",
+        "subcategoryName": "\u7ec8\u6781\u76ee\u6807",
         "scenarioCount": 3,
         "color": "#9EB3BD"
        }
       ]
      },
      {
-      "categoryName": "跟踪",
+      "categoryName": "\u8ddf\u8e2a",
       "color": "#9ED3FF",
       "subcategories": [
        {
-        "subcategoryName": "平滑",
+        "subcategoryName": "\u5e73\u6ed1",
         "scenarioCount": 2,
         "color": "#9EB3BD"
        },
        {
-        "subcategoryName": "精准度",
+        "subcategoryName": "\u7cbe\u51c6\u5ea6",
         "scenarioCount": 2,
         "color": "#9EB3BD"
        },
        {
-        "subcategoryName": "终极目标",
+        "subcategoryName": "\u7ec8\u6781\u76ee\u6807",
         "scenarioCount": 3,
         "color": "#EEEEEE"
        }
       ]
      },
      {
-      "categoryName": "动态点击",
+      "categoryName": "\u52a8\u6001\u70b9\u51fb",
       "color": "#9ED3FF",
       "subcategories": [
        {
-        "subcategoryName": "速度",
+        "subcategoryName": "\u901f\u5ea6",
         "scenarioCount": 2,
         "color": "#9EB3BD"
        },
        {
-        "subcategoryName": "确认",
+        "subcategoryName": "\u786e\u8ba4",
         "scenarioCount": 2,
         "color": "#9EB3BD"
        },
        {
-        "subcategoryName": "终极",
+        "subcategoryName": "\u7ec8\u6781",
         "scenarioCount": 3,
         "color": "#9EB3BD"
        }
       ]
      },
      {
-      "categoryName": "转火",
+      "categoryName": "\u8f6c\u706b",
       "color": "#9ED3FF",
       "subcategories": [
        {
-        "subcategoryName": "速度",
+        "subcategoryName": "\u901f\u5ea6",
         "scenarioCount": 2,
         "color": "#9EB3BD"
        },
        {
-        "subcategoryName": " 精准度",
+        "subcategoryName": " \u7cbe\u51c6\u5ea6",
         "scenarioCount": 2,
         "color": "#9EB3BD"
        },
        {
-        "subcategoryName": "终极目标",
+        "subcategoryName": "\u7ec8\u6781\u76ee\u6807",
         "scenarioCount": 4,
         "color": "#9EB3BD"
        }

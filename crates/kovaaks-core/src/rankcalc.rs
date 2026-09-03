@@ -276,7 +276,7 @@ pub fn scenario_floor_rank(progress: &BenchmarkProgress) -> u32 {
     let mut valid = true;
     for (_, category) in &progress.categories {
         for (_, scenario) in &category.scenarios {
-            if scenario.score / 100.0 <= 0.0 {
+            if scenario.score <= 0.0 {
                 valid = false;
                 break;
             }
@@ -316,12 +316,12 @@ pub fn calc_basic(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32
         for _ in 0..*count {
             if idx < order.len() {
                 let (_name, entry) = order[idx];
-                let norm = entry.score / 100.0;
+                let norm = entry.score;
                 if norm > 0.0 {
                     let pr = rank_of(norm, &entry.rank_maxes);
                     let entry_ratio = |s: &ScenarioEntry| {
                         if s.rank_maxes.first().cloned().unwrap_or(0.0) > 0.0 {
-                            s.score / 100.0 / s.rank_maxes[0]
+                            s.score / s.rank_maxes[0]
                         } else {
                             0.0
                         }
@@ -359,6 +359,7 @@ pub fn calc_basic(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32
             }
         }
     }
+
     let ladder_len = difficulty.rank_colors.len() as u32;
     let min_rank = best_ranks.iter().cloned().min().unwrap_or(0);
     if any_unranked {
@@ -376,7 +377,6 @@ pub fn calc_basic(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32
         progresses.iter().sum::<f64>() / subs.len().max(1) as f64,
     )
 }
-
 
 /// (category, count, subcategory) spans flattened from the registry metadata.
 pub fn subcategory_spans(difficulty: &Difficulty) -> Vec<(String, usize, String)> {
@@ -431,7 +431,7 @@ pub fn energy_core(
         for _ in 0..*count {
             if idx < order.len() {
                 let (_, entry) = order[idx];
-                let norm = entry.score / 100.0;
+                let norm = entry.score;
                 if norm > 0.0 && !entry.rank_maxes.is_empty() {
                     let pr = rank_of(norm, &entry.rank_maxes);
                     scores.push(energy_of(&pr, thresholds, fake_lower, fake_upper));
@@ -523,7 +523,7 @@ pub fn calc_jade_palace(
         for _ in 0..*count {
             if idx < order.len() {
                 let (_, entry) = order[idx];
-                let norm = entry.score / 100.0;
+                let norm = entry.score;
                 if norm > 0.0 && !entry.rank_maxes.is_empty() {
                     let pr = rank_of(norm, &entry.rank_maxes);
                     let e = energy_of(&pr, &thresholds, 100, 1.0);
@@ -561,7 +561,7 @@ pub fn calc_aimbeast(progress: &BenchmarkProgress) -> (u32, f64) {
         let mut sum = 0.0;
         let mut n = 0usize;
         for (_, scenario) in &category.scenarios {
-            if scenario.scenario_rank == 0 || scenario.score / 100.0 <= 0.0 {
+            if scenario.scenario_rank == 0 || scenario.score <= 0.0 {
                 sum = 0.0;
                 n = 0;
                 break;
@@ -587,7 +587,7 @@ pub fn calc_count_required(progress: &BenchmarkProgress, required: usize) -> u32
     let mut counts: std::collections::BTreeMap<u32, u32> = Default::default();
     for (_, category) in &progress.categories {
         for (_, scenario) in &category.scenarios {
-            if scenario.score / 100.0 > 0.0 && scenario.scenario_rank > 0 {
+            if scenario.score > 0.0 && scenario.scenario_rank > 0 {
                 *counts.entry(scenario.scenario_rank).or_default() += 1;
             }
         }
@@ -626,7 +626,7 @@ pub fn calc_aoi(progress: &BenchmarkProgress, difficulty: &Difficulty) -> u32 {
         for _ in 0..*count {
             if idx < order.len() {
                 let (_, entry) = order[idx];
-                if entry.score / 100.0 > 0.0 && entry.scenario_rank > 0 {
+                if entry.score > 0.0 && entry.scenario_rank > 0 {
                     ranks.push(entry.scenario_rank);
                 }
             }
@@ -658,7 +658,7 @@ pub fn calc_miyu(progress: &BenchmarkProgress) -> u32 {
         .iter()
         .flat_map(|(_, c)| c.scenarios.iter())
         .map(|(_, s)| {
-            if s.score / 100.0 > 0.0 && s.scenario_rank > 0 {
+            if s.score > 0.0 && s.scenario_rank > 0 {
                 2.0 + (s.scenario_rank as f64 - 1.0)
             } else {
                 0.0
@@ -733,7 +733,7 @@ pub fn compute_rank(
                 let mut sum = 0.0;
                 let mut n = 0usize;
                 for (_, scenario) in &category.scenarios {
-                    if scenario.scenario_rank > 0 && scenario.score / 100.0 > 0.0 {
+                    if scenario.scenario_rank > 0 && scenario.score > 0.0 {
                         sum += scenario.scenario_rank as f64;
                         n += 1;
                         ranked_total += 1;
@@ -869,7 +869,7 @@ mod tests {
 
     fn scenario(score: f64, rank: u32, maxes: &[f64]) -> ScenarioEntry {
         ScenarioEntry {
-            score: score * 100.0,
+            score,
             leaderboard_rank: 0,
             scenario_rank: rank,
             rank_maxes: maxes.to_vec(),

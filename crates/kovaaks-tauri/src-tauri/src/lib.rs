@@ -456,9 +456,9 @@ pub mod commands {
     /// API's `benchmark_progress` uses) — now in the same units, so deltas
     /// are meaningful.
     /// Rebuild an API-shaped [`BenchmarkProgress`] from a stored snapshot so
-    /// the rank engine can consume it. Stored scores are display units
-    /// (already ÷100); the engine expects centi-scale API units, so scores
-    /// and rank_maxes scale back ×100. Scenario order follows the stored
+    /// the rank engine can consume it. Stored scores and rank_maxes are
+    /// display units (already ÷100 from the API); the engine works in display
+    /// units too, so no scaling. Scenario order follows the stored
     /// `api_order` (category × 10 000 + index), matching evxl's ordering.
     fn stored_to_progress(
         snap: &kovaaks_core::store::StoredSnapshot,
@@ -473,7 +473,7 @@ pub mod commands {
                 score: score_centi,
                 leaderboard_rank: row.leaderboard_rank.max(0) as u64,
                 scenario_rank: row.scenario_rank.max(0) as u32,
-                rank_maxes: row.rank_maxes.iter().map(|m| m * 100.0).collect(),
+                rank_maxes: row.rank_maxes.clone(),
                 leaderboard_id: 0,
             };
             match categories.last_mut() {
