@@ -455,6 +455,49 @@ pub mod commands {
     /// Next-rank delta uses the category ladder sum (same additive model the
     /// API's `benchmark_progress` uses) — now in the same units, so deltas
     /// are meaningful.
+    /// Rebuild an API-shaped [`BenchmarkProgress`] from a stored snapshot so
+    /// the rank engine can consume it. Stored scores are display units
+    /// (already ÷100); the engine expects centi-scale API units, so scores
+    /// and rank_maxes scale back ×100. Scenario order follows the stored
+    /// `api_order` (category × 10 000 + index), matching evxl's ordering.
+    fn stored_to_progress(
+        snap: &kovaaks_core::store::StoredSnapshot,
+    ) -> kovaaks_core::types::BenchmarkProgress {
+        use kovaaks_core::types::{CategoryProgress, ScenarioEntry};
+        let mut categories: Vec<(String, CategoryProgress)> = Vec::new();
+        // Stored rows are ordered by (category, order_idx); rebuild the API's
+        // per-category scenario maps in that same document order.
+        for row in &snap.scenarios {
+            let score_centi = (row.score as f64 * 100.0).round();
+            let entry = ScenarioEntry {
+                score: score_centi,
+                leaderboard_rank: row.leaderboard_rank.max(0) as u64,
+                scenario_rank: row.scenario_rank.max(0) as u32,
+                rank_maxes: row.rank_maxes.iter().map(|m| m * 100.0).collect(),
+                leaderboard_id: 0,
+            };
+            match categories.last_mut() {
+                Some((name, cat)) if *name == row.category => {
+                    cat.scenarios.push((row.scenario.clone(), entry));
+                }
+                _ => categories.push((
+                    row.category.clone(),
+                    CategoryProgress {
+                        benchmark_progress: 0.0,
+                        category_rank: row.category_rank.max(0) as u32,
+                        rank_maxes: Vec::new(),
+                        scenarios: vec![(row.scenario.clone(), entry)],
+                    },
+                )),
+            }
+        }
+        kovaaks_core::types::BenchmarkProgress {
+            benchmark_progress: snap.benchmark_progress as f64,
+            overall_rank: snap.overall_rank.max(0) as u32,
+            categories,
+        }
+    }
+
     fn build_card(
         state: &AppState,
         steam_id: &str,
@@ -469,6 +512,16 @@ pub mod commands {
         let metrics = metrics_for_benchmark(&state.store, steam_id, benchmark_id)?;
         let progress = latest.map(|s| s.benchmark_progress).unwrap_or(0);
         let overall_rank = latest.map(|s| s.overall_rank).unwrap_or(0).max(0) as u32;
+        // v0.2 rank engine: recompute the rank the way evxl does. Stored
+        // scenario scores are display units; the engine expects centi-scale
+        // API units, so scale back up before dispatching.
+        let rank_tier = latest
+            .and_then(|snap| {
+                let api_progress = stored_to_progress(snap);
+                kovaaks_core::rankcalc::compute_rank(&api_progress, bench, &difficulty)
+                    .tier(&difficulty)
+            })
+            .or_else(|| kovaaks_core::rank_from_index(overall_rank, &difficulty));
         let ladder = overall_ladder(latest);
         let (next_name, next_delta) = next_rank_from_ladder(progress, &ladder, &difficulty);
         Ok(Some(BenchmarkCard {
@@ -476,7 +529,7 @@ pub mod commands {
             benchmark_name: bench.name.clone(),
             abbreviation: bench.abbreviation.clone(),
             difficulty_name: difficulty.name.clone(),
-            rank: kovaaks_core::rank_from_index(overall_rank, &difficulty),
+            rank: rank_tier,
             benchmark_progress: progress,
             next_rank_name: next_name,
             next_rank_delta: next_delta,

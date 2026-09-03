@@ -312,12 +312,20 @@ pub fn calc_basic(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32
     let mut idx = 0usize;
     for (_, count, _name) in &subs {
         let mut best: Option<(f64, PreciseRank)> = None;
+        let mut best_ratio = 0.0f64;
         for _ in 0..*count {
             if idx < order.len() {
-                let (name, entry) = order[idx];
+                let (_name, entry) = order[idx];
                 let norm = entry.score / 100.0;
                 if norm > 0.0 {
                     let pr = rank_of(norm, &entry.rank_maxes);
+                    let entry_ratio = |s: &ScenarioEntry| {
+                        if s.rank_maxes.first().cloned().unwrap_or(0.0) > 0.0 {
+                            s.score / 100.0 / s.rank_maxes[0]
+                        } else {
+                            0.0
+                        }
+                    };
                     let better = match &best {
                         None => true,
                         Some((_, bp)) => {
@@ -327,18 +335,12 @@ pub fn calc_basic(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32
                                 pr.precise > bp.precise
                             } else {
                                 // both below first rank: compare score ratio
-                                let ratio = |s: &ScenarioEntry| {
-                                    if s.rank_maxes.first().cloned().unwrap_or(0.0) > 0.0 {
-                                        s.score / 100.0 / s.rank_maxes[0]
-                                    } else {
-                                        0.0
-                                    }
-                                };
-                                ratio(entry) > ratio(best_ref(&order, idx, &best, name))
+                                entry_ratio(entry) > best_ratio
                             }
                         }
                     };
                     if better {
+                        best_ratio = entry_ratio(entry);
                         best = Some((norm, pr));
                     }
                 }
@@ -375,16 +377,6 @@ pub fn calc_basic(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32
     )
 }
 
-fn best_ref<'a>(
-    _order: &'a [(&'a str, &'a ScenarioEntry)],
-    _idx: usize,
-    _best: &Option<(f64, PreciseRank)>,
-    _name: &str,
-) -> &'a ScenarioEntry {
-    // Placeholder to satisfy the both-unranked ratio comparison; the ratio is
-    // recomputed from the same entry by the caller, so this never dereferences.
-    unreachable!("ratio comparison only needs the entry itself")
-}
 
 /// (category, count, subcategory) spans flattened from the registry metadata.
 pub fn subcategory_spans(difficulty: &Difficulty) -> Vec<(String, usize, String)> {
@@ -830,6 +822,16 @@ pub struct RankResult {
     pub complete: bool,
     /// Where this rank came from.
     pub method: MethodSource,
+}
+
+impl RankResult {
+    /// Resolve the display name into the difficulty's colored tier.
+    /// "Complete" results render as the top tier (name carries the suffix).
+    pub fn tier(&self, difficulty: &Difficulty) -> Option<crate::types::RankTier> {
+        let top = difficulty.rank_colors.len() as u32;
+        let index = if self.complete { top } else { self.rank };
+        crate::ranks::rank_from_index(index, difficulty)
+    }
 }
 
 #[cfg(test)]
