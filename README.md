@@ -10,7 +10,7 @@ A desktop companion for [KovaaK's FPS Aim Trainer](https://store.steampowered.co
 - **One-click sync** — shallow pass for your main benchmarks, Deep Scan for everything. Throttled requests get a cooled-down sequential retry pass that honors the server's `Retry-After`.
 - **Per-scenario detail** — score history chart (local plays + sync snapshots), 7-day average, running high, avg/high scores, and 30-day improvement % for the selected scenario. Snapshots that don't set a new high are ignored, so stale syncs never pollute charts or averages.
 - **Local CSV ingest** — reads KovaaK's own `Stats/` CSVs forward-only, so sessions played offline still count.
-- **Search + favorites** — filter the grid by name, pin benchmarks to the top. Pins survive restarts.
+- **Search + favorites** — filter the grid by name, pin benchmarks to the top.
 
 ![Kairos benchmark detail](docs/screenshots/benchmark-detail.png)
 
@@ -30,9 +30,12 @@ Windows: grab `kairos.exe` from `target/release/` (or build it below), launch, e
 
 ## Build from source
 
-Prereqs: Rust stable (MSVC), Node 24 + npm.
+Prereqs: Rust stable via rustup (MSVC toolchain on Windows), Node 24 + npm.
 
 ```bash
+# one-time: linters used below
+rustup component add clippy rustfmt
+
 # 1. Frontend first — plain cargo does NOT rebuild it
 cd crates/kovaaks-tauri/ui && npm install && npm run build
 
@@ -41,10 +44,10 @@ cd ../src-tauri && cargo build --release --features custom-protocol
 # → ../../../target/release/kairos.exe
 ```
 
-Tests (offline by default; live API tests are `#[ignore]`d):
+Tests (from the repo root; offline by default, live API tests are `#[ignore]`d):
 
 ```bash
-cargo test --workspace --offline
+cd ../.. && cargo test --workspace --offline
 cargo clippy --workspace --offline
 ```
 
