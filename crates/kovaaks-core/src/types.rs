@@ -5,8 +5,6 @@
 //! scenario scores as floats (e.g. `"Score:,959.120239"` in stats CSVs); ranks
 //! are 1-based indices into a difficulty's `rank_colors`.
 
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
 
 /// Serde helper: the webapp-backend emits explicit `null` for rank/id/threshold
@@ -22,6 +20,61 @@ pub(crate) mod null_default {
         T: Deserialize<'de> + Default,
     {
         Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+    }
+}
+
+/// Serde helper: some scenarios report numerics as strings (observed live:
+/// benchmark 2108 `"score": "3750.00"`). Accept f64, integers, numeric
+/// strings, or null (→ 0.0) instead of failing the whole benchmark payload.
+pub(crate) mod flex_f64 {
+    use serde::{Deserialize, Deserializer};
+
+    pub fn deserialize<'de, D>(d: D) -> Result<f64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Num {
+            F(f64),
+            I(i64),
+            S(String),
+        }
+        match Option::<Num>::deserialize(d)? {
+            None => Ok(0.0),
+            Some(Num::F(v)) => Ok(v),
+            Some(Num::I(v)) => Ok(v as f64),
+            Some(Num::S(s)) => s.trim().parse::<f64>().map_err(serde::de::Error::custom),
+        }
+    }
+
+    /// Same flexibility for threshold arrays (same payload shape, same risk).
+    pub fn deserialize_vec<'de, D>(d: D) -> Result<Vec<f64>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Num {
+            F(f64),
+            I(i64),
+            S(String),
+        }
+        fn one(n: Num) -> Result<f64, String> {
+            match n {
+                Num::F(v) => Ok(v),
+                Num::I(v) => Ok(v as f64),
+                Num::S(s) => s.trim().parse::<f64>().map_err(|e| format!("{e}")),
+            }
+        }
+        match Option::<Vec<Num>>::deserialize(d)? {
+            None => Ok(Vec::new()),
+            Some(v) => v
+                .into_iter()
+                .map(one)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(serde::de::Error::custom),
+        }
     }
 }
 
@@ -127,6 +180,7 @@ pub struct CategoryProgress {
 /// One played scenario inside a category.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioEntry {
+    #[serde(deserialize_with = "flex_f64::deserialize")]
     pub score: f64,
     /// Position on the scenario's public leaderboard; `0` when the payload
     /// reports `null` (never played / unranked).
@@ -143,7 +197,7 @@ pub struct ScenarioEntry {
     )]
     pub scenario_rank: u32,
     /// Scenario score thresholds, ascending, one per rank tier.
-    #[serde(rename = "rank_maxes", deserialize_with = "null_default::deserialize")]
+    #[serde(rename = "rank_maxes", deserialize_with = "flex_f64::deserialize_vec")]
     pub rank_maxes: Vec<f64>,
     /// KovaaK's leaderboard id for pulling the global scores list; `0` when
     /// the payload reports `null`.
@@ -431,6 +485,48 @@ mod tests {
         assert_eq!(partially_null.leaderboard_rank, 0);
         assert!(partially_null.rank_maxes.is_empty());
         assert_eq!(partially_null.leaderboard_id, 0);
+    }
+
+    /// REGRESSION (deep sweep 2026-09-03): benchmarks 2108/2487 report
+    /// `"score": "3750.00"` as a string. That must decode instead of killing
+    /// the whole benchmark payload.
+    #[test]
+    fn string_encoded_scores_decode_as_floats() {
+        const STRING_SCORE_SAMPLE: &str = r#"{
+            "benchmark_progress": 100000,
+            "overall_rank": 3,
+            "categories": {
+                "Clicking": {
+                    "benchmark_progress": 50000,
+                    "category_rank": 3,
+                    "rank_maxes": [10000, 20000, 30000, 40000],
+                    "scenarios": {
+                        "Stringy Scenario": {
+                            "score": "3750.00",
+                            "leaderboard_rank": 12,
+                            "scenario_rank": 2,
+                            "rank_maxes": ["1000.5", 2000, 3000, 4000],
+                            "leaderboard_id": 2108
+                        }
+                    }
+                }
+            }
+        }"#;
+        let p: BenchmarkProgress =
+            serde_json::from_str(STRING_SCORE_SAMPLE).expect("string scores must decode");
+        let scen = &p
+            .categories
+            .iter()
+            .find(|(n, _)| n == "Clicking")
+            .unwrap()
+            .1
+            .scenarios
+            .iter()
+            .find(|(n, _)| n == "Stringy Scenario")
+            .unwrap()
+            .1;
+        assert_eq!(scen.score, 3750.0);
+        assert_eq!(scen.rank_maxes, vec![1000.5, 2000.0, 3000.0, 4000.0]);
     }
 
     #[test]
