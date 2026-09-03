@@ -60,8 +60,7 @@ fn major_ids() -> Vec<i64> {
 fn all_ids() -> Vec<i64> {
     let reg = Registry;
     let mut ids: Vec<i64> = reg
-        .all()
-        .iter()
+        .visible()
         .flat_map(|b| b.difficulties.iter().map(|d| d.kovaaks_benchmark_id as i64))
         .collect();
     ids.sort();

@@ -146,14 +146,16 @@ impl<S: ProgressSource> SyncEngine<S> {
         }
     }
 
-    /// Candidate difficulty ids for a discovery pass. `deep=false` probes only
-    /// difficulties whose benchmark name starts with one of the registry's
-    /// `major_families()`; `deep=true` probes every registry difficulty.
+    /// Candidate difficulty ids for a discovery pass.
+    ///
+    /// evxl shows every visible benchmark's difficulties on a user page, so
+    /// `deep=true` probes exactly those (matching evxl's coverage). The
+    /// default pass (`deep=false`) is a fast subset — the major community
+    /// families — while `Deep Scan` extends to everything evxl tracks.
     pub fn candidate_ids(&self, deep: bool) -> Vec<i64> {
         let mut ids: Vec<i64> = self
             .registry
-            .all()
-            .iter()
+            .visible()
             .filter(|b| {
                 deep || Registry::major_families()
                     .iter()

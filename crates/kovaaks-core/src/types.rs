@@ -256,6 +256,16 @@ pub struct BenchmarkDef {
     /// Difficulties, in registry order.
     #[serde(rename = "difficulties")]
     pub difficulties: Vec<Difficulty>,
+    /// evxl's own visibility flag: `true` excludes the benchmark from its
+    /// user pages (2 hidden entries in the embedded registry). We mirror that
+    /// rule in [`crate::registry::Registry::visible`].
+    #[serde(
+        rename = "hidden",
+        alias = "is_hidden",
+        default,
+        deserialize_with = "null_default::deserialize"
+    )]
+    pub hidden: bool,
 }
 
 /// A resolved KovaaK's player profile (evxl `/api/steam` response).

@@ -69,6 +69,13 @@ impl Registry {
         })
     }
 
+    /// Benchmarks evxl actually shows: `hidden != true`. This is the same
+    /// visibility rule evxl applies on user pages, so the app's card list can
+    /// match it benchmark-for-benchmark.
+    pub fn visible(&self) -> impl Iterator<Item = &BenchmarkDef> {
+        self.all().iter().filter(|b| !b.hidden)
+    }
+
     /// Find a difficulty by benchmark name + difficulty name
     /// (case/whitespace-tolerant), e.g. `("Voltaic S5", "Novice")` → id 459.
     pub fn find(&self, benchmark_name: &str, difficulty_name: &str) -> Option<Difficulty> {
