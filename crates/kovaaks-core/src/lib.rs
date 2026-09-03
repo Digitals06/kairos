@@ -9,6 +9,7 @@ pub mod error;
 pub mod http;
 pub mod kovaaks;
 pub mod metrics;
+pub mod rankcalc;
 pub mod ranks;
 pub mod registry;
 pub mod steam;
