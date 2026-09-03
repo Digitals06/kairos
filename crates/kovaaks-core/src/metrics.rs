@@ -13,7 +13,10 @@
 //!   the average of the *first half*: `(second - first) / first * 100`.
 //! - `high_improvement_pct` compares the current high score against the high
 //!   of the chronologically first bucket.
-//! - Fewer than 2 buckets (empty series, single sample, one week of data)
+//! - A single bucket with 2+ samples (e.g. a fresh player with one session)
+//!   falls back to the same comparison at *sample* granularity: second-half
+//!   sample mean vs first-half sample mean (avg), current high vs the first
+//!   sample (high). One bucket and one sample — or a non-positive baseline —
 //!   yields `None` — never `0.0` — so the UI can show "not enough data".
 
 use chrono::{DateTime, Utc};
@@ -171,43 +174,64 @@ fn group_runs(keys: &[String]) -> Vec<(String, Vec<usize>)> {
 }
 
 /// `(avg of second-half bucket-averages - avg of first-half bucket-averages)
-/// / first-half avg * 100`, or `None` with fewer than 2 buckets or a
-/// non-positive baseline.
+/// / first-half avg * 100`, or `None` with fewer than 2 samples or a
+/// non-positive baseline. A single bucket falls back to the same split at
+/// sample granularity so fresh (single-session) series still score.
 fn avg_improvement(sorted: &[(DateTime<Utc>, f64)]) -> Option<f64> {
     let keys = iso_week_keys(&sorted.iter().map(|(t, _)| *t).collect::<Vec<_>>());
     let buckets = group_runs(&keys);
-    if buckets.len() < 2 {
+    let avgs: Vec<f64> = if buckets.len() >= 2 {
+        buckets
+            .iter()
+            .map(|(_, idxs)| {
+                let sum: f64 = idxs.iter().map(|&i| sorted[i].1).sum();
+                sum / idxs.len() as f64
+            })
+            .collect()
+    } else {
+        // Single-bucket fallback: one average per sample, same halves split.
+        if sorted.len() < 2 {
+            return None;
+        }
+        sorted.iter().map(|(_, s)| *s).collect()
+    };
+    halves_pct(&avgs)
+}
+
+/// Split `values` chronologically in halves (mirroring the bucket split:
+/// `mid = len / 2`) and return `(second - first) / first * 100`, or `None`
+/// on a non-positive/non-finite baseline.
+fn halves_pct(values: &[f64]) -> Option<f64> {
+    let mid = values.len() / 2;
+    if mid == 0 {
         return None;
     }
-    let bucket_avgs: Vec<f64> = buckets
-        .iter()
-        .map(|(_, idxs)| {
-            let sum: f64 = idxs.iter().map(|&i| sorted[i].1).sum();
-            sum / idxs.len() as f64
-        })
-        .collect();
-    let mid = bucket_avgs.len() / 2;
-    let first: f64 = bucket_avgs[..mid].iter().sum::<f64>() / mid as f64;
-    let second: f64 = bucket_avgs[mid..].iter().sum::<f64>() / (bucket_avgs.len() - mid) as f64;
-    if first <= 0.0 || !first.is_finite() {
+    let first: f64 = values[..mid].iter().sum::<f64>() / mid as f64;
+    let second: f64 = values[mid..].iter().sum::<f64>() / (values.len() - mid) as f64;
+    if first <= 0.0 || !first.is_finite() || !second.is_finite() {
         return None;
     }
     Some((second - first) / first * 100.0)
 }
 
 /// `(current high - high of first bucket) / first-bucket high * 100`, or
-/// `None` with fewer than 2 buckets or a non-positive baseline high.
+/// `None` with fewer than 2 samples or a non-positive baseline high. A
+/// single bucket compares against the first *sample* instead.
 fn high_improvement(sorted: &[(DateTime<Utc>, f64)]) -> Option<f64> {
-    let keys = iso_week_keys(&sorted.iter().map(|(t, _)| *t).collect::<Vec<_>>());
-    let buckets = group_runs(&keys);
-    if buckets.len() < 2 {
+    if sorted.len() < 2 {
         return None;
     }
-    let first_bucket = &buckets[0].1;
-    let first_high = first_bucket
-        .iter()
-        .map(|&i| sorted[i].1)
-        .fold(f64::NEG_INFINITY, f64::max);
+    let keys = iso_week_keys(&sorted.iter().map(|(t, _)| *t).collect::<Vec<_>>());
+    let buckets = group_runs(&keys);
+    let first_high = if buckets.len() >= 2 {
+        buckets[0]
+            .1
+            .iter()
+            .map(|&i| sorted[i].1)
+            .fold(f64::NEG_INFINITY, f64::max)
+    } else {
+        sorted[0].1
+    };
     let current_high = sorted
         .iter()
         .map(|(_, s)| *s)
@@ -253,9 +277,10 @@ mod tests {
         series
     }
 
-    /// avg [100, 200, 300] = 200, high = 300; one ISO week → improvements None.
+    /// avg [100, 200, 300] = 200, high = 300; one ISO week → the
+    /// single-bucket fallback scores at sample granularity.
     #[test]
-    fn basic_stats_and_single_week_have_no_improvement() {
+    fn single_week_falls_back_to_sample_granularity() {
         let series = vec![
             (ts(2026, 9, 1, 10), 100.0),
             (ts(2026, 9, 1, 11), 200.0),
@@ -265,8 +290,10 @@ mod tests {
         approx(m.avg_score, 200.0);
         approx(m.high_score, 300.0);
         assert_eq!(m.samples, 3);
-        assert_eq!(m.avg_improvement_pct, None);
-        assert_eq!(m.high_improvement_pct, None);
+        // Halves split [100] vs [200, 300] → (250-100)/100 = +150 %.
+        approx(m.avg_improvement_pct.expect("fallback"), 150.0);
+        // Current high 300 vs first sample 100 → +200 %.
+        approx(m.high_improvement_pct.expect("fallback"), 200.0);
 
         // Input order must not matter (internal chronological sort).
         let shuffled = vec![
