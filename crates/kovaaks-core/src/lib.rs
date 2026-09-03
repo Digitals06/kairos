@@ -23,7 +23,7 @@ pub use metrics::{
     compute, compute_trailing_30d, compute_window, metrics_for_benchmark,
     metrics_for_scenario_plays, Metrics,
 };
-pub use ranks::{rank_for, scenario_rank_tier};
+pub use ranks::{rank_for, rank_from_index, scenario_rank_tier};
 pub use registry::Registry;
 pub use steam::EvxlClient;
 pub use store::{SnapshotWrite, Store, StoredScenario, StoredSnapshot};

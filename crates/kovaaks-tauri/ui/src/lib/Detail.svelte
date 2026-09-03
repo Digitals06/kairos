@@ -60,6 +60,25 @@
   // --- scenario table: score sort toggle -------------------------------------
   let scoreDesc = $state(true)
 
+  // --- per-scenario history picker -------------------------------------------
+  // 'ALL' = benchmark aggregate (snapshot_history); otherwise a scenario name
+  // scopes the chart to that scenario's per-snapshot scores (issue #3).
+  const ALL = 'ALL'
+  let chartScope = $state(ALL)
+
+  const historyOptions = $derived.by(() => {
+    if (!detail) return []
+    return detail.scenario_history
+      .filter((s) => s.points.length > 0)
+      .map((s) => ({ scenario: s.scenario, category: s.category, n: s.points.length }))
+  })
+
+  function scopeTitle(): string {
+    return chartScope === ALL
+      ? 'Progress history'
+      : `Score history — ${chartScope}`
+  }
+
   const scenarios = $derived.by(() => {
     const rows = detail?.scenario_ranks ?? []
     return [...rows].sort((a, b) => (scoreDesc ? b.score - a.score : a.score - b.score))
@@ -82,19 +101,36 @@
 
   $effect(() => {
     const d = detail
-    if (!d || !lineCanvas || d.snapshot_history.length === 0) return
+    if (!d || !lineCanvas) return
 
-    const snaps = d.snapshot_history.map((p) => ({
-      x: new Date(p.captured_at).getTime(),
-      y: p.benchmark_progress,
-    }))
+    // Scoped series: ALL = benchmark aggregate; otherwise one scenario.
+    let raw: { x: number; y: number }[]
+    let playPts: { x: number; y: number }[]
+    if (chartScope === ALL) {
+      raw = d.snapshot_history.map((p) => ({
+        x: new Date(p.captured_at).getTime(),
+        y: p.benchmark_progress,
+      }))
+      playPts = d.plays.map((p) => ({ x: new Date(p.played_at).getTime(), y: p.score }))
+    } else {
+      const series = d.scenario_history.find((s) => s.scenario === chartScope)
+      raw = (series?.points ?? []).map((p) => ({
+        x: new Date(p.captured_at).getTime(),
+        y: p.score,
+      }))
+      // Local plays for exactly this scenario.
+      playPts = d.plays
+        .filter((p) => p.scenario === chartScope)
+        .map((p) => ({ x: new Date(p.played_at).getTime(), y: p.score }))
+    }
+    if (raw.length === 0) return
+
     let high = -Infinity
-    const highPts = snaps.map((p) => ({ x: p.x, y: (high = Math.max(high, p.y)) }))
-    const rolling = snaps.map((p) => {
-      const win = snaps.filter((q) => q.x > p.x - DAY_MS && q.x <= p.x)
+    const highPts = raw.map((p) => ({ x: p.x, y: (high = Math.max(high, p.y)) }))
+    const rolling = raw.map((p) => {
+      const win = raw.filter((q) => q.x > p.x - DAY_MS && q.x <= p.x)
       return { x: p.x, y: win.reduce((s, q) => s + q.y, 0) / win.length }
     })
-    const playPts = d.plays.map((p) => ({ x: new Date(p.played_at).getTime(), y: p.score }))
 
     lineChart = new Chart(lineCanvas, {
       type: 'line',
@@ -326,7 +362,21 @@
       </div>
     {:else}
       <section class="panel chart-panel">
-        <h3>Progress history</h3>
+        <div class="chart-head">
+          <h3>{scopeTitle()}</h3>
+          {#if historyOptions.length > 0}
+            <select
+              class="scope-select"
+              bind:value={chartScope}
+              aria-label="Chart scope: all scenarios or a single scenario"
+            >
+              <option value={ALL}>All scenarios (aggregate)</option>
+              {#each historyOptions as opt (opt.scenario)}
+                <option value={opt.scenario}>{opt.scenario} ({opt.n})</option>
+              {/each}
+            </select>
+          {/if}
+        </div>
         <div class="chart-box">
           <canvas bind:this={lineCanvas}></canvas>
         </div>

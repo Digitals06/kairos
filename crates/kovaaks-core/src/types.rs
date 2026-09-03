@@ -29,7 +29,8 @@ pub(crate) mod null_default {
 /// `benchmark-progress-rank-benchmark` payload).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BenchmarkProgress {
-    /// Overall benchmark progress score (e.g. 180000).
+    /// Overall benchmark progress score, in in-game display units
+    /// (raw API value ÷ 100 — see [`BenchmarkProgress::normalize_scale`]).
     #[serde(rename = "benchmark_progress")]
     pub benchmark_progress: f64,
     /// 1-based rank index into the benchmark's difficulty `rank_colors`.
@@ -37,6 +38,35 @@ pub struct BenchmarkProgress {
     pub overall_rank: u32,
     /// Per-category progress keyed by category name (Clicking, Tracking, ...).
     pub categories: HashMap<String, CategoryProgress>,
+}
+
+impl BenchmarkProgress {
+    /// Normalize the API's mixed units into in-game display units.
+    ///
+    /// Verified ground truth (2026-09-02, kovaaks.com): scenario scores come
+    /// as centi-scale integers (`VT Pasu Novice S5` raw `128161` ↔ in-game
+    /// `1281.61`; leaderboard WR `1704.91` on the same scenario), and so do
+    /// benchmark/category progress values and their `rank_maxes` ladders
+    /// (user progress 60000 == category rank_maxes[3] 60000). Scenario-level
+    /// `rank_maxes`, however, are ALREADY display-scale (555..800 for the
+    /// same scenario) — they must not be scaled.
+    ///
+    /// Call once at the client boundary (`KovaaksClient::benchmark_progress`);
+    /// everything downstream (store, ranks, UI) works in display units only.
+    pub fn normalize_scale(&mut self) {
+        const CENTI: f64 = 100.0;
+        self.benchmark_progress /= CENTI;
+        for cat in self.categories.values_mut() {
+            cat.benchmark_progress /= CENTI;
+            for max in &mut cat.rank_maxes {
+                *max /= CENTI;
+            }
+            for scen in cat.scenarios.values_mut() {
+                scen.score /= CENTI;
+                // scen.rank_maxes already display-scale — deliberately untouched.
+            }
+        }
+    }
 }
 
 /// Progress within a single category of a benchmark.

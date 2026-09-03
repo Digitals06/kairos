@@ -62,6 +62,21 @@ pub fn scenario_rank_tier(scenario_rank_idx: usize, difficulty: &Difficulty) -> 
     difficulty.rank_colors.get(scenario_rank_idx - 1).cloned()
 }
 
+/// Resolve the rank tier for a 1-based API rank index (the payload's
+/// `overall_rank` / `category_rank` / `scenario_rank` fields, `0` = unplayed).
+///
+/// The KovaaK's webapp-backend computes ranks with each benchmark's own
+/// rules server-side (`rankCalculation`: basic average, vt-energy, ...), so
+/// the index is authoritative — tiers map by position into the difficulty's
+/// `rank_colors` ladder. Threshold recomputation is deliberately NOT used:
+/// ladders differ per benchmark and per difficulty.
+pub fn rank_from_index(api_rank: u32, difficulty: &Difficulty) -> Option<RankTier> {
+    if api_rank == 0 {
+        return None;
+    }
+    difficulty.rank_colors.get(api_rank as usize - 1).cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,5 +224,54 @@ mod tests {
         assert_eq!(scenario_rank_tier(4, &d).unwrap(), tier("Gold", "#CAB148"));
         assert!(scenario_rank_tier(5, &d).is_none(), "beyond ladder");
         assert!(scenario_rank_tier(99, &d).is_none(), "way beyond ladder");
+    }
+
+    #[test]
+    fn rank_from_index_matches_api_semantics() {
+        let d = vt_novice();
+        assert!(rank_from_index(0, &d).is_none(), "0 = unplayed");
+        assert_eq!(rank_from_index(1, &d).unwrap().name, "Iron");
+        assert_eq!(rank_from_index(4, &d).unwrap(), tier("Gold", "#CAB148"));
+        assert!(rank_from_index(5, &d).is_none(), "beyond ladder");
+    }
+
+    #[test]
+    fn normalize_scale_converts_centi_to_display() {
+        use crate::types::{BenchmarkProgress, CategoryProgress, ScenarioEntry};
+        use std::collections::HashMap;
+        let mut cats = HashMap::new();
+        cats.insert(
+            "Clicking".to_string(),
+            CategoryProgress {
+                benchmark_progress: 60000.0,
+                category_rank: 4,
+                rank_maxes: vec![15000.0, 30000.0, 45000.0, 60000.0],
+                scenarios: HashMap::from([(
+                    "VT Pasu Novice S5".to_string(),
+                    ScenarioEntry {
+                        score: 128161.0,
+                        leaderboard_rank: 169,
+                        scenario_rank: 4,
+                        // Scenario ladders are ALREADY display-scale.
+                        rank_maxes: vec![555.0, 660.0, 745.0, 800.0],
+                        leaderboard_id: 98059,
+                    },
+                )]),
+            },
+        );
+        let mut p = BenchmarkProgress {
+            benchmark_progress: 180000.0,
+            overall_rank: 4,
+            categories: cats,
+        };
+        p.normalize_scale();
+        assert_eq!(p.benchmark_progress, 1800.0);
+        let cat = &p.categories["Clicking"];
+        assert_eq!(cat.benchmark_progress, 600.0);
+        assert_eq!(cat.rank_maxes, vec![150.0, 300.0, 450.0, 600.0]);
+        let scen = &cat.scenarios["VT Pasu Novice S5"];
+        assert_eq!(scen.score, 1281.61);
+        // Scenario thresholds untouched.
+        assert_eq!(scen.rank_maxes, vec![555.0, 660.0, 745.0, 800.0]);
     }
 }

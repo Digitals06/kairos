@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use kovaaks_core::{
-    csv_ingest, metrics_for_benchmark, rank_for,
+    csv_ingest, metrics_for_benchmark,
     store::StoredSnapshot,
     types::{Difficulty, RankTier},
     EvxlClient, KovaaksClient, Registry, Store, SyncEngine, SyncReport,
@@ -26,7 +26,8 @@ const INGEST_INSERTED_KEY: &str = "ingest_stats_csv_inserted";
 /// Meta key: RFC3339 timestamp of the last successful `sync_now`.
 const LAST_SYNCED_KEY: &str = "last_synced_at";
 /// Default KovaaK's stats dir (standard Steam library install).
-const DEFAULT_STATS_DIR: &str = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\FPSAimTrainer\\FPSAimTrainer\\stats";
+const DEFAULT_STATS_DIR: &str =
+    "C:\\Program Files (x86)\\Steam\\steamapps\\common\\FPSAimTrainer\\FPSAimTrainer\\stats";
 /// Sync staleness threshold (hours): rows older than this get re-probed on
 /// every `sync_now` (and `force=true` re-probes everything regardless).
 const SYNC_MAX_AGE_HOURS: u64 = 2;
@@ -62,13 +63,30 @@ pub struct BenchmarkCard {
 }
 
 /// One scenario row in the benchmark detail view.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ScenarioRank {
     pub scenario: String,
     pub score: i64,
     pub leaderboard_rank: i64,
     pub tier: Option<RankTier>,
+}
+
+/// One scenario's score history across snapshots (per-scenario trends).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ScenarioHistorySeries {
+    pub scenario: String,
+    pub category: String,
+    pub points: Vec<ScenarioHistoryPoint>,
+}
+
+/// One (time, score) point of a scenario's history.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ScenarioHistoryPoint {
+    pub captured_at: String,
+    pub score: i64,
 }
 
 /// One category row in the benchmark detail view.
@@ -89,9 +107,11 @@ pub struct SnapshotPoint {
 }
 
 /// One CSV play point.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct PlayPoint {
+    /// Scenario this play belongs to (scoped chart underlay).
+    pub scenario: String,
     pub played_at: String,
     pub score: f64,
 }
@@ -105,6 +125,8 @@ pub struct BenchmarkDetail {
     pub plays: Vec<PlayPoint>,
     pub scenario_ranks: Vec<ScenarioRank>,
     pub categories: Vec<CategoryCard>,
+    /// Per-scenario score history across snapshots (scenario-scoped trends).
+    pub scenario_history: Vec<ScenarioHistorySeries>,
 }
 
 /// Counters from the last CSV ingest scan + last sync time.
@@ -132,7 +154,11 @@ pub struct SyncReportDto {
 
 impl From<SyncReport> for SyncReportDto {
     fn from(r: SyncReport) -> Self {
-        Self { ok: r.ok, failed: r.failed, errors: r.errors }
+        Self {
+            ok: r.ok,
+            failed: r.failed,
+            errors: r.errors,
+        }
     }
 }
 
@@ -148,7 +174,10 @@ pub struct AppSettings {
 
 impl Default for AppSettings {
     fn default() -> Self {
-        Self { stats_dir: String::new(), sync_interval_hours: 6 }
+        Self {
+            stats_dir: String::new(),
+            sync_interval_hours: 6,
+        }
     }
 }
 
@@ -265,9 +294,11 @@ impl AppState {
 /// SQLite DB path: `%LOCALAPPDATA%\kovaaks-companion\store.db` (dir created).
 fn db_path() -> PathBuf {
     let base = std::env::var("LOCALAPPDATA").map_or_else(
-        |_| std::env::var("USERPROFILE")
-            .map(|h| PathBuf::from(h).join("AppData").join("Local"))
-            .unwrap_or_else(|_| PathBuf::from(".")),
+        |_| {
+            std::env::var("USERPROFILE")
+                .map(|h| PathBuf::from(h).join("AppData").join("Local"))
+                .unwrap_or_else(|_| PathBuf::from("."))
+        },
         PathBuf::from,
     );
     let dir = base.join("kovaaks-companion");
@@ -326,7 +357,10 @@ pub mod commands {
             .resolve(identifier.trim())
             .await
             .map_err(|e| e.to_string())?;
-        state.store.upsert_player(&profile).map_err(|e| e.to_string())?;
+        state
+            .store
+            .upsert_player(&profile)
+            .map_err(|e| e.to_string())?;
         state
             .store
             .set_meta("steam_id", &profile.steam_id)
@@ -389,6 +423,13 @@ pub mod commands {
     }
 
     /// Build one overview card from store + registry + metrics.
+    ///
+    /// Rank comes from the API's own `overall_rank` index (authoritative —
+    /// each benchmark ranks by its own `rankCalculation` server-side);
+    /// progress/deltas are display-unit values (client already normalized).
+    /// Next-rank delta uses the category ladder sum (same additive model the
+    /// API's `benchmark_progress` uses) — now in the same units, so deltas
+    /// are meaningful.
     fn build_card(
         state: &AppState,
         steam_id: &str,
@@ -401,6 +442,7 @@ pub mod commands {
         let latest = history.last();
         let metrics = metrics_for_benchmark(&state.store, steam_id, benchmark_id)?;
         let progress = latest.map(|s| s.benchmark_progress).unwrap_or(0);
+        let overall_rank = latest.map(|s| s.overall_rank).unwrap_or(0).max(0) as u32;
         let ladder = overall_ladder(latest);
         let (next_name, next_delta) = next_rank_from_ladder(progress, &ladder, &difficulty);
         Ok(Some(BenchmarkCard {
@@ -408,7 +450,7 @@ pub mod commands {
             benchmark_name: bench.name.clone(),
             abbreviation: bench.abbreviation.clone(),
             difficulty_name: difficulty.name.clone(),
-            rank: rank_for(progress, &ladder, &difficulty),
+            rank: kovaaks_core::rank_from_index(overall_rank, &difficulty),
             benchmark_progress: progress,
             next_rank_name: next_name,
             next_rank_delta: next_delta,
@@ -499,8 +541,8 @@ pub mod commands {
                 .unwrap_or_default()
                 .into_iter()
                 .map(|row| ScenarioRank {
-                    tier: kovaaks_core::scenario_rank_tier(
-                        row.scenario_rank.max(0) as usize,
+                    tier: kovaaks_core::rank_from_index(
+                        row.scenario_rank.max(0) as u32,
                         &difficulty,
                     ),
                     scenario: row.scenario,
@@ -509,8 +551,10 @@ pub mod commands {
                 })
                 .collect();
 
-            // CSV plays for every scenario of the newest snapshot, merged + sorted.
-            let mut plays: Vec<(chrono::DateTime<chrono::Utc>, f64)> = Vec::new();
+            // CSV plays for every scenario of the newest snapshot, merged +
+            // sorted; each point keeps its scenario so the UI can scope the
+            // underlay to the selected scenario.
+            let mut plays: Vec<(String, chrono::DateTime<chrono::Utc>, f64)> = Vec::new();
             if let Some(snapshot) = latest {
                 let mut scenarios: Vec<&str> = snapshot
                     .scenarios
@@ -525,46 +569,82 @@ pub mod commands {
                         .plays_history(&steam_id, scenario)
                         .map_err(|e| e.to_string())?
                     {
-                        plays.push((play.played_at, play.score));
+                        plays.push((scenario.to_string(), play.played_at, play.score));
                     }
                 }
             }
-            plays.sort_by(|a, b| a.0.cmp(&b.0));
+            plays.sort_by_key(|p| p.1);
             let plays: Vec<PlayPoint> = plays
                 .into_iter()
-                .map(|(played_at, score)| PlayPoint {
+                .map(|(scenario, played_at, score)| PlayPoint {
+                    scenario,
                     played_at: played_at.to_rfc3339(),
                     score,
                 })
                 .collect();
 
             // Per-category progress: sum of that category's scenario scores in the
-            // newest snapshot, tiered against the category's own ladder.
+            // newest snapshot; tier from the API's own category_rank index.
             let mut per_category: BTreeMap<String, Vec<&kovaaks_core::store::StoredScenario>> =
                 BTreeMap::new();
             if let Some(snapshot) = latest {
                 for row in &snapshot.scenarios {
-                    per_category.entry(row.category.clone()).or_default().push(row);
+                    per_category
+                        .entry(row.category.clone())
+                        .or_default()
+                        .push(row);
                 }
             }
             let categories: Vec<CategoryCard> = per_category
                 .into_iter()
                 .map(|(name, rows)| {
                     let progress: i64 = rows.iter().map(|r| r.score).sum();
-                    let ladder = rows
+                    let category_rank = rows
                         .iter()
-                        .find(|r| !r.rank_maxes.is_empty())
-                        .map(|r| ladder_from_rows(&r.rank_maxes))
-                        .unwrap_or_default();
+                        .map(|r| r.category_rank.max(0) as u32)
+                        .max()
+                        .unwrap_or(0);
                     CategoryCard {
                         name,
                         progress,
-                        rank_tier: rank_for(progress, &ladder, &difficulty),
+                        rank_tier: kovaaks_core::rank_from_index(category_rank, &difficulty),
                     }
                 })
                 .collect();
 
-            Ok(BenchmarkDetail { card, snapshot_history, plays, scenario_ranks, categories })
+            // Per-scenario score history across ALL snapshots of this
+            // benchmark (issue #3: history was benchmark-aggregate only).
+            let scenario_history: Vec<ScenarioHistorySeries> = latest
+                .map(|snap| {
+                    snap.scenarios
+                        .iter()
+                        .map(|row| ScenarioHistorySeries {
+                            scenario: row.scenario.clone(),
+                            category: row.category.clone(),
+                            points: history
+                                .iter()
+                                .filter_map(|s| {
+                                    s.scenarios.iter().find(|r| r.scenario == row.scenario).map(
+                                        |r| ScenarioHistoryPoint {
+                                            captured_at: s.captured_at.to_rfc3339(),
+                                            score: r.score,
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            Ok(BenchmarkDetail {
+                card,
+                snapshot_history,
+                plays,
+                scenario_ranks,
+                categories,
+                scenario_history,
+            })
         })
         .await
         .map_err(|e| format!("detail join error: {e}"))?
@@ -599,10 +679,12 @@ pub mod commands {
     #[tauri::command]
     pub fn set_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
         let json = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
-        state.store.set_meta(SETTINGS_KEY, &json).map_err(|e| e.to_string())
+        state
+            .store
+            .set_meta(SETTINGS_KEY, &json)
+            .map_err(|e| e.to_string())
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Wiring
@@ -624,7 +706,10 @@ mod tests {
             benchmark_name: "Voltaic S5".into(),
             abbreviation: "VT".into(),
             difficulty_name: "Novice".into(),
-            rank: Some(RankTier { name: "Gold".into(), color: "#CAB148".into() }),
+            rank: Some(RankTier {
+                name: "Gold".into(),
+                color: "#CAB148".into(),
+            }),
             benchmark_progress: 180000,
             next_rank_name: None,
             next_rank_delta: None,
@@ -653,12 +738,19 @@ mod tests {
         ] {
             assert!(json.contains(key), "missing {key} in {json}");
         }
-        assert!(!json.contains("benchmarkId"), "camelCase leaked into wire format: {json}");
+        assert!(
+            !json.contains("benchmarkId"),
+            "camelCase leaked into wire format: {json}"
+        );
 
         let detail = BenchmarkDetail {
             card: card.clone(),
             snapshot_history: vec![],
-            plays: vec![],
+            plays: vec![PlayPoint {
+                scenario: "VT Pasu Novice S5".into(),
+                played_at: "2026-09-02T22:00:00Z".into(),
+                score: 1281.61,
+            }],
             scenario_ranks: vec![ScenarioRank {
                 scenario: "VT Pasu Novice S5".into(),
                 score: 128161,
@@ -670,12 +762,28 @@ mod tests {
                 progress: 60000,
                 rank_tier: None,
             }],
+            scenario_history: vec![ScenarioHistorySeries {
+                scenario: "VT Pasu Novice S5".into(),
+                category: "Clicking".into(),
+                points: vec![ScenarioHistoryPoint {
+                    captured_at: "2026-09-02T22:00:00Z".into(),
+                    score: 1282,
+                }],
+            }],
         };
         let json = serde_json::to_string(&detail).unwrap();
-        for key in ["\"scenario_ranks\"", "\"leaderboard_rank\"", "\"rank_tier\"", "\"snapshot_history\""] {
+        for key in [
+            "\"scenario_ranks\"",
+            "\"leaderboard_rank\"",
+            "\"rank_tier\"",
+            "\"snapshot_history\"",
+        ] {
             assert!(json.contains(key), "missing {key} in {json}");
         }
-        assert!(!json.contains("leaderboardRank"), "camelCase leaked: {json}");
+        assert!(
+            !json.contains("leaderboardRank"),
+            "camelCase leaked: {json}"
+        );
     }
 
     #[test]
@@ -691,7 +799,10 @@ mod tests {
 
     #[test]
     fn ladder_from_rows_sorts_and_dedups() {
-        assert_eq!(ladder_from_rows(&[1000.0, 500.0, 1000.0, 2000.0]), vec![500, 1000, 2000]);
+        assert_eq!(
+            ladder_from_rows(&[1000.0, 500.0, 1000.0, 2000.0]),
+            vec![500, 1000, 2000]
+        );
         assert!(ladder_from_rows(&[]).is_empty());
     }
 
@@ -702,9 +813,18 @@ mod tests {
             kovaaks_benchmark_id: 1,
             sharecode: String::new(),
             rank_colors: vec![
-                RankTier { name: "Bronze".into(), color: "#000".into() },
-                RankTier { name: "Silver".into(), color: "#111".into() },
-                RankTier { name: "Gold".into(), color: "#222".into() },
+                RankTier {
+                    name: "Bronze".into(),
+                    color: "#000".into(),
+                },
+                RankTier {
+                    name: "Silver".into(),
+                    color: "#111".into(),
+                },
+                RankTier {
+                    name: "Gold".into(),
+                    color: "#222".into(),
+                },
             ],
             categories: Vec::new(),
         };
@@ -728,7 +848,7 @@ mod tests {
 pub fn run() {
     let store = Store::open(&db_path()).expect("open sqlite store");
     csv_ingest::ensure_cutoff(&store).expect("seed first-run csv cutoff");
-    let registry: &'static Registry = Box::leak(Box::new(Registry::default()));
+    let registry: &'static Registry = Box::leak(Box::new(Registry));
     let scan_store = store.clone();
     tauri::Builder::default()
         .setup(move |_app| {
@@ -737,7 +857,11 @@ pub fn run() {
             tauri::async_runtime::spawn_blocking(move || run_csv_scan(&scan_store));
             Ok(())
         })
-        .manage(AppState { store, registry, evxl: EvxlClient::new().expect("evxl http client") })
+        .manage(AppState {
+            store,
+            registry,
+            evxl: EvxlClient::new().expect("evxl http client"),
+        })
         .invoke_handler(tauri::generate_handler![
             commands::resolve_profile,
             commands::get_profile,

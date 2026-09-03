@@ -17,7 +17,7 @@ use crate::error::Result;
 use crate::types::{BenchmarkProgress, PlayRecord, PlayerProfile};
 
 /// Schema version this build writes; `PRAGMA user_version` gates migrations.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// Result of [`Store::record_snapshot`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,10 +33,16 @@ pub enum SnapshotWrite {
 pub struct StoredScenario {
     pub scenario: String,
     pub category: String,
-    /// Rounded INTEGER score as persisted (input scores are f64).
+    /// Score in in-game display units, rounded to the nearest integer for
+    /// storage (input is f64; the UI shows decimals from the raw plays table).
     pub score: i64,
     pub leaderboard_rank: i64,
+    /// 1-based tier index into the difficulty's `rank_colors` (0 = unplayed).
     pub scenario_rank: i64,
+    /// 1-based tier index of the scenario's category in the same ladder
+    /// (0 when the payload omitted it) — ranks come from the API's own
+    /// per-benchmark rules, not threshold recomputation.
+    pub category_rank: i64,
     /// Scenario rank thresholds (JSON array column round-tripped via serde_json).
     pub rank_maxes: Vec<f64>,
 }
@@ -62,9 +68,9 @@ pub struct Store {
 }
 
 /// Internal (category, scenario, score, leaderboard_rank, scenario_rank,
-/// rank_maxes-json) tuple used for dedup comparison; sorted so HashMap
-/// iteration order never affects equality.
-type ScenarioRow = (String, String, i64, i64, i64, String);
+/// category_rank, rank_maxes-json) tuple used for dedup comparison; sorted so
+/// HashMap iteration order never affects equality.
+type ScenarioRow = (String, String, i64, i64, i64, i64, String);
 
 fn scenario_rows_from_progress(progress: &BenchmarkProgress) -> Result<Vec<ScenarioRow>> {
     let mut rows: Vec<ScenarioRow> = Vec::new();
@@ -76,6 +82,7 @@ fn scenario_rows_from_progress(progress: &BenchmarkProgress) -> Result<Vec<Scena
                 scen.score.round() as i64,
                 scen.leaderboard_rank.min(i64::MAX as u64) as i64,
                 scen.scenario_rank as i64,
+                cat.category_rank as i64,
                 serde_json::to_string(&scen.rank_maxes)?,
             ));
         }
@@ -86,22 +93,23 @@ fn scenario_rows_from_progress(progress: &BenchmarkProgress) -> Result<Vec<Scena
 
 fn scenario_rows_from_conn(conn: &Connection, snapshot_id: i64) -> Result<Vec<StoredScenario>> {
     let mut stmt = conn.prepare(
-        "SELECT scenario, category, score, leaderboard_rank, scenario_rank, rank_maxes
+        "SELECT scenario, category, score, leaderboard_rank, scenario_rank, category_rank, rank_maxes
          FROM scenario_scores WHERE snapshot_id = ?1
          ORDER BY category, scenario",
     )?;
     let rows = stmt
         .query_map(params![snapshot_id], |row| {
-            let maxes: String = row.get(5)?;
+            let maxes: String = row.get(6)?;
             Ok(StoredScenario {
                 scenario: row.get(0)?,
                 category: row.get(1)?,
                 score: row.get(2)?,
                 leaderboard_rank: row.get(3)?,
                 scenario_rank: row.get(4)?,
+                category_rank: row.get(5)?,
                 rank_maxes: serde_json::from_str(&maxes).map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        5,
+                        6,
                         rusqlite::types::Type::Text,
                         Box::new(e),
                     )
@@ -122,6 +130,7 @@ fn scenario_row_tuples(stored: &[StoredScenario]) -> Result<Vec<ScenarioRow>> {
                 s.score,
                 s.leaderboard_rank,
                 s.scenario_rank,
+                s.category_rank,
                 serde_json::to_string(&s.rank_maxes)?,
             ))
         })
@@ -151,8 +160,44 @@ impl Store {
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version < 1 {
             conn.execute_batch(SCHEMA_V1)?;
-            conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
+        if version < 2 {
+            // v2: centi→display unit rescale + API-rank columns. Snapshot data
+            // is a re-fetchable cache (dedup keeps only the newest state), so
+            // the correct migration is a rebuild; plays + meta are preserved.
+            conn.execute_batch(
+                "BEGIN;
+                 DROP TABLE scenario_scores;
+                 DROP TABLE snapshots;
+                 CREATE TABLE snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    steam_id TEXT NOT NULL,
+                    benchmark_id INTEGER NOT NULL,
+                    captured_at TEXT NOT NULL,
+                    benchmark_progress INTEGER NOT NULL,
+                    overall_rank INTEGER NOT NULL,
+                    UNIQUE (steam_id, benchmark_id, captured_at)
+                 );
+                 CREATE TABLE scenario_scores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+                    scenario TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    score INTEGER NOT NULL,
+                    leaderboard_rank INTEGER NOT NULL,
+                    scenario_rank INTEGER NOT NULL,
+                    category_rank INTEGER NOT NULL DEFAULT 0,
+                    rank_maxes TEXT NOT NULL,
+                    UNIQUE (snapshot_id, scenario, category)
+                 );
+                 CREATE INDEX idx_snapshots_player ON snapshots(steam_id, benchmark_id, captured_at);
+                 CREATE INDEX idx_scenario_scores_snapshot ON scenario_scores(snapshot_id);
+                 COMMIT;",
+            )?;
+            // Snapshots are gone; force the next sync to re-pull everything.
+            conn.execute("DELETE FROM benchmarks_playing", [])?;
+        }
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -220,12 +265,12 @@ impl Store {
             ],
         )?;
         let snapshot_id = conn.last_insert_rowid();
-        for (category, scenario, score, lrank, srank, maxes) in &new_rows {
+        for (category, scenario, score, lrank, srank, crank, maxes) in &new_rows {
             conn.execute(
                 "INSERT INTO scenario_scores
-                 (snapshot_id, scenario, category, score, leaderboard_rank, scenario_rank, rank_maxes)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![snapshot_id, scenario, category, score, lrank, srank, maxes],
+                 (snapshot_id, scenario, category, score, leaderboard_rank, scenario_rank, category_rank, rank_maxes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![snapshot_id, scenario, category, score, lrank, srank, crank, maxes],
             )?;
         }
         tx.commit()?;

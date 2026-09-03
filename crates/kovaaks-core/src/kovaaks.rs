@@ -90,7 +90,9 @@ impl KovaaksClient {
         // Decode via text + explicit parse so JSON shape failures surface as
         // Error::Json, not Error::Http.
         let body = response.text().await?;
-        serde_json::from_str(&body).map_err(Error::from)
+        let mut progress: BenchmarkProgress = serde_json::from_str(&body).map_err(Error::from)?;
+        progress.normalize_scale();
+        Ok(progress)
     }
 }
 

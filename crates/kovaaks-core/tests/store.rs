@@ -121,7 +121,10 @@ fn open_creates_schema_v1_and_reopen_preserves_data() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 1, "migration must set user_version to 1");
+    assert_eq!(
+        version, 2,
+        "migration must set user_version to current schema"
+    );
     for table in [
         "players",
         "benchmarks_playing",

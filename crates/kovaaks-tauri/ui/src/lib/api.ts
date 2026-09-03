@@ -61,8 +61,20 @@ export interface SnapshotPoint {
 }
 
 export interface PlayPoint {
+  scenario: string
   played_at: string
   score: number
+}
+
+export interface ScenarioHistoryPoint {
+  captured_at: string
+  score: number
+}
+
+export interface ScenarioHistorySeries {
+  scenario: string
+  category: string
+  points: ScenarioHistoryPoint[]
 }
 
 export interface BenchmarkDetail {
@@ -71,6 +83,7 @@ export interface BenchmarkDetail {
   plays: PlayPoint[]
   scenario_ranks: ScenarioRank[]
   categories: CategoryCard[]
+  scenario_history: ScenarioHistorySeries[]
 }
 
 export interface IngestStatus {

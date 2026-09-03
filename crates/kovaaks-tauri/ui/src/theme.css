@@ -397,6 +397,30 @@ input {
   text-transform: uppercase;
 }
 
+.chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.scope-select {
+  background: var(--bg, #0a0e14);
+  color: var(--text, #e5e7eb);
+  border: 1px solid var(--border, #1f2937);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  max-width: 320px;
+}
+
+.scope-select:focus {
+  outline: none;
+  border-color: var(--accent-2, #00e5ff);
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.35);
+}
+
 .chart-box {
   position: relative;
   height: 300px;
