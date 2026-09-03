@@ -10,7 +10,7 @@ name = "kovaaks_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "kovaaks-companion"
+name = "kairos"
 path = "src/main.rs"
 
 [build-dependencies]

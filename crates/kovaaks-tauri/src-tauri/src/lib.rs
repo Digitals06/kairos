@@ -305,7 +305,11 @@ impl AppState {
     }
 }
 
-/// SQLite DB path: `%LOCALAPPDATA%\kovaaks-companion\store.db` (dir created).
+/// SQLite DB path: `%LOCALAPPDATA%\kairos\store.db` (dir created).
+/// First launch after the rename carries the legacy
+/// `%LOCALAPPDATA%\kovaaks-companion\store.db` forward (history + favorites),
+/// so the rename never orphans player data. A failed move falls back to a
+/// fresh DB rather than refusing to start.
 fn db_path() -> PathBuf {
     let base = std::env::var("LOCALAPPDATA").map_or_else(
         |_| {
@@ -315,9 +319,16 @@ fn db_path() -> PathBuf {
         },
         PathBuf::from,
     );
-    let dir = base.join("kovaaks-companion");
+    let dir = base.join("kairos");
     let _ = std::fs::create_dir_all(&dir);
-    dir.join("store.db")
+    let db = dir.join("store.db");
+    if !db.exists() {
+        let legacy = base.join("kovaaks-companion").join("store.db");
+        if legacy.exists() {
+            let _ = std::fs::rename(&legacy, &db);
+        }
+    }
+    db
 }
 
 /// CSV ingest scan (forward-only from the stored first-run cutoff). Tolerates

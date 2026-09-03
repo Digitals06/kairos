@@ -6,8 +6,8 @@
 
 use std::time::Duration;
 
-/// Identifies the companion app to public endpoints.
-pub const USER_AGENT: &str = "kovaaks-companion/0.1";
+/// Identifies the app to public endpoints (name tracks the workspace version).
+pub const USER_AGENT: &str = concat!("kairos/", env!("CARGO_PKG_VERSION"));
 
 /// Hard ceiling for a single request; endpoints here are small JSON docs.
 const TIMEOUT_SECS: u64 = 15;
@@ -28,7 +28,7 @@ mod tests {
 
     #[test]
     fn user_agent_is_app_identifier() {
-        assert_eq!(USER_AGENT, "kovaaks-companion/0.1");
+        assert!(USER_AGENT.starts_with("kairos/"), "{USER_AGENT}");
     }
 
     #[test]

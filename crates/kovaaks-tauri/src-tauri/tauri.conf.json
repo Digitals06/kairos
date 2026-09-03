@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "kovaaks-companion",
+  "productName": "Kairos",
   "version": "0.1.0",
-  "identifier": "com.kovaaks.companion",
+  "identifier": "com.digitals06.kairos",
   "build": {
     "frontendDist": "../ui/dist",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Kairos — KovaaK's Companion",
+        "title": "Kairos",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
