@@ -41,22 +41,6 @@
     return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   }
 
-  // --- rank-up bar (same derivation as BenchmarkCardView) --------------------
-  const hasRankup = $derived(
-    detail !== null &&
-      detail.card.next_rank_name !== null &&
-      detail.card.next_rank_delta !== null &&
-      detail.card.next_rank_delta >= 0,
-  )
-
-  const rankupPct = $derived.by(() => {
-    if (!detail) return 0
-    const delta = detail.card.next_rank_delta
-    if (delta === null || delta < 0) return 0
-    const denom = detail.card.benchmark_progress + delta
-    return denom > 0 ? Math.min(100, (detail.card.benchmark_progress / denom) * 100) : 0
-  })
-
   // --- scenario table: score sort toggle -------------------------------------
   let scoreDesc = $state(true)
 
@@ -193,7 +177,7 @@
           },
           {
             label: 'sync snapshot',
-            data: snaps,
+            data: raw,
             borderColor: CYAN,
             backgroundColor: CYAN,
             borderWidth: 2,
@@ -339,17 +323,7 @@
         <h2>{detail.card.benchmark_name}</h2>
         <span class="detail-difficulty">{detail.card.difficulty_name}</span>
       </div>
-      <RankBadge tier={detail.card.rank} progress={detail.card.benchmark_progress} />
-      {#if hasRankup}
-        <div class="rankup">
-          <div class="bar" role="progressbar" aria-valuenow={rankupPct}>
-            <div class="fill" style={`width: ${rankupPct}%`}></div>
-          </div>
-          <span class="label num">
-            +{detail.card.next_rank_delta?.toLocaleString()} to {detail.card.next_rank_name}
-          </span>
-        </div>
-      {/if}
+      <RankBadge tier={detail.card.rank} />
     </header>
 
     {#if weakest}
