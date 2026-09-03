@@ -1,16 +1,16 @@
 # Kairos
 
-A desktop companion for [KovaaK's FPS Aim Trainer](https://store.steampowered.com/app/824270/KovaKs/): track every benchmark, watch ranks climb, and see per-scenario improvement over time — all in a neon-soaked native app. No login, no accounts, your data stays in a local SQLite file.
+A desktop companion for [KovaaK's FPS Aim Trainer](https://store.steampowered.com/app/824270/KovaKs/): track every benchmark, watch ranks climb, and see per-scenario improvement over time — all in a neon-soaked native app. No login, no accounts, your data stays in a local file on your PC.
 
 ![Kairos card list](docs/screenshots/card-list.png)
 
 ## Features
 
-- **Full benchmark coverage** — every benchmark tracked on [evxl.app](https://evxl.app) (Voltaic, Revosect, PureG, Aimerz+, …), with official rank names and colors resolved per benchmark rules.
-- **One-click sync** — shallow pass for your main benchmarks, Deep Scan for everything. Throttled requests get a cooled-down sequential retry pass that honors the server's `Retry-After`.
-- **Per-scenario detail** — score history chart (local plays + sync snapshots), 7-day average, running high, avg/high scores, and 30-day improvement % for the selected scenario. Snapshots that don't set a new high are ignored, so stale syncs never pollute charts or averages.
-- **Local CSV ingest** — reads KovaaK's own `Stats/` CSVs forward-only, so sessions played offline still count.
-- **Search + favorites** — filter the grid by name, pin benchmarks to the top.
+- **Full benchmark coverage** — every benchmark tracked on [evxl.app](https://evxl.app) (Voltaic, Revosect, PureG, Aimerz+, …), with official rank names and colors.
+- **One-click sync** — a quick pass for your main benchmarks, plus a Deep Scan for everything. If the server throttles, Kairos waits and retries politely on its own.
+- **Per-scenario detail** — score history chart (your local plays + sync snapshots), 7-day average, running high, avg/high scores, and 30-day improvement % for the selected scenario. Snapshots that don't set a new high are ignored, so stale syncs never pollute charts or averages.
+- **Local CSV ingest** — reads KovaaK's own `Stats` folder, so sessions you played offline still count.
+- **Search + favorites** — filter the grid by name, pin benchmarks to the top. Pins survive restarts.
 
 ![Kairos benchmark detail](docs/screenshots/benchmark-detail.png)
 
@@ -18,38 +18,82 @@ A desktop companion for [KovaaK's FPS Aim Trainer](https://store.steampowered.co
 
 | Source | Used for |
 |---|---|
-| KovaaK's public `webapp-backend` (no auth) | Scores, ranks, leaderboard positions |
-| evxl.app public resolver + embedded registry | Steam ID → profile, benchmark/difficulty/rank definitions |
-| `%USERPROFILE%\…\FPSAimTrainer\FPSAimTrainer\stats\*.csv` | Local play history |
+| KovaaK's public score server (no login needed) | Scores, ranks, leaderboard positions |
+| evxl.app public lookup + built-in registry | Finding your profile, benchmark and rank definitions |
+| Your KovaaK's `Stats` folder (`*.csv` files) | Local play history |
 
-All state lives in `%LOCALAPPDATA%\kairos\store.db`. Nothing is uploaded anywhere.
+Everything is stored in one file: `%LOCALAPPDATA%\kairos\store.db`. Nothing is uploaded anywhere.
 
-## Run it
+## Run it (no building needed)
 
-Windows: grab `kairos.exe` from `target/release/` (or build it below), launch, enter a Steam ID / vanity / profile URL, hit **Sync Now**.
+1. Download `kairos.exe` from the [latest release](https://github.com/Digitals06/kairos/releases).
+2. Double-click it, enter your Steam ID (or vanity name / profile link), hit **Sync Now**.
 
-## Build from source
+## Build from source (Windows, step by step)
 
-Prereqs: Rust stable via rustup (MSVC toolchain on Windows), Node 24 + npm.
+You only need this if you want to change the code. Takes ~10 minutes the first time.
 
-```bash
-# one-time: linters used below
-rustup component add clippy rustfmt
+**Step 0 — install the tools** (skip any you already have):
 
-# 1. Frontend first — plain cargo does NOT rebuild it
-cd crates/kovaaks-tauri/ui && npm install && npm run build
+1. **Git**: download from [git-scm.com](https://git-scm.com/download/win), run the installer, keep all defaults.
+2. **Rust**: download from [rustup.rs](https://rustup.rs/) and run `rustup-init.exe`. When it asks, choose **Desktop development with C++** if prompted about Visual Studio (Rust needs Microsoft's C++ build tools to link apps on Windows — the installer will point you to them).
+3. **Node.js 24**: download the LTS installer from [nodejs.org](https://nodejs.org/), run it, keep defaults. This gives you both `node` and `npm`.
 
-# 2. Backend (custom-protocol embeds the built frontend into the binary)
-cd ../src-tauri && cargo build --release --features custom-protocol
-# → ../../../target/release/kairos.exe
+Check they work (open a fresh terminal — search "PowerShell" in Start — and run):
+
+```powershell
+git --version
+rustc --version
+node --version
+npm --version
 ```
 
-Tests (from the repo root; offline by default, live API tests are `#[ignore]`d):
+Each should print a version number. If a command is "not recognized", close and reopen the terminal (installers update the `PATH` only for new windows).
 
-```bash
-cd ../.. && cargo test --workspace --offline
-cargo clippy --workspace --offline
+**Step 1 — download the code:**
+
+```powershell
+cd $HOME\Desktop
+git clone https://github.com/Digitals06/kairos.git
+cd kairos
 ```
+
+This creates a `kairos` folder on your Desktop with the full source.
+
+**Step 2 — build the frontend** (the visual part; plain Rust builds skip it, so this step is mandatory):
+
+```powershell
+cd crates\kovaaks-tauri\ui
+npm install
+npm run build
+```
+
+`npm install` downloads the UI libraries (once), `npm run build` compiles them into the `dist` folder.
+
+**Step 3 — build the app:**
+
+```powershell
+cd ..\src-tauri
+cargo build --release --features custom-protocol
+```
+
+The `--features custom-protocol` part is required: it bakes the built frontend from step 2 into the `.exe`. Without it the app opens to a connection error. The finished app lands at `..\..\..\target\release\kairos.exe` (i.e. `kairos\target\release\kairos.exe` from the repo root).
+
+**Step 4 — run it:**
+
+```powershell
+..\..\..\target\release\kairos.exe
+```
+
+**Running the tests** (from the repo root folder):
+
+```powershell
+cd ..\..\..   # back to the kairos folder
+cargo test --workspace --offline        # fast, no network
+cargo clippy --workspace --offline      # linter (first time only: rustup component add clippy)
+```
+
+Live API tests exist but are skipped by default (`#[ignore]`) so the suite never hammers the public servers.
 
 ## Layout
 
