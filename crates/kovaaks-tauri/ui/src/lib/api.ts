@@ -26,6 +26,7 @@ export interface BenchmarkCard {
   high_improvement_pct: number | null
   samples: number
   last_synced: string | null
+  is_favorite: boolean
   snapshot_history: SnapshotPoint[]
 }
 
@@ -143,4 +144,8 @@ export function getSettings(): Promise<AppSettings> {
 
 export function setSettings(settings: AppSettings): Promise<void> {
   return invoke('set_settings', { settings })
+}
+
+export function toggleFavorite(benchmarkId: number): Promise<boolean> {
+  return invoke('toggle_favorite', { benchmarkId })
 }

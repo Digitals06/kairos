@@ -8,6 +8,7 @@
     getSettings,
     setSettings,
     getBenchmarkDetail,
+    toggleFavorite,
     type BenchmarkCard,
     type PlayerProfile,
     type AppSettings,
@@ -23,6 +24,7 @@
 
   let profile = $state<PlayerProfile | null>(null)
   let cards = $state<BenchmarkCard[]>([])
+  let searchQuery = $state('')
   let loadingOverview = $state(false)
   let toast = $state<string | null>(null)
   let toastTimer: ReturnType<typeof setTimeout> | undefined
@@ -160,6 +162,29 @@
   // --- detail drill-down (client-side state, no router lib) -------------------
   let selectedBenchmarkId = $state<number | null>(null)
 
+  // --- search filter + favorites ----------------------------------------------
+  const filteredCards = $derived.by(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return cards
+    return cards.filter((c) => c.benchmark_name.toLowerCase().includes(q))
+  })
+
+  async function toggleFavoriteLocal(benchmarkId: number) {
+    try {
+      const nowFavorite = await toggleFavorite(benchmarkId)
+      const card = cards.find((c) => c.benchmark_id === benchmarkId)
+      if (card) card.is_favorite = nowFavorite
+      // Re-sort locally to match the backend ordering (favorites on top).
+      cards = [...cards].sort(
+        (a, b) =>
+          (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0) ||
+          a.benchmark_name.localeCompare(b.benchmark_name),
+      )
+    } catch (err) {
+      showError(humanError(err))
+    }
+  }
+
   function openDetail(id: number) {
     selectedBenchmarkId = id
   }
@@ -242,14 +267,32 @@
           <p class="muted">Hit <strong>Sync Now</strong> to pull your KovaaK's benchmark data.</p>
         </div>
       {:else}
-        <div class="grid">
-          {#each cards as card (card.benchmark_id)}
-            <BenchmarkCardView
-              {card}
-              onclick={() => openDetail(card.benchmark_id)}
-            />
-          {/each}
+        <div class="search-row">
+          <input
+            class="search-input"
+            type="text"
+            placeholder="Filter benchmarks…"
+            bind:value={searchQuery}
+          />
+          {#if searchQuery}
+            <button class="btn btn-small" onclick={() => (searchQuery = '')}>clear</button>
+          {/if}
         </div>
+        {#if filteredCards.length === 0}
+          <div class="empty panel">
+            <p>No benchmarks match “{searchQuery}”.</p>
+          </div>
+        {:else}
+          <div class="grid">
+            {#each filteredCards as card (card.benchmark_id)}
+              <BenchmarkCardView
+                {card}
+                onclick={() => openDetail(card.benchmark_id)}
+                ontogglefavorite={() => toggleFavoriteLocal(card.benchmark_id)}
+              />
+            {/each}
+          </div>
+        {/if}
       {/if}
     </main>
   </div>
@@ -399,6 +442,35 @@
     accent-color: var(--accent);
     width: 16px;
     height: 16px;
+  }
+
+  /* --- search ---------------------------------------------------------------- */
+  .search-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .search-input {
+    flex: 1;
+    max-width: 420px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 9px 14px;
+    font-size: 13px;
+  }
+
+  .search-input::placeholder {
+    color: var(--muted);
+  }
+
+  .search-input:focus {
+    outline: none;
+    border-color: var(--accent-2);
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.25);
   }
 
   /* --- grid ------------------------------------------------------------------ */

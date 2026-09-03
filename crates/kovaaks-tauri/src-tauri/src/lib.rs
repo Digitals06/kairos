@@ -57,6 +57,8 @@ pub struct BenchmarkCard {
     pub high_improvement_pct: Option<f64>,
     pub samples: usize,
     pub last_synced: Option<String>,
+    /// Whether this benchmark is pinned to the top of the player's list.
+    pub is_favorite: bool,
     /// Full snapshot history so the UI can draw sparklines without an N+1 of
     /// per-card detail calls (those starve the main thread on 70-card grids).
     pub snapshot_history: Vec<SnapshotPoint>,
@@ -446,6 +448,7 @@ pub mod commands {
         state: &AppState,
         steam_id: &str,
         benchmark_id: i64,
+        favorite_ids: &std::collections::HashSet<i64>,
     ) -> kovaaks_core::Result<Option<BenchmarkCard>> {
         let Some((bench, difficulty)) = state.registry.by_id(benchmark_id as u64) else {
             return Ok(None); // snapshot for a difficulty no longer in the registry
@@ -472,6 +475,7 @@ pub mod commands {
             high_improvement_pct: metrics.high_improvement_pct,
             samples: metrics.samples,
             last_synced: latest.map(|s| s.captured_at.to_rfc3339()),
+            is_favorite: favorite_ids.contains(&benchmark_id),
             snapshot_history: history
                 .iter()
                 .map(|s| SnapshotPoint {
@@ -494,6 +498,12 @@ pub mod commands {
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| "no profile connected".to_string())?
                 .steam_id;
+            let favorite_ids: std::collections::HashSet<i64> = state
+                .store
+                .favorites(&steam_id)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .collect();
             let mut cards = Vec::new();
             for benchmark_id in state
                 .store
@@ -501,12 +511,18 @@ pub mod commands {
                 .map_err(|e| e.to_string())?
             {
                 if let Some(card) =
-                    build_card(&state, &steam_id, benchmark_id).map_err(|e| e.to_string())?
+                    build_card(&state, &steam_id, benchmark_id, &favorite_ids)
+                        .map_err(|e| e.to_string())?
                 {
                     cards.push(card);
                 }
             }
-            cards.sort_by(|a, b| a.benchmark_name.cmp(&b.benchmark_name));
+            // Favorites pinned on top (pin order), then alphabetical.
+            cards.sort_by(|a, b| {
+                b.is_favorite
+                    .cmp(&a.is_favorite)
+                    .then_with(|| a.benchmark_name.cmp(&b.benchmark_name))
+            });
             Ok(cards)
         })
         .await
@@ -527,7 +543,7 @@ pub mod commands {
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| "no profile connected".to_string())?
                 .steam_id;
-            let card = build_card(&state, &steam_id, benchmark_id)
+            let card = build_card(&state, &steam_id, benchmark_id, &std::collections::HashSet::new())
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| format!("unknown benchmark id {benchmark_id}"))?;
             let (_, difficulty) = state
@@ -709,6 +725,33 @@ pub mod commands {
         Ok(state.load_settings())
     }
 
+    /// Toggle a benchmark's favorite pin. Returns the new state (true = pinned).
+    #[tauri::command]
+    pub fn toggle_favorite(
+        state: State<'_, AppState>,
+        benchmark_id: i64,
+    ) -> Result<bool, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        let favorites = state.store.favorites(&steam_id).map_err(|e| e.to_string())?;
+        if favorites.contains(&benchmark_id) {
+            state
+                .store
+                .remove_favorite(&steam_id, benchmark_id)
+                .map_err(|e| e.to_string())?;
+            Ok(false)
+        } else {
+            state
+                .store
+                .add_favorite(&steam_id, benchmark_id)
+                .map_err(|e| e.to_string())?;
+            Ok(true)
+        }
+    }
+
     /// Persist app settings (stats dir override, sync interval).
     #[tauri::command]
     pub fn set_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
@@ -753,6 +796,7 @@ mod tests {
             high_improvement_pct: None,
             samples: 1,
             last_synced: None,
+            is_favorite: false,
             snapshot_history: vec![],
         };
         let json = serde_json::to_string(&card).unwrap();
@@ -935,6 +979,7 @@ pub fn run() {
             commands::ingest_status,
             commands::get_settings,
             commands::set_settings,
+            commands::toggle_favorite,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

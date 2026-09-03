@@ -17,7 +17,7 @@ use crate::error::Result;
 use crate::types::{BenchmarkProgress, PlayRecord, PlayerProfile};
 
 /// Schema version this build writes; `PRAGMA user_version` gates migrations.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// Result of [`Store::record_snapshot`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,6 +237,18 @@ impl Store {
             )?;
             conn.execute("DELETE FROM benchmarks_playing", [])?;
         }
+        if version < 4 {
+            // v4: per-player favorite benchmarks (pinned to the top of the
+            // card list). User data, NOT a cache — preserved across upgrades.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS favorites (
+                    steam_id TEXT NOT NULL,
+                    benchmark_id INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (steam_id, benchmark_id)
+                 );",
+            )?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -398,6 +410,40 @@ impl Store {
             })
             .optional()?;
         Ok(v)
+    }
+
+    /// Pin a benchmark to the top of this player's card list.
+    pub fn add_favorite(&self, steam_id: &str, benchmark_id: i64) -> Result<bool> {
+        let conn = self.lock();
+        let n = conn.execute(
+            "INSERT INTO favorites (steam_id, benchmark_id, created_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(steam_id, benchmark_id) DO NOTHING",
+            params![steam_id, benchmark_id, Utc::now().to_rfc3339()],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Unpin a benchmark. Returns whether a row was removed.
+    pub fn remove_favorite(&self, steam_id: &str, benchmark_id: i64) -> Result<bool> {
+        let conn = self.lock();
+        let n = conn.execute(
+            "DELETE FROM favorites WHERE steam_id = ?1 AND benchmark_id = ?2",
+            params![steam_id, benchmark_id],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// The player's favorited benchmark ids, pinned order (oldest first).
+    pub fn favorites(&self, steam_id: &str) -> Result<Vec<i64>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare(
+            "SELECT benchmark_id FROM favorites WHERE steam_id = ?1 ORDER BY created_at, benchmark_id",
+        )?;
+        let ids = stmt
+            .query_map(params![steam_id], |r| r.get(0))?
+            .collect::<std::result::Result<Vec<i64>, _>>()?;
+        Ok(ids)
     }
 
     /// Insert or update a `benchmarks_playing` row (idempotent).
