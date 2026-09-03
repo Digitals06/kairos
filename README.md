@@ -2,6 +2,10 @@
 
 A desktop companion for [KovaaK's FPS Aim Trainer](https://store.steampowered.com/app/824270/KovaKs/): track every benchmark, watch ranks climb, and see per-scenario improvement over time — all in a neon-soaked native app. No login, no accounts, your data stays in a local file on your PC.
 
+If Kairos helps your grind, consider supporting development:
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q2S1237A82)
+
 ![Kairos card list](docs/screenshots/card-list.png)
 
 ## Features
