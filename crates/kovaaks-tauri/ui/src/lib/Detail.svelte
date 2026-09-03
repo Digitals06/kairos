@@ -45,10 +45,20 @@
   let scoreDesc = $state(true)
 
   // --- per-scenario history picker -------------------------------------------
-  // 'ALL' = benchmark aggregate (snapshot_history); otherwise a scenario name
-  // scopes the chart to that scenario's per-snapshot scores (issue #3).
-  const ALL = 'ALL'
-  let chartScope = $state(ALL)
+  // One scenario is ALWAYS selected (defaults to the first with data); the
+  // chart and the stat cards both reflect it. When the payload changes
+  // (different benchmark), reset to that benchmark's first scenario.
+  let chartScope = $state('')
+
+  $effect(() => {
+    // reset when the detail payload identity changes
+    const d = detail
+    if (d && !d.scenario_history.some((s) => s.scenario === chartScope)) {
+      chartScope = d.scenario_history.find((s) => s.points.length > 0)?.scenario
+        ?? d.scenario_history[0]?.scenario
+        ?? ''
+    }
+  })
 
   const historyOptions = $derived.by(() => {
     if (!detail) return []
@@ -58,10 +68,14 @@
   })
 
   function scopeTitle(): string {
-    return chartScope === ALL
-      ? 'Progress history'
-      : `Score history — ${chartScope}`
+    return chartScope ? `Score history — ${chartScope}` : 'Score history'
   }
+
+  // --- stat cards follow the selected scenario --------------------------------
+  const activeMetrics = $derived.by(() => {
+    if (!detail || !chartScope) return null
+    return detail.scenario_metrics?.[chartScope] ?? null
+  })
 
   const scenarios = $derived.by(() => {
     const rows = detail?.scenario_ranks ?? []
@@ -113,16 +127,10 @@
     const d = detail
     if (!d || !lineCanvas) return
 
-    // Scoped series: ALL = benchmark aggregate; otherwise one scenario.
+    // Series: the selected scenario only (chart is always scenario-scoped).
     let raw: { x: number; y: number }[]
     let playPts: { x: number; y: number }[]
-    if (chartScope === ALL) {
-      raw = d.snapshot_history.map((p) => ({
-        x: new Date(p.captured_at).getTime(),
-        y: p.benchmark_progress,
-      }))
-      playPts = d.plays.map((p) => ({ x: new Date(p.played_at).getTime(), y: p.score }))
-    } else {
+    if (chartScope) {
       const series = d.scenario_history.find((s) => s.scenario === chartScope)
       raw = (series?.points ?? []).map((p) => ({
         x: new Date(p.captured_at).getTime(),
@@ -132,6 +140,8 @@
       playPts = d.plays
         .filter((p) => p.scenario === chartScope)
         .map((p) => ({ x: new Date(p.played_at).getTime(), y: p.score }))
+    } else {
+      return
     }
     if (raw.length === 0) return
 
@@ -334,26 +344,49 @@
     {/if}
 
     <div class="stat-row">
-      <div class="stat-card">
-        <span class="stat-label">Avg Score</span>
-        <span class="stat-value num">{fmtScore(detail.card.avg_score)}</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">High Score</span>
-        <span class="stat-value num">{fmtScore(detail.card.high_score)}</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Avg Improvement % (30d)</span>
-        <span class="stat-value num" class:up={(detail.card.avg_improvement_pct ?? 0) > 0}>
-          {fmtPct(detail.card.avg_improvement_pct)}
-        </span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">High Improvement % (30d)</span>
-        <span class="stat-value num" class:up={(detail.card.high_improvement_pct ?? 0) > 0}>
-          {fmtPct(detail.card.high_improvement_pct)}
-        </span>
-      </div>
+      {#if activeMetrics}
+        <div class="stat-card">
+          <span class="stat-label">Avg Score</span>
+          <span class="stat-value num">{fmtScore(activeMetrics.avg_score)}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">High Score</span>
+          <span class="stat-value num">{fmtScore(activeMetrics.high_score)}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Avg Improvement % (30d)</span>
+          <span class="stat-value num" class:up={(activeMetrics.avg_improvement_pct ?? 0) > 0}>
+            {fmtPct(activeMetrics.avg_improvement_pct)}
+          </span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">High Improvement % (30d)</span>
+          <span class="stat-value num" class:up={(activeMetrics.high_improvement_pct ?? 0) > 0}>
+            {fmtPct(activeMetrics.high_improvement_pct)}
+          </span>
+        </div>
+      {:else}
+        <div class="stat-card">
+          <span class="stat-label">Avg Score</span>
+          <span class="stat-value num">{fmtScore(detail.card.avg_score)}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">High Score</span>
+          <span class="stat-value num">{fmtScore(detail.card.high_score)}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Avg Improvement % (30d)</span>
+          <span class="stat-value num" class:up={(detail.card.avg_improvement_pct ?? 0) > 0}>
+            {fmtPct(detail.card.avg_improvement_pct)}
+          </span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">High Improvement % (30d)</span>
+          <span class="stat-value num" class:up={(detail.card.high_improvement_pct ?? 0) > 0}>
+            {fmtPct(detail.card.high_improvement_pct)}
+          </span>
+        </div>
+      {/if}
     </div>
 
     {#if detail.snapshot_history.length === 0}
@@ -368,9 +401,8 @@
             <select
               class="scope-select"
               bind:value={chartScope}
-              aria-label="Chart scope: all scenarios or a single scenario"
+              aria-label="Select scenario"
             >
-              <option value={ALL}>All scenarios (aggregate)</option>
               {#each historyOptions as opt (opt.scenario)}
                 <option value={opt.scenario}>{opt.scenario} ({opt.n})</option>
               {/each}

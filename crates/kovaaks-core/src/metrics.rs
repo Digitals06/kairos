@@ -25,7 +25,8 @@ use crate::store::Store;
 pub const TRAILING_WINDOW_DAYS: i64 = 30;
 
 /// Aggregated metrics for one score series.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct Metrics {
     /// Mean of every score in the (windowed) series.
     pub avg_score: f64,

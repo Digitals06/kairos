@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use kovaaks_core::{
-    csv_ingest, metrics_for_benchmark,
+    csv_ingest, metrics_for_benchmark, metrics_for_scenario_plays,
     store::StoredSnapshot,
     types::{Difficulty, RankTier},
     EvxlClient, KovaaksClient, Registry, Store, SyncEngine, SyncReport,
@@ -135,6 +135,10 @@ pub struct BenchmarkDetail {
     /// The difficulty's rank ladder (name + color, worst → best) for the
     /// evxl-style per-tier threshold matrix.
     pub rank_tiers: Vec<RankTier>,
+    /// Per-scenario improvement metrics (avg/high/improvement from CSV plays),
+    /// keyed by scenario name — powers the stat cards when a scenario is
+    /// selected in the chart picker.
+    pub scenario_metrics: std::collections::BTreeMap<String, kovaaks_core::Metrics>,
 }
 
 /// Counters from the last CSV ingest scan + last sync time.
@@ -655,6 +659,19 @@ pub mod commands {
                 categories,
                 scenario_history,
                 rank_tiers: difficulty.rank_colors.clone(),
+                scenario_metrics: {
+                    let mut map = std::collections::BTreeMap::new();
+                    let latest_rows =
+                        latest.map(|snap| snap.scenarios.clone()).unwrap_or_default();
+                    for s in &latest_rows {
+                        map.insert(
+                            s.scenario.clone(),
+                            metrics_for_scenario_plays(&state.store, &steam_id, &s.scenario)
+                                .unwrap_or_default(),
+                        );
+                    }
+                    map
+                },
             })
         })
         .await
@@ -789,6 +806,16 @@ mod tests {
                 RankTier { name: "Silver".into(), color: "#CBD9E6".into() },
                 RankTier { name: "Gold".into(), color: "#CAB148".into() },
             ],
+            scenario_metrics: std::collections::BTreeMap::from([(
+                "VT Pasu Novice S5".to_string(),
+                kovaaks_core::Metrics {
+                    avg_score: 1280.0,
+                    high_score: 1282.0,
+                    avg_improvement_pct: Some(5.0),
+                    high_improvement_pct: Some(2.0),
+                    samples: 2,
+                },
+            )]),
         };
         let json = serde_json::to_string(&detail).unwrap();
         for key in [

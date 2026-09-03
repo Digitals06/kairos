@@ -90,6 +90,14 @@ export interface BenchmarkDetail {
   scenario_history: ScenarioHistorySeries[]
   /** Rank ladder for the difficulty (name + color, worst → best). */
   rank_tiers: RankTier[]
+  /** Per-scenario metrics from CSV plays, keyed by scenario name. */
+  scenario_metrics: Record<string, {
+    avg_score: number
+    high_score: number
+    avg_improvement_pct: number | null
+    high_improvement_pct: number | null
+    samples: number
+  }>
 }
 
 export interface IngestStatus {
