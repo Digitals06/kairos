@@ -510,9 +510,8 @@ pub mod commands {
                 .played_benchmarks(&steam_id)
                 .map_err(|e| e.to_string())?
             {
-                if let Some(card) =
-                    build_card(&state, &steam_id, benchmark_id, &favorite_ids)
-                        .map_err(|e| e.to_string())?
+                if let Some(card) = build_card(&state, &steam_id, benchmark_id, &favorite_ids)
+                    .map_err(|e| e.to_string())?
                 {
                     cards.push(card);
                 }
@@ -543,9 +542,14 @@ pub mod commands {
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| "no profile connected".to_string())?
                 .steam_id;
-            let card = build_card(&state, &steam_id, benchmark_id, &std::collections::HashSet::new())
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| format!("unknown benchmark id {benchmark_id}"))?;
+            let card = build_card(
+                &state,
+                &steam_id,
+                benchmark_id,
+                &std::collections::HashSet::new(),
+            )
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("unknown benchmark id {benchmark_id}"))?;
             let (_, difficulty) = state
                 .registry
                 .by_id(benchmark_id as u64)
@@ -727,16 +731,16 @@ pub mod commands {
 
     /// Toggle a benchmark's favorite pin. Returns the new state (true = pinned).
     #[tauri::command]
-    pub fn toggle_favorite(
-        state: State<'_, AppState>,
-        benchmark_id: i64,
-    ) -> Result<bool, String> {
+    pub fn toggle_favorite(state: State<'_, AppState>, benchmark_id: i64) -> Result<bool, String> {
         let steam_id = state
             .profile()
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "no profile connected".to_string())?
             .steam_id;
-        let favorites = state.store.favorites(&steam_id).map_err(|e| e.to_string())?;
+        let favorites = state
+            .store
+            .favorites(&steam_id)
+            .map_err(|e| e.to_string())?;
         if favorites.contains(&benchmark_id) {
             state
                 .store
