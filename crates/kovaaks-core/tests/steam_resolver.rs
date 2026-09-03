@@ -105,7 +105,7 @@ async fn server_error_response_maps_to_rate_limited() {
         .await
         .expect_err("500 must map to an Error");
     assert!(
-        matches!(err, Error::RateLimited { status: 500 }),
+        matches!(err, Error::RateLimited { status: 500, .. }),
         "got {err:?}"
     );
     server.await.expect("mock server task");

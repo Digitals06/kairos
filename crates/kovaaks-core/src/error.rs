@@ -27,9 +27,14 @@ pub enum Error {
     InvalidSteamId(String),
 
     /// The request was rate limited (429) or the server errored (5xx) after
-    /// retries were exhausted.
+    /// retries were exhausted. `retry_after_secs` carries the server's
+    /// `Retry-After` hint when one was present, so callers can cool down
+    /// instead of hammering.
     #[error("rate limited or server unavailable: {status}")]
-    RateLimited { status: u16 },
+    RateLimited {
+        status: u16,
+        retry_after_secs: Option<u64>,
+    },
 
     /// Benchmark or difficulty not present in the embedded registry.
     #[error("benchmark not found in registry: {0}")]

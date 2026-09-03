@@ -19,6 +19,13 @@ const BASE_URL: &str = "https://kovaaks.com/webapp-backend";
 /// probes with 4-way concurrency, so pacing must live in the client).
 const MIN_REQUEST_INTERVAL: Duration = Duration::from_millis(250);
 
+/// Parse a `Retry-After` header value (delta-seconds only). HTTP dates and
+/// garbage map to `None` — the sync engine's default cooldown covers those.
+/// Oversized values are capped so one hostile header can't stall a sweep.
+fn parse_retry_after(value: &str) -> Option<u64> {
+    Some(value.trim().parse::<u64>().ok()?.min(600))
+}
+
 /// HTTP client for kovaaks.com webapp-backend endpoints. Clones share the
 /// same pacing state and connection pool.
 #[derive(Debug, Clone)]
@@ -81,9 +88,16 @@ impl KovaaksClient {
         let status = response.status();
         if status.as_u16() == 429 || status.is_server_error() {
             // Surface as RateLimited so the sync engine's retry policy
-            // (up to 2 retries on 429/5xx) can engage.
+            // (fast retries + a cooled-down leftover pass) can engage, and
+            // forward the server's Retry-After hint when one is present.
+            let retry_after_secs = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(parse_retry_after);
             return Err(Error::RateLimited {
                 status: status.as_u16(),
+                retry_after_secs,
             });
         }
         let response = response.error_for_status()?;
@@ -119,5 +133,16 @@ mod tests {
         let err = KovaaksClient::validate_steam_id("7656119817333526a")
             .expect_err("17 chars but not all digits");
         assert!(matches!(err, Error::InvalidSteamId(_)));
+    }
+
+    #[test]
+    fn retry_after_parses_delta_seconds_and_rejects_the_rest() {
+        assert_eq!(parse_retry_after("120"), Some(120));
+        assert_eq!(parse_retry_after("  7 "), Some(7));
+        assert_eq!(parse_retry_after("0"), Some(0));
+        assert_eq!(parse_retry_after("3600"), Some(600), "oversized hints cap");
+        assert_eq!(parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT"), None);
+        assert_eq!(parse_retry_after("soon"), None);
+        assert_eq!(parse_retry_after(""), None);
     }
 }

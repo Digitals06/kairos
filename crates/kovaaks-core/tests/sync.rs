@@ -124,6 +124,8 @@ enum FakeReply {
     RateLimited(u16),
     /// Succeeds only after `failures` retryable failures (attempt <= failures).
     FlakyThenOk { failures: usize },
+    /// Like `FlakyThenOk`, but failures carry a `Retry-After` hint.
+    FlakyHintThenOk { failures: usize, hint_secs: u64 },
     /// Sleeps `ms` then returns zero progress (concurrency testing).
     Slow(u64),
 }
@@ -170,10 +172,29 @@ impl ProgressSource for FakeSource {
         async move {
             match reply {
                 FakeReply::Progress(p) => Ok(p),
-                FakeReply::RateLimited(status) => Err(Error::RateLimited { status }),
+                FakeReply::RateLimited(status) => Err(Error::RateLimited {
+                    status,
+                    retry_after_secs: None,
+                }),
                 FakeReply::FlakyThenOk { failures } => {
                     if attempt <= failures {
-                        Err(Error::RateLimited { status: 429 })
+                        Err(Error::RateLimited {
+                            status: 429,
+                            retry_after_secs: None,
+                        })
+                    } else {
+                        Ok(prog(0.0, 0.0))
+                    }
+                }
+                FakeReply::FlakyHintThenOk {
+                    failures,
+                    hint_secs,
+                } => {
+                    if attempt <= failures {
+                        Err(Error::RateLimited {
+                            status: 429,
+                            retry_after_secs: Some(hint_secs),
+                        })
                     } else {
                         Ok(prog(0.0, 0.0))
                     }
@@ -286,16 +307,22 @@ async fn retries_twice_on_429_then_succeeds() {
 }
 
 #[tokio::test]
-async fn gives_up_after_two_retries_and_reports_the_error() {
+async fn gives_up_after_main_plus_leftover_retries_and_reports() {
     let path = temp_db("retry-fail");
     let store = Store::open(&path).unwrap();
     let src = FakeSource::new(replies_for_majors(HashMap::from([(
         459,
         FakeReply::RateLimited(429),
     )])));
-    let engine = SyncEngine::new(store.clone(), src.clone(), &Registry);
+    // Zero cooldown keeps the suite fast; 1 leftover retry.
+    let engine = SyncEngine::new(store.clone(), src.clone(), &Registry)
+        .with_leftover_policy(Duration::ZERO, 1);
     let report = engine.discover(SID, false).await.expect("discovery");
-    assert_eq!(src.attempts_for(459), 3, "retries stop at 2");
+    assert_eq!(
+        src.attempts_for(459),
+        5,
+        "main pass (1+2) + leftover pass (1+1)"
+    );
     assert_eq!(report.ok, major_ids().len() - 1);
     assert_eq!(report.failed, 1);
     assert!(
@@ -305,6 +332,55 @@ async fn gives_up_after_two_retries_and_reports_the_error() {
     );
     // A failed probe leaves no benchmarks_playing row behind.
     assert!(!store.played_benchmarks(SID).unwrap().contains(&459));
+    cleanup_db(&path);
+}
+
+// ---------- leftover pass ----------
+
+#[tokio::test]
+async fn leftover_pass_recovers_benchmarks_throttled_in_the_main_pass() {
+    let path = temp_db("leftover-ok");
+    let store = Store::open(&path).unwrap();
+    // Fails exactly the main budget (1+2): without a leftover pass this id
+    // would report failed.
+    let src = FakeSource::new(replies_for_majors(HashMap::from([(
+        459,
+        FakeReply::FlakyThenOk { failures: 3 },
+    )])));
+    let engine = SyncEngine::new(store.clone(), src.clone(), &Registry)
+        .with_leftover_policy(Duration::ZERO, 3);
+    let report = engine.discover(SID, false).await.expect("discovery");
+    assert_eq!(report.failed, 0, "errors: {:?}", report.errors);
+    assert_eq!(report.ok, major_ids().len());
+    assert_eq!(
+        src.attempts_for(459),
+        4,
+        "main budget exhausted, first leftover reprobe recovers"
+    );
+    cleanup_db(&path);
+}
+
+#[tokio::test]
+async fn leftover_pass_cools_down_for_the_retry_after_hint() {
+    let path = temp_db("leftover-hint");
+    let store = Store::open(&path).unwrap();
+    let src = FakeSource::new(replies_for_majors(HashMap::from([(
+        459,
+        FakeReply::FlakyHintThenOk {
+            failures: 3,
+            hint_secs: 1,
+        },
+    )])));
+    let engine = SyncEngine::new(store.clone(), src.clone(), &Registry)
+        .with_leftover_policy(Duration::ZERO, 3);
+    let started = std::time::Instant::now();
+    let report = engine.discover(SID, false).await.expect("discovery");
+    assert_eq!(report.failed, 0, "errors: {:?}", report.errors);
+    assert_eq!(src.attempts_for(459), 4);
+    assert!(
+        started.elapsed() >= Duration::from_secs(1),
+        "server hint must drive the cooldown even with a zero default"
+    );
     cleanup_db(&path);
 }
 

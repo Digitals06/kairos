@@ -48,7 +48,10 @@ impl EvxlClient {
         if !status.is_success() {
             return match status.as_u16() {
                 404 => Err(Error::SteamNotFound(identifier.to_string())),
-                s => Err(Error::RateLimited { status: s }),
+                s => Err(Error::RateLimited {
+                    status: s,
+                    retry_after_secs: None,
+                }),
             };
         }
         // Decode via text + explicit parse so shape failures surface as
