@@ -14,7 +14,7 @@ fn live_rankcheck_voltaic_s3_and_s5() {
     let mut report = String::new();
 
     for benchmark_id in [
-        266i64, 460, 2070, 687, 2336, 458, 459, 2834, 2835, 2335, 688, 686,
+        266i64, 460, 2070, 687, 2336, 458, 459, 2834, 2835, 2335, 688, 686, 2843,
     ] {
         let Some((bench, difficulty)) = registry.by_id(benchmark_id as u64) else {
             continue;

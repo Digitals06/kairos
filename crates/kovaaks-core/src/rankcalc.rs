@@ -503,6 +503,104 @@ pub fn calc_generic_energy(
     )
 }
 
+/// Cross-difficulty ladder slice for `Avasive-S2` (evxl `ye`): like
+/// [`difficulty_thresholds`], but when one difficulty's LAST tier has the same
+/// name as the next difficulty's FIRST tier, that boundary tier counts once —
+/// the slice shifts down 100 per shared boundary. Avasive S2 Medium ends on
+/// `Charm` and Medium starts on `Charm`, so Medium's slice is [500..900], not
+/// [600..1000].
+fn ye_thresholds(benchmark: &BenchmarkDef, difficulty: &Difficulty) -> Vec<f64> {
+    let idx = benchmark
+        .difficulties
+        .iter()
+        .position(|d| d.name == difficulty.name)
+        .unwrap_or(0);
+    let before: usize = benchmark.difficulties[..idx]
+        .iter()
+        .map(|d| d.rank_colors.len())
+        .sum();
+    // evxl: for difficulties (idx-1..=idx) pair-wise, +1 when the previous
+    // difficulty's last tier name equals this difficulty's first tier name.
+    let mut shared = 0usize;
+    for w in 1..=idx {
+        let prev_last = benchmark.difficulties[w - 1].rank_colors.last();
+        let cur_first = benchmark.difficulties[w].rank_colors.first();
+        if let (Some(p), Some(c)) = (prev_last, cur_first) {
+            if p.name.trim().eq_ignore_ascii_case(c.name.trim()) {
+                shared += 1;
+            }
+        }
+    }
+    let count = difficulty.rank_colors.len();
+    (0..count)
+        .map(|l| (before - shared + 1 + l) as f64 * 100.0)
+        .collect()
+}
+
+/// `Avasive-S2` (evxl `Nn` → `se` with an energy cap): per-difficulty
+/// thresholds (`ye`), per-scenario energy clamped to a difficulty cap
+/// (easier 600 / medium 1000 / hard 1400), subcategory energy = average of
+/// the top TWO scenario energies (a single-scenario subcategory contributes
+/// HALF its energy), harmonic mean across subcategories.
+pub fn calc_avasive_s2(
+    progress: &BenchmarkProgress,
+    benchmark: &BenchmarkDef,
+    difficulty: &Difficulty,
+) -> (u32, f64) {
+    let thresholds = ye_thresholds(benchmark, difficulty);
+    let cap = match difficulty.name.trim().to_lowercase().as_str() {
+        "easier" => 600.0,
+        "medium" => 1000.0,
+        "hard" => 1400.0,
+        _ => f64::INFINITY,
+    };
+    let order = scenario_order(progress, difficulty);
+    let subs = subcategory_spans(difficulty);
+    let mut sub_energies: Vec<f64> = Vec::new();
+    let mut idx = 0usize;
+    for (_, count, _name) in &subs {
+        let mut energies: Vec<f64> = Vec::new();
+        for _ in 0..*count {
+            if idx < order.len() {
+                let (_, entry) = order[idx];
+                let score = entry.score;
+                if score > 0.0 && !entry.rank_maxes.is_empty() {
+                    let pr = rank_of(score, &entry.rank_maxes);
+                    // Uncapped energy interpolation over the threshold table
+                    // (evxl W with fakeUpper = +Infinity), then the cap.
+                    let mut e = energy_of(&pr, &thresholds, 100, f64::INFINITY);
+                    if e.is_finite() {
+                        e = e.min(cap);
+                    } else {
+                        e = cap;
+                    }
+                    energies.push(e);
+                } else {
+                    energies.push(0.0);
+                }
+            }
+            idx += 1;
+        }
+        energies.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+        let sub = if energies.len() == 1 {
+            energies[0] / 2.0
+        } else if energies.len() >= 2 {
+            (energies[0] + energies[1]) / 2.0
+        } else {
+            0.0
+        };
+        sub_energies.push(sub);
+    }
+    let overall = harmonic_strict(&sub_energies);
+    let mut rank = 0u32;
+    for (i, t) in thresholds.iter().enumerate() {
+        if overall >= *t {
+            rank = (i + 1) as u32;
+        }
+    }
+    (rank, overall)
+}
+
 /// `jade-palace`: subcategory energy = avg best half (Fundamentals: top 3,
 /// Easy: capped 600 until overall reaches 600), harmonic soft.
 pub fn calc_jade_palace(
@@ -701,6 +799,10 @@ pub fn compute_rank(
             let (r, _) = calc_generic_energy(progress, benchmark, difficulty);
             (r, false)
         }
+        "Avasive-S2" => {
+            let (r, _) = calc_avasive_s2(progress, benchmark, difficulty);
+            (r, false)
+        }
         "generic-energy-uncapped" => {
             // Same ladder slice but no fakeUpper cap.
             let thresholds = difficulty_thresholds(benchmark, difficulty);
@@ -840,6 +942,42 @@ impl RankResult {
 
 #[cfg(test)]
 mod tests {
+
+#[test]
+fn ye_thresholds_shift_down_on_shared_boundary_tier() {
+    // Construct a 2-difficulty benchmark where Easier ends on 'Charm' and
+    // Medium starts on 'Charm' (Avasive S2's exact ladder shape).
+    let mk = |name: &str, first: &str, last: &str, n: usize| Difficulty {
+        name: name.to_string(),
+        kovaaks_benchmark_id: 0,
+        sharecode: String::new(),
+        rank_colors: std::iter::repeat(())
+            .take(n)
+            .enumerate()
+            .map(|(i, _)| crate::types::RankTier {
+                name: if i == 0 { first.to_string() } else if i == n - 1 { last.to_string() } else { format!("{name}T{i}") },
+                color: "#000000".to_string(),
+            })
+            .collect(),
+        categories: Vec::new(),
+    };
+    let bench = BenchmarkDef {
+        name: "T".into(),
+        abbreviation: "T".into(),
+        color: "#000".into(),
+        rank_calculation: "Avasive-S2".into(),
+        spreadsheet_url: String::new(),
+        difficulties: vec![mk("Easier", "Flutter", "Charm", 5), mk("Medium", "Charm", "Tranquility", 5)],
+        hidden: false,
+    };
+    let easier = &bench.difficulties[0];
+    let medium = &bench.difficulties[1];
+    // Easier: 0 tiers before, no shared boundary -> [100, 200, 300, 400, 500].
+    assert_eq!(ye_thresholds(&bench, easier), vec![100.0, 200.0, 300.0, 400.0, 500.0]);
+    // Medium: 5 tiers before, 1 shared 'Charm' boundary -> [500..900], NOT [600..1000].
+    assert_eq!(ye_thresholds(&bench, medium), vec![500.0, 600.0, 700.0, 800.0, 900.0]);
+}
+
     use super::*;
     use crate::types::{CategoryProgress, RankTier, ScenarioEntry};
 
