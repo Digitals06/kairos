@@ -139,25 +139,24 @@
     if (raw.length === 0 && playPts.length === 0) return
 
     const seriesSource = d.scenario_history.find((s) => s.scenario === chartScope)?.source
-    const sourceLabel = seriesSource === 'local' ? 'local highs' : 'sync snapshot'
-    // Magenta dots only when they ADD info (snapshot-backed series); when the
-    // series itself is local, the dots would just duplicate the line.
-    const showPlayDots = seriesSource !== 'local'
 
     // Combined view: local plays + snapshot points, deduped. A snapshot whose
     // score equals a play's score (to 2dp) is the same run echoed by the sync
     // — no matter how much later the sync ran — so the snapshot point is
     // dropped. Running high + 7-day avg draw from this so trends stay
     // consistent over time no matter which source observed a run.
-    // Snapshot echoes (same score as an earlier play) are removed from the
-    // cyan dataset: the dot would imply a run happened at sync time. For a
-    // local-backed series the cyan line IS the data, so no dedupe there.
+    // Snapshot echoes (same score as an earlier play) are dropped: the dot
+    // would imply a run happened at sync time. The cyan "runs" line is the
+    // SAME merged series for every scenario — snapshot-backed or local — so
+    // all charts behave uniformly. Magenta dots mark which runs came from
+    // local plays; they only show when snapshot points exist too (otherwise
+    // they would just sit on the cyan line).
     const snapPts =
       seriesSource === 'local'
         ? raw
         : raw.filter((s) => !playPts.some((p) => Math.abs(p.y - s.y) < 0.01))
-    const merged = [...playPts, ...snapPts].sort((a, b) => a.x - b.x)
-    const trend = merged
+    const trend = [...playPts, ...snapPts].sort((a, b) => a.x - b.x)
+    const showPlayDots = snapPts.length > 0 && playPts.length > 0
 
     let high = -Infinity
     const highPts = trend.map((p) => ({ x: p.x, y: (high = Math.max(high, p.y)) }))
@@ -200,8 +199,8 @@
             stepped: 'before',
           },
           {
-            label: sourceLabel,
-            data: snapPts,
+            label: seriesSource === 'local' ? 'local highs' : 'sync snapshot',
+            data: trend,
             borderColor: CYAN,
             backgroundColor: CYAN,
             borderWidth: 2,
