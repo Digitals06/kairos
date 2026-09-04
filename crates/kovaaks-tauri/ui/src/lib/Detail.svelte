@@ -121,41 +121,30 @@
     if (!d || !lineCanvas) return
 
     // Series: the selected scenario only (chart is always scenario-scoped).
-    let raw: { x: number; y: number }[]
-    let playPts: { x: number; y: number }[]
-    if (chartScope) {
-      const series = d.scenario_history.find((s) => s.scenario === chartScope)
-      raw = (series?.points ?? []).map((p) => ({
-        x: new Date(p.captured_at).getTime(),
-        y: p.score,
-      }))
-      // Local plays for exactly this scenario.
-      playPts = d.plays
-        .filter((p) => p.scenario === chartScope)
-        .map((p) => ({ x: new Date(p.played_at).getTime(), y: p.score }))
-    } else {
-      return
-    }
+    if (!chartScope) return
+    const series = d.scenario_history.find((s) => s.scenario === chartScope)
+    const raw = (series?.points ?? []).map((p) => ({
+      x: new Date(p.captured_at).getTime(),
+      y: p.score,
+    }))
+    // Local plays for exactly this scenario.
+    const playPts = d.plays
+      .filter((p) => p.scenario === chartScope)
+      .map((p) => ({ x: new Date(p.played_at).getTime(), y: p.score }))
     if (raw.length === 0 && playPts.length === 0) return
 
-    const seriesSource = d.scenario_history.find((s) => s.scenario === chartScope)?.source
-
-    // Combined view: local plays + snapshot points, deduped. A snapshot whose
-    // score equals a play's score (to 2dp) is the same run echoed by the sync
-    // — no matter how much later the sync ran — so the snapshot point is
-    // dropped. Running high + 7-day avg draw from this so trends stay
-    // consistent over time no matter which source observed a run.
-    // Snapshot echoes (same score as an earlier play) are dropped: the dot
-    // would imply a run happened at sync time. The cyan "runs" line is the
-    // SAME merged series for every scenario — snapshot-backed or local — so
-    // all charts behave uniformly. Magenta dots mark which runs came from
-    // local plays; they only show when snapshot points exist too (otherwise
-    // they would just sit on the cyan line).
+    const seriesSource = series?.source
+    // The cyan "runs" line is the same merged series for every scenario —
+    // snapshot-backed or local — so all charts behave uniformly. Snapshot
+    // echoes of a play (same score) were already dropped backend-side.
+    // Running high + 7-day avg derive from the merged runs.
     const snapPts =
       seriesSource === 'local'
         ? raw
         : raw.filter((s) => !playPts.some((p) => Math.abs(p.y - s.y) < 0.01))
     const trend = [...playPts, ...snapPts].sort((a, b) => a.x - b.x)
+    // Magenta dots mark play-sourced runs; hidden when the cyan line already
+    // is those plays (local-backed series) or there are no plays at all.
     const showPlayDots = snapPts.length > 0 && playPts.length > 0
 
     let high = -Infinity
@@ -164,6 +153,8 @@
       const win = trend.filter((q) => q.x > p.x - DAY_MS && q.x <= p.x)
       return { x: p.x, y: win.reduce((s, q) => s + q.y, 0) / win.length }
     })
+    // Loop-invariant: sorted trend ⇒ first/last points bound the span.
+    const span = trend.length > 1 ? trend[trend.length - 1].x - trend[0].x : 0
 
     lineChart = new Chart(lineCanvas, {
       type: 'line',
@@ -224,13 +215,8 @@
               // Sub-day spans need clock labels — repeating "Sep 3" eight
               // times makes a 5-minute chart look like a full day.
               callback: (v) => {
-                const xs = [
-                  ...trend.map((p) => p.x),
-                ]
-                const span = Math.max(...xs) - Math.min(...xs)
-                const d = new Date(Number(v))
                 if (span < 20 * 3600 * 1000) {
-                  return d.toLocaleTimeString([], {
+                  return new Date(Number(v)).toLocaleTimeString([], {
                     hour: '2-digit',
                     minute: '2-digit',
                   })

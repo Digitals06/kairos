@@ -168,14 +168,22 @@ pub fn improving_only(series: &[(DateTime<Utc>, f64)]) -> Vec<(DateTime<Utc>, f6
     kept
 }
 
+/// Two scores within this epsilon are the same run. KovaaK's scenario scores
+/// are precise floats, so a sync snapshot matching a local play's score is the
+/// SAME run observed twice — no matter how much later the sync ran.
+///
+/// Note: in `build_scenario_history` the comparison runs against *i64-
+/// truncated* values (StoredScenario.score / play scores as i64), so on that
+/// path this behaves as exact integer equality.
+pub const SAME_RUN_EPSILON: f64 = 0.01;
+
 /// Merge local plays with (already new-high-filtered) snapshot points into one
 /// chronological series, dropping snapshot points that duplicate a local play.
 ///
-/// A snapshot whose score equals a local play's score (to 2dp) is the SAME
-/// scenario run observed twice — KovaaK's scenario scores are precise floats,
-/// so an exact match is the same run no matter how much later the sync ran.
-/// Keeping both would add a phantom sample at the sync timestamp and truncate
-/// the real average improvement, so the snapshot point is skipped and the play
+/// A snapshot whose score equals a local play's score (see
+/// [`SAME_RUN_EPSILON`]) is the SAME scenario run observed twice — keeping
+/// both would add a phantom sample at the sync timestamp and truncate the
+/// real average improvement, so the snapshot point is skipped and the play
 /// (exact time) is kept. Plays are always kept verbatim.
 pub fn merge_plays_snapshots_dedup(
     plays: &[(String, DateTime<Utc>, f64)],
@@ -186,7 +194,7 @@ pub fn merge_plays_snapshots_dedup(
     for &(at, score) in snapshots {
         let dup = plays
             .iter()
-            .any(|(_, _, pscore)| (*pscore - score).abs() < 0.01);
+            .any(|(_, _, pscore)| (*pscore - score).abs() < SAME_RUN_EPSILON);
         if !dup {
             merged.push((at, score));
         }
@@ -225,6 +233,42 @@ pub struct ScenarioSeries {
     pub points: Vec<(DateTime<Utc>, i64)>,
 }
 
+/// One scenario's chart series: snapshot points with play-echoes dropped,
+/// falling back to local play points when nothing synced survives. Returns
+/// `None` when neither source has data for the scenario.
+fn series_for_scenario(
+    history: &[crate::store::StoredSnapshot],
+    local_plays: &[(String, DateTime<Utc>, f64)],
+    scenario: &str,
+    category: String,
+) -> Option<ScenarioSeries> {
+    let plays_pts = local_points(local_plays, scenario).1;
+    // Snapshot points that echo a local play (same score = same run) are
+    // dropped so the series never double-counts or renders a phantom run.
+    let pts: Vec<(DateTime<Utc>, i64)> = snapshot_points(history, scenario)
+        .into_iter()
+        .filter(|(_, v)| {
+            !plays_pts
+                .iter()
+                .any(|(_, pv)| (*pv as f64 - *v as f64).abs() < SAME_RUN_EPSILON)
+        })
+        .collect();
+    let (source, points) = if pts.is_empty() {
+        local_points(local_plays, scenario)
+    } else {
+        (ScenarioSeriesSource::Snapshot, pts)
+    };
+    if points.is_empty() {
+        return None; // nothing synced AND nothing local: no chart
+    }
+    Some(ScenarioSeries {
+        scenario: scenario.to_string(),
+        category,
+        source,
+        points,
+    })
+}
+
 /// Build per-scenario chart series for one benchmark.
 ///
 /// Scenario order follows the latest snapshot (API document order); scenarios
@@ -261,76 +305,37 @@ pub fn build_scenario_history(
 
     let mut out = Vec::new();
     for row in &latest.scenarios {
-        let plays_pts = local_points(local_plays, &row.scenario).1;
-        // Snapshot points that echo a local play (same score = same run) are
-        // dropped so the series never double-counts or renders a phantom run.
-        let pts: Vec<(DateTime<Utc>, i64)> = snapshot_points(history, &row.scenario)
-            .into_iter()
-            .filter(|(_, v)| {
-                !plays_pts
-                    .iter()
-                    .any(|(_, pv)| (*pv as f64 - *v as f64).abs() < 0.01)
-            })
-            .collect();
-        let (source, points) = if pts.is_empty() {
-            local_points(local_plays, &row.scenario)
-        } else {
-            (ScenarioSeriesSource::Snapshot, pts)
-        };
-        if points.is_empty() {
-            continue; // nothing synced AND nothing local: no chart
+        if let Some(series) =
+            series_for_scenario(history, local_plays, &row.scenario, row.category.clone())
+        {
+            out.push(series);
         }
-        out.push(ScenarioSeries {
-            scenario: row.scenario.clone(),
-            category: row.category.clone(),
-            source,
-            points,
-        });
     }
     for (scenario, category) in extras {
-        let plays_pts = local_points(local_plays, &scenario).1;
-        let pts: Vec<(DateTime<Utc>, i64)> = snapshot_points(history, &scenario)
-            .into_iter()
-            .filter(|(_, v)| {
-                !plays_pts
-                    .iter()
-                    .any(|(_, pv)| (*pv as f64 - *v as f64).abs() < 0.01)
-            })
-            .collect();
-        let (source, points) = if pts.is_empty() {
-            local_points(local_plays, &scenario)
-        } else {
-            (ScenarioSeriesSource::Snapshot, pts)
-        };
-        if points.is_empty() {
-            continue;
+        if let Some(series) = series_for_scenario(history, local_plays, &scenario, category) {
+            out.push(series);
         }
-        out.push(ScenarioSeries {
-            scenario,
-            category,
-            source,
-            points,
-        });
     }
     // Local-only scenarios (never in any snapshot, unattributable via rows):
     // include when the player has plays for them — appended alphabetically.
-    let mut locals: Vec<&(String, DateTime<Utc>, f64)> = local_plays
+    // (Reachable only when the caller passes plays for scenarios absent from
+    // every snapshot; the wired command currently derives its scenario set
+    // from snapshot history, so this is a core-level contract for callers
+    // that fetch plays per player.)
+    let emitted: std::collections::HashSet<&str> =
+        out.iter().map(|s| s.scenario.as_str()).collect();
+    let locals: std::collections::BTreeSet<&str> = local_plays
         .iter()
-        .filter(|(s, _, _)| !out.iter().any(|series| &series.scenario == s))
+        .filter(|(s, _, _)| !emitted.contains(s.as_str()))
+        .map(|(s, _, _)| s.as_str())
         .collect();
-    locals.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut seen: Vec<&str> = Vec::new();
-    for (scenario, _at, _score) in locals {
-        if seen.contains(&scenario.as_str()) {
-            continue;
-        }
-        seen.push(scenario);
+    for scenario in locals {
         let (_, points) = local_points(local_plays, scenario);
         if points.is_empty() {
             continue;
         }
         out.push(ScenarioSeries {
-            scenario: scenario.clone(),
+            scenario: scenario.to_string(),
             category: "Local".to_string(),
             source: ScenarioSeriesSource::Local,
             points,

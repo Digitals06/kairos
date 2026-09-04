@@ -366,6 +366,23 @@ fn run_csv_scan(store: &Store) -> Option<(usize, usize)> {
     Some((report.seen, report.inserted))
 }
 
+/// Ingest counters for the DTO, read back from the stored meta.
+fn ingest_status_from(store: &Store) -> IngestStatus {
+    let meta_num = |key: &str| -> u64 {
+        store
+            .get_meta(key)
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    };
+    IngestStatus {
+        csv_seen: meta_num(INGEST_SEEN_KEY),
+        csv_inserted: meta_num(INGEST_INSERTED_KEY),
+        last_synced_at: store.get_meta(LAST_SYNCED_KEY).ok().flatten(),
+    }
+}
+
 pub mod commands {
     use super::*;
 
@@ -657,6 +674,8 @@ pub mod commands {
             // underlay to the selected scenario. Scenarios missing from the
             // snapshot entirely still need their plays, so scan ALL local
             // plays of scenarios seen in any snapshot of this benchmark.
+            // Kept as typed tuples through both consumers below; serialized
+            // to `PlayPoint` rfc3339 strings only at the DTO boundary.
             let mut benchmark_scenarios: std::collections::BTreeSet<String> =
                 std::collections::BTreeSet::new();
             for snap in &history {
@@ -675,12 +694,12 @@ pub mod commands {
                 }
             }
             plays.sort_by_key(|p| p.1);
-            let plays: Vec<PlayPoint> = plays
-                .into_iter()
+            let play_points: Vec<PlayPoint> = plays
+                .iter()
                 .map(|(scenario, played_at, score)| PlayPoint {
-                    scenario,
+                    scenario: scenario.clone(),
                     played_at: played_at.to_rfc3339(),
-                    score,
+                    score: *score,
                 })
                 .collect();
 
@@ -713,25 +732,12 @@ pub mod commands {
                 })
                 .collect();
 
-            // Per-scenario score history across ALL snapshots of this
-            // benchmark (issue #3: history was benchmark-aggregate only).
             // Per-scenario chart series: synced snapshot points, falling back
             // to local CSV plays for scenarios without a synced score (see
-            // kovaaks_core::metrics::build_scenario_history).
-            let scenario_history: Vec<ScenarioHistorySeries> = {
-                let local: Vec<(String, chrono::DateTime<chrono::Utc>, f64)> = plays
-                    .iter()
-                    .map(|p| {
-                        (
-                            p.scenario.clone(),
-                            chrono::DateTime::parse_from_rfc3339(&p.played_at)
-                                .map(|t| t.with_timezone(&chrono::Utc))
-                                .unwrap_or_default(),
-                            p.score,
-                        )
-                    })
-                    .collect();
-                kovaaks_core::metrics::build_scenario_history(&history, &local)
+            // kovaaks_core::metrics::build_scenario_history). `plays` already
+            // carries typed timestamps — no string round-trip.
+            let scenario_history: Vec<ScenarioHistorySeries> =
+                kovaaks_core::metrics::build_scenario_history(&history, &plays)
                     .into_iter()
                     .map(|s| ScenarioHistorySeries {
                         scenario: s.scenario,
@@ -746,13 +752,12 @@ pub mod commands {
                             })
                             .collect(),
                     })
-                    .collect()
-            };
+                    .collect();
 
             Ok(BenchmarkDetail {
                 card,
                 snapshot_history,
-                plays,
+                plays: play_points,
                 scenario_ranks,
                 categories,
                 scenario_history,
@@ -785,20 +790,7 @@ pub mod commands {
     /// CSV ingest counters from the last scan + last sync timestamp.
     #[tauri::command]
     pub fn ingest_status(state: State<'_, AppState>) -> Result<IngestStatus, String> {
-        let meta_num = |key: &str| -> u64 {
-            state
-                .store
-                .get_meta(key)
-                .ok()
-                .flatten()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0)
-        };
-        Ok(IngestStatus {
-            csv_seen: meta_num(INGEST_SEEN_KEY),
-            csv_inserted: meta_num(INGEST_INSERTED_KEY),
-            last_synced_at: state.store.get_meta(LAST_SYNCED_KEY).ok().flatten(),
-        })
+        Ok(ingest_status_from(&state.store))
     }
 
     /// Re-scan the local KovaaK's stats CSVs (no network). Forward-only like
@@ -807,21 +799,17 @@ pub mod commands {
     pub async fn refresh_local(state: State<'_, AppState>) -> Result<IngestStatus, String> {
         let state = state.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
-            run_csv_scan(&state.store);
-            let meta_num = |key: &str| -> u64 {
-                state
-                    .store
-                    .get_meta(key)
-                    .ok()
-                    .flatten()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(0)
+            // Prefer the scan's own counts when it ran; fall back to the
+            // stored meta (last scan's counters) when there was no profile.
+            let status = match run_csv_scan(&state.store) {
+                Some((seen, inserted)) => IngestStatus {
+                    csv_seen: seen as u64,
+                    csv_inserted: inserted as u64,
+                    last_synced_at: state.store.get_meta(LAST_SYNCED_KEY).ok().flatten(),
+                },
+                None => ingest_status_from(&state.store),
             };
-            Ok(IngestStatus {
-                csv_seen: meta_num(INGEST_SEEN_KEY),
-                csv_inserted: meta_num(INGEST_INSERTED_KEY),
-                last_synced_at: state.store.get_meta(LAST_SYNCED_KEY).ok().flatten(),
-            })
+            Ok(status)
         })
         .await
         .map_err(|e| format!("refresh join error: {e}"))?

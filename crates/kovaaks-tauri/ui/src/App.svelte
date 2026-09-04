@@ -86,7 +86,7 @@
     }
   }
 
-    let refreshingLocal = $state(false)
+  let refreshingLocal = $state(false)
 
   async function doRefreshLocal() {
     if (refreshingLocal) return
@@ -103,7 +103,7 @@
     }
   }
 
-// --- settings dropdown -----------------------------------------------------
+  // --- settings dropdown -----------------------------------------------------
   let settingsOpen = $state(false)
   let deepScan = $state(false)
   // `deep` is a per-call flag on sync_now, not persisted server-side; map the
