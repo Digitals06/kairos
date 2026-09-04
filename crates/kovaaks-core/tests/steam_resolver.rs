@@ -111,16 +111,21 @@ async fn server_error_response_maps_to_rate_limited() {
     server.await.expect("mock server task");
 }
 
-/// Live probe against evxl.app (ground truth, plan recon 2026-09-02:
-/// 76561190000000001 resolves to persona "Digitals", FR).
+/// Live probe against evxl.app. Requires KAIROS_TEST_STEAM_ID; skips when
+/// unset. Only asserts response shape (steam_id echo, non-empty persona),
+/// not any specific account.
 #[tokio::test]
 #[ignore]
-async fn live_resolves_verified_steam_id_to_digitals() {
+async fn live_resolves_configured_steam_id() {
+    let Ok(sid) = std::env::var("KAIROS_TEST_STEAM_ID") else {
+        eprintln!("skipped: KAIROS_TEST_STEAM_ID not set");
+        return;
+    };
     let client = EvxlClient::new().expect("client");
     let profile = client
-        .resolve("76561190000000001")
+        .resolve(&sid)
         .await
         .expect("live evxl resolve must succeed");
-    assert_eq!(profile.persona, "Digitals");
-    assert_eq!(profile.steam_id, "76561190000000001");
+    assert_eq!(profile.steam_id, sid);
+    assert!(!profile.persona.is_empty());
 }

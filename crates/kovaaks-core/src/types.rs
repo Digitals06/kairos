@@ -328,7 +328,7 @@ pub struct PlayerProfile {
     /// 17-digit SteamID64.
     #[serde(rename = "steam_id", alias = "steamid")]
     pub steam_id: String,
-    /// Persona name (e.g. "Digitals").
+    /// Persona name (the player's Steam display name).
     #[serde(rename = "persona", alias = "personaname")]
     pub persona: String,
     /// Full avatar URL (may be empty).

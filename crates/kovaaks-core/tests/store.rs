@@ -577,9 +577,9 @@ fn meta_set_get_and_overwrite() {
 fn upsert_player_inserts_and_updates_preserving_first_seen() {
     let path = temp_db("players");
     let store = Store::open(&path).unwrap();
-    store.upsert_player(&profile("Digitals", "FR")).unwrap();
+    store.upsert_player(&profile("TestPersona", "FR")).unwrap();
     let p = store.player(SID).unwrap().expect("player row");
-    assert_eq!(p.persona, "Digitals");
+    assert_eq!(p.persona, "TestPersona");
     assert_eq!(p.country, "FR");
     let first_seen = |path: &Path| -> String {
         let conn = rusqlite::Connection::open(path).unwrap();
@@ -592,13 +592,10 @@ fn upsert_player_inserts_and_updates_preserving_first_seen() {
     };
     let before = first_seen(&path);
     store
-        .upsert_player(&profile("Digitals Prime", "FR"))
+        .upsert_player(&profile("TestPersona 2", "FR"))
         .unwrap();
     assert_eq!(first_seen(&path), before, "first_seen must be stable");
-    assert_eq!(
-        store.player(SID).unwrap().unwrap().persona,
-        "Digitals Prime"
-    );
+    assert_eq!(store.player(SID).unwrap().unwrap().persona, "TestPersona 2");
     assert!(store.player("76561190000000000").unwrap().is_none());
     cleanup_db(&path);
 }
