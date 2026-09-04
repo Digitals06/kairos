@@ -150,9 +150,12 @@
     // dropped. Running high + 7-day avg draw from this so trends stay
     // consistent over time no matter which source observed a run.
     // Snapshot echoes (same score as an earlier play) are removed from the
-    // cyan dataset as well: the dot would imply a run happened at sync time
-    // and stretches the x-axis, leaving the trend lines hanging mid-chart.
-    const snapPts = raw.filter((s) => !playPts.some((p) => Math.abs(p.y - s.y) < 0.01))
+    // cyan dataset: the dot would imply a run happened at sync time. For a
+    // local-backed series the cyan line IS the data, so no dedupe there.
+    const snapPts =
+      seriesSource === 'local'
+        ? raw
+        : raw.filter((s) => !playPts.some((p) => Math.abs(p.y - s.y) < 0.01))
     const merged = [...playPts, ...snapPts].sort((a, b) => a.x - b.x)
     const trend = merged
 
@@ -217,7 +220,25 @@
           x: {
             type: 'linear',
             grid: { color: GRID },
-            ticks: { maxTicksLimit: 8, callback: (v) => fmtDay(Number(v)) },
+            ticks: {
+              maxTicksLimit: 8,
+              // Sub-day spans need clock labels — repeating "Sep 3" eight
+              // times makes a 5-minute chart look like a full day.
+              callback: (v) => {
+                const xs = [
+                  ...trend.map((p) => p.x),
+                ]
+                const span = Math.max(...xs) - Math.min(...xs)
+                const d = new Date(Number(v))
+                if (span < 20 * 3600 * 1000) {
+                  return d.toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                }
+                return fmtDay(Number(v))
+              },
+            },
           },
           y: {
             grid: { color: GRID },
