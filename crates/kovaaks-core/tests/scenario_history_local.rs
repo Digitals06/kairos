@@ -115,3 +115,32 @@ fn order_follows_latest_snapshot_then_locals_appended() {
     let names: Vec<&str> = out.iter().map(|s| s.scenario.as_str()).collect();
     assert_eq!(names, vec!["GridShot", "Spidershot"]);
 }
+
+#[test]
+fn snapshot_series_drops_points_echoing_a_play_score() {
+    // Sync captured 1180 at t=200 (echo of the 1180 play at t=100? No —
+    // play 1180 is at t=150, BEFORE the sync): the snapshot point must be
+    // dropped and the series stays snapshot-backed via the other point.
+    let history = vec![
+        snap(utc(200), &[("S", "Cat", 1180)]),
+        snap(utc(300), &[("S", "Cat", 1200)]),
+    ];
+    let local = plays(&[("S", 150, 1180.0)]);
+    let out = build_scenario_history(&history, &local);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].source.as_str(), "snapshot");
+    let scores: Vec<i64> = out[0].points.iter().map(|p| p.1).collect();
+    assert_eq!(scores, vec![1200], "echoed 1180 snapshot point dropped");
+}
+
+#[test]
+fn snapshot_series_falls_back_to_local_when_all_points_echo_plays() {
+    // Only snapshot point echoes the play → series becomes local-backed.
+    let history = vec![snap(utc(200), &[("S", "Cat", 1180)])];
+    let local = plays(&[("S", 150, 1180.0)]);
+    let out = build_scenario_history(&history, &local);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].source.as_str(), "local");
+    assert_eq!(out[0].points.len(), 1);
+    assert_eq!(out[0].points[0].1, 1180);
+}

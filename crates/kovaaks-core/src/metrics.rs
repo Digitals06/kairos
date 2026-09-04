@@ -261,7 +261,17 @@ pub fn build_scenario_history(
 
     let mut out = Vec::new();
     for row in &latest.scenarios {
-        let pts = snapshot_points(history, &row.scenario);
+        let plays_pts = local_points(local_plays, &row.scenario).1;
+        // Snapshot points that echo a local play (same score = same run) are
+        // dropped so the series never double-counts or renders a phantom run.
+        let pts: Vec<(DateTime<Utc>, i64)> = snapshot_points(history, &row.scenario)
+            .into_iter()
+            .filter(|(_, v)| {
+                !plays_pts
+                    .iter()
+                    .any(|(_, pv)| (*pv as f64 - *v as f64).abs() < 0.01)
+            })
+            .collect();
         let (source, points) = if pts.is_empty() {
             local_points(local_plays, &row.scenario)
         } else {
@@ -278,7 +288,15 @@ pub fn build_scenario_history(
         });
     }
     for (scenario, category) in extras {
-        let pts = snapshot_points(history, &scenario);
+        let plays_pts = local_points(local_plays, &scenario).1;
+        let pts: Vec<(DateTime<Utc>, i64)> = snapshot_points(history, &scenario)
+            .into_iter()
+            .filter(|(_, v)| {
+                !plays_pts
+                    .iter()
+                    .any(|(_, pv)| (*pv as f64 - *v as f64).abs() < 0.01)
+            })
+            .collect();
         let (source, points) = if pts.is_empty() {
             local_points(local_plays, &scenario)
         } else {

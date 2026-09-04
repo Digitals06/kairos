@@ -149,10 +149,11 @@
     // — no matter how much later the sync ran — so the snapshot point is
     // dropped. Running high + 7-day avg draw from this so trends stay
     // consistent over time no matter which source observed a run.
-    const merged = [
-      ...playPts,
-      ...raw.filter((s) => !playPts.some((p) => Math.abs(p.y - s.y) < 0.01)),
-    ].sort((a, b) => a.x - b.x)
+    // Snapshot echoes (same score as an earlier play) are removed from the
+    // cyan dataset as well: the dot would imply a run happened at sync time
+    // and stretches the x-axis, leaving the trend lines hanging mid-chart.
+    const snapPts = raw.filter((s) => !playPts.some((p) => Math.abs(p.y - s.y) < 0.01))
+    const merged = [...playPts, ...snapPts].sort((a, b) => a.x - b.x)
     const trend = merged
 
     let high = -Infinity
@@ -197,7 +198,7 @@
           },
           {
             label: sourceLabel,
-            data: raw,
+            data: snapPts,
             borderColor: CYAN,
             backgroundColor: CYAN,
             borderWidth: 2,
