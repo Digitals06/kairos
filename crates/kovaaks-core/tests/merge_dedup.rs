@@ -1,6 +1,5 @@
-//! Dedupe tests: snapshot points that duplicate a local play (same run) must
-//! not inflate the combined series — they would drag avg/high improvement
-//! toward the sync timestamp instead of the real play time.
+//! Dedupe tests: snapshot points that duplicate a local play (same score = the
+//! same run echoed by the sync) must not inflate the combined series.
 
 use chrono::TimeZone;
 use kovaaks_core::metrics::merge_plays_snapshots_dedup;
@@ -11,13 +10,24 @@ fn utc(secs: i64) -> chrono::DateTime<chrono::Utc> {
 
 #[test]
 fn snapshot_duplicating_local_play_is_dropped() {
-    // Player scores 805.6 locally at t=100; sync at t=120 records the same
-    // score (same run, 20s later). The snapshot point must be dropped.
+    // Player scores 805.6 locally at t=100; a sync at t=120 records the same
+    // score (same run echoed 20s later). The snapshot point must be dropped.
     let plays = vec![("S".to_string(), utc(100), 805.6)];
     let snapshots = vec![(utc(120), 805.6), (utc(300), 900.0)];
     let merged = merge_plays_snapshots_dedup(&plays, &snapshots);
     let times: Vec<i64> = merged.iter().map(|(t, _)| t.timestamp()).collect();
     assert_eq!(times, vec![100, 300], "duplicate snapshot point removed");
+}
+
+#[test]
+fn snapshot_duplicating_much_later_is_still_dropped() {
+    // The user's case: play at 10:33, sync echoes the same score hours later.
+    // Same score to 2dp = same run, regardless of elapsed time.
+    let plays = vec![("S".to_string(), utc(100), 1130.0)];
+    let snapshots = vec![(utc(100 + 14 * 3600), 1130.0)];
+    let merged = merge_plays_snapshots_dedup(&plays, &snapshots);
+    assert_eq!(merged.len(), 1, "play kept, snapshot echo dropped");
+    assert_eq!(merged[0].1, 1130.0);
 }
 
 #[test]
@@ -29,10 +39,11 @@ fn snapshot_with_new_score_is_kept() {
 }
 
 #[test]
-fn same_score_outside_time_window_is_kept() {
-    // Same score 2 hours later is a genuine replay, not the same run.
+fn similar_but_different_score_is_kept() {
+    // 805.60 vs 805.62 could be a genuine near-identical replay — only scores
+    // matching to 2dp count as the same run.
     let plays = vec![("S".to_string(), utc(100), 805.6)];
-    let snapshots = vec![(utc(100 + 2 * 3600), 805.6)];
+    let snapshots = vec![(utc(120), 805.62)];
     let merged = merge_plays_snapshots_dedup(&plays, &snapshots);
     assert_eq!(merged.len(), 2);
 }

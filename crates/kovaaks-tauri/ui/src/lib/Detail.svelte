@@ -144,19 +144,14 @@
     // series itself is local, the dots would just duplicate the line.
     const showPlayDots = seriesSource !== 'local'
 
-    // Combined view: local plays + snapshot points, deduped (a snapshot within
-    // 5min of a play with the same score is the same run — drop the snapshot).
-    // Running high + 7-day avg draw from this so trends stay consistent over
-    // time no matter which source observed a run.
-    const DUP_MS = 5 * 60 * 1000
+    // Combined view: local plays + snapshot points, deduped. A snapshot whose
+    // score equals a play's score (to 2dp) is the same run echoed by the sync
+    // — no matter how much later the sync ran — so the snapshot point is
+    // dropped. Running high + 7-day avg draw from this so trends stay
+    // consistent over time no matter which source observed a run.
     const merged = [
       ...playPts,
-      ...raw.filter(
-        (s) =>
-          !playPts.some(
-            (p) => Math.abs(p.y - s.y) < 0.01 && Math.abs(p.x - s.x) <= DUP_MS,
-          ),
-      ),
+      ...raw.filter((s) => !playPts.some((p) => Math.abs(p.y - s.y) < 0.01)),
     ].sort((a, b) => a.x - b.x)
     const trend = merged
 
@@ -198,7 +193,7 @@
             borderWidth: 1.5,
             borderDash: [4, 4],
             pointRadius: 0,
-            tension: 0.3,
+            stepped: 'before',
           },
           {
             label: sourceLabel,

@@ -171,27 +171,22 @@ pub fn improving_only(series: &[(DateTime<Utc>, f64)]) -> Vec<(DateTime<Utc>, f6
 /// Merge local plays with (already new-high-filtered) snapshot points into one
 /// chronological series, dropping snapshot points that duplicate a local play.
 ///
-/// A snapshot captured within [`SNAPSHOT_DUP_WINDOW`] of a local play with the
-/// same score is the SAME scenario run observed twice — the sync just echoed
-/// the play. Keeping both would add a phantom sample at the sync timestamp and
-/// truncate the real average improvement, so the snapshot point is skipped and
-/// the play (exact time) is kept. Plays are always kept verbatim.
+/// A snapshot whose score equals a local play's score (to 2dp) is the SAME
+/// scenario run observed twice — KovaaK's scenario scores are precise floats,
+/// so an exact match is the same run no matter how much later the sync ran.
+/// Keeping both would add a phantom sample at the sync timestamp and truncate
+/// the real average improvement, so the snapshot point is skipped and the play
+/// (exact time) is kept. Plays are always kept verbatim.
 pub fn merge_plays_snapshots_dedup(
     plays: &[(String, DateTime<Utc>, f64)],
     snapshots: &[(DateTime<Utc>, f64)],
 ) -> Vec<(DateTime<Utc>, f64)> {
-    /// A snapshot within 5 minutes of a local play is treated as the same run
-    /// (syncs run while the game may still be open; KovaaK's writes the CSV
-    /// right after the run ends).
-    const SNAPSHOT_DUP_WINDOW: chrono::Duration = chrono::Duration::minutes(5);
-
     let mut merged: Vec<(DateTime<Utc>, f64)> =
         plays.iter().map(|(_, at, score)| (*at, *score)).collect();
     for &(at, score) in snapshots {
-        let dup = plays.iter().any(|(_, pat, pscore)| {
-            (*pscore - score).abs() < 0.01
-                && pat.signed_duration_since(at).abs() <= SNAPSHOT_DUP_WINDOW
-        });
+        let dup = plays
+            .iter()
+            .any(|(_, _, pscore)| (*pscore - score).abs() < 0.01);
         if !dup {
             merged.push((at, score));
         }
