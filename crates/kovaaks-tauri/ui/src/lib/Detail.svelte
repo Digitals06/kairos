@@ -136,18 +136,34 @@
     } else {
       return
     }
-    if (raw.length === 0) return
+    if (raw.length === 0 && playPts.length === 0) return
 
     const seriesSource = d.scenario_history.find((s) => s.scenario === chartScope)?.source
     const sourceLabel = seriesSource === 'local' ? 'local highs' : 'sync snapshot'
     // Magenta dots only when they ADD info (snapshot-backed series); when the
     // series itself is local, the dots would just duplicate the line.
-    const showPlayDots = seriesSource !== 'local' 
+    const showPlayDots = seriesSource !== 'local'
+
+    // Combined view: local plays + snapshot points, deduped (a snapshot within
+    // 5min of a play with the same score is the same run — drop the snapshot).
+    // Running high + 7-day avg draw from this so trends stay consistent over
+    // time no matter which source observed a run.
+    const DUP_MS = 5 * 60 * 1000
+    const merged = [
+      ...playPts,
+      ...raw.filter(
+        (s) =>
+          !playPts.some(
+            (p) => Math.abs(p.y - s.y) < 0.01 && Math.abs(p.x - s.x) <= DUP_MS,
+          ),
+      ),
+    ].sort((a, b) => a.x - b.x)
+    const trend = merged
 
     let high = -Infinity
-    const highPts = raw.map((p) => ({ x: p.x, y: (high = Math.max(high, p.y)) }))
-    const rolling = raw.map((p) => {
-      const win = raw.filter((q) => q.x > p.x - DAY_MS && q.x <= p.x)
+    const highPts = trend.map((p) => ({ x: p.x, y: (high = Math.max(high, p.y)) }))
+    const rolling = trend.map((p) => {
+      const win = trend.filter((q) => q.x > p.x - DAY_MS && q.x <= p.x)
       return { x: p.x, y: win.reduce((s, q) => s + q.y, 0) / win.length }
     })
 
