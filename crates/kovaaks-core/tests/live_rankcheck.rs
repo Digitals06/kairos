@@ -1,16 +1,25 @@
-//! Live repro: run the rank engine on real stored snapshots.
+//! Live regression harness: run the rank engine on real stored snapshots.
+//!
+//! Skipped unless both env vars are set (they point at YOUR local data, which
+//! is not part of the repo):
+//!   KAIROS_LIVE_DB        path to a Kairos store.db
+//!   KAIROS_LIVE_STEAM_ID  the SteamID64 whose snapshots to load
 //! Run: cargo test -p kovaaks-core --test live_rankcheck -- --ignored --nocapture
 use kovaaks_core::{Registry, Store};
 
 #[test]
 #[ignore]
 fn live_rankcheck_voltaic_s3_and_s5() {
-    let store = Store::open(&std::path::PathBuf::from(
-        "std::env::var("KAIROS_LIVE_DB").unwrap_or_default()",
-    ))
-    .unwrap();
+    let Ok(db_path) = std::env::var("KAIROS_LIVE_DB") else {
+        eprintln!("skipped: KAIROS_LIVE_DB not set");
+        return;
+    };
+    let Ok(sid) = std::env::var("KAIROS_LIVE_STEAM_ID") else {
+        eprintln!("skipped: KAIROS_LIVE_STEAM_ID not set");
+        return;
+    };
+    let store = Store::open(&std::path::PathBuf::from(db_path)).unwrap();
     let registry = Registry;
-    let sid = "76561190000000001";
     let mut report = String::new();
 
     for benchmark_id in [
@@ -25,7 +34,7 @@ fn live_rankcheck_voltaic_s3_and_s5() {
         let Some((bench, difficulty)) = registry.by_id(benchmark_id as u64) else {
             continue;
         };
-        let history = store.history(sid, benchmark_id).unwrap();
+        let history = store.history(&sid, benchmark_id).unwrap();
         let Some(snap) = history.last() else {
             report.push_str(&format!("{}: no snapshot\n", bench.name));
             continue;

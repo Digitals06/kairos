@@ -8,3 +8,7 @@ dist/
 # Misc
 *.log
 .DS_Store
+
+# Local-only debug tooling (CDP probes etc.) — never push these
+/scripts/
+make_icon.py
