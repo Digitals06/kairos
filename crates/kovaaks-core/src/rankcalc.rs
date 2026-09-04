@@ -270,6 +270,459 @@ pub fn is_strafe(subcategory: &str) -> bool {
     subcategory.to_lowercase().contains("strafe")
 }
 
+/// `jade-palace`: subcategory energy = avg best half (Fundamentals: top 3,
+/// Easy: capped 600 until overall reaches 600), harmonic soft.
+pub fn calc_jade_palace(
+    progress: &BenchmarkProgress,
+    benchmark: &BenchmarkDef,
+    difficulty: &Difficulty,
+) -> (u32, f64) {
+    let mut thresholds = difficulty_thresholds(benchmark, difficulty);
+    if thresholds.len() > 1 {
+        thresholds.pop(); // evxl slices off the last ladder entry
+    }
+    let is_easy = difficulty.name.eq_ignore_ascii_case("easy");
+    let is_fundamentals = difficulty.name.eq_ignore_ascii_case("fundamentals");
+    let order = scenario_order(progress, difficulty);
+    let subs = subcategory_spans(difficulty);
+    let mut energies: Vec<f64> = Vec::new();
+    let mut uncapped_energies: Vec<f64> = Vec::new();
+    let mut idx = 0usize;
+    for (_, count, _) in &subs {
+        let mut capped: Vec<f64> = Vec::new();
+        let mut raw: Vec<f64> = Vec::new();
+        for _ in 0..*count {
+            if idx < order.len() {
+                let (_, entry) = order[idx];
+                let norm = entry.score;
+                if norm > 0.0 && !entry.rank_maxes.is_empty() {
+                    let pr = rank_of(norm, &entry.rank_maxes);
+                    let e = energy_of(&pr, &thresholds, 100, 1.0);
+                    raw.push(e);
+                    capped.push(if is_easy { e.min(600.0) } else { e });
+                } else {
+                    raw.push(0.0);
+                    capped.push(0.0);
+                }
+            }
+            idx += 1;
+        }
+        energies.push(avg_best_half(&capped, is_fundamentals));
+        uncapped_energies.push(avg_best_half(&raw, is_fundamentals));
+    }
+    let mut overall = harmonic_soft(&energies);
+    // Easy: once capped overall reaches 600, uncap.
+    if is_easy && harmonic_soft(&uncapped_energies) >= 600.0 {
+        overall = harmonic_soft(&uncapped_energies);
+    }
+    let mut rank = 0u32;
+    for (i, t) in thresholds.iter().enumerate() {
+        if overall >= *t {
+            rank = (i + 1) as u32;
+        }
+    }
+    (rank, overall)
+}
+
+/// `aimbeast`: category rank = average of scenario ranks; overall = average of
+/// category ranks; any unranked scenario poisons its category.
+pub fn calc_aimbeast(progress: &BenchmarkProgress) -> (u32, f64) {
+    let mut category_ranks: Vec<f64> = Vec::new();
+    for (_, category) in &progress.categories {
+        let mut sum = 0.0;
+        let mut n = 0usize;
+        for (_, scenario) in &category.scenarios {
+            if scenario.scenario_rank == 0 || scenario.score <= 0.0 {
+                sum = 0.0;
+                n = 0;
+                break;
+            }
+            sum += scenario.scenario_rank as f64;
+            n += 1;
+        }
+        if n == 0 {
+            return (0, 0.0);
+        }
+        category_ranks.push(sum / n as f64);
+    }
+    if category_ranks.is_empty() {
+        return (0, 0.0);
+    }
+    let avg = category_ranks.iter().sum::<f64>() / category_ranks.len() as f64;
+    (avg.floor() as u32, avg)
+}
+
+/// `dojo`-family: N scenarios at rank R (or higher) ⇒ rank R
+/// (dojo = 4, dojo2 = 3, dojo3 = 5).
+pub fn calc_count_required(progress: &BenchmarkProgress, required: usize) -> u32 {
+    let mut counts: std::collections::BTreeMap<u32, u32> = Default::default();
+    for (_, category) in &progress.categories {
+        for (_, scenario) in &category.scenarios {
+            if scenario.score > 0.0 && scenario.scenario_rank > 0 {
+                *counts.entry(scenario.scenario_rank).or_default() += 1;
+            }
+        }
+    }
+    let mut ranks: Vec<u32> = counts.keys().cloned().collect();
+    ranks.sort_unstable_by(|a, b| b.cmp(a));
+    for &r in &ranks {
+        let at_or_above: u32 = ranks.iter().filter(|&&k| k >= r).map(|k| counts[k]).sum();
+        if at_or_above >= required as u32 {
+            return r;
+        }
+    }
+    0
+}
+
+/// `hewchy`: 12 scenarios at rank R.
+pub fn calc_hewchy(progress: &BenchmarkProgress) -> u32 {
+    calc_count_required(progress, 12)
+}
+
+/// `e1se`: 6 scenarios at rank R.
+pub fn calc_e1se(progress: &BenchmarkProgress) -> u32 {
+    calc_count_required(progress, 6)
+}
+
+/// `aoi`: 1 score at R in 4 different subcategories, OR 2 scores at R in
+/// 3 different subcategories; best qualifying rank wins.
+pub fn calc_aoi(progress: &BenchmarkProgress, difficulty: &Difficulty) -> u32 {
+    let order = scenario_order(progress, difficulty);
+    let subs = subcategory_spans(difficulty);
+    // (rank -> set of subcategory keys), one entry per subcategory occurrence
+    let mut per_sub: Vec<Vec<u32>> = Vec::new();
+    let mut idx = 0usize;
+    for (_, count, _) in &subs {
+        let mut ranks = Vec::new();
+        for _ in 0..*count {
+            if idx < order.len() {
+                let (_, entry) = order[idx];
+                if entry.score > 0.0 && entry.scenario_rank > 0 {
+                    ranks.push(entry.scenario_rank);
+                }
+            }
+            idx += 1;
+        }
+        per_sub.push(ranks);
+    }
+    let qualifies = |target: u32, need_subs: usize, need_scores: usize| -> bool {
+        per_sub
+            .iter()
+            .filter(|ranks| ranks.iter().filter(|&&r| r >= target).count() >= need_scores)
+            .count()
+            >= need_subs
+    };
+    let ladder = difficulty.rank_colors.len() as u32;
+    for target in (1..=ladder).rev() {
+        if qualifies(target, 4, 1) || qualifies(target, 3, 2) {
+            return target;
+        }
+    }
+    0
+}
+
+/// `MIYU`: points per scenario = 2 + (rank - 1); total vs fixed thresholds.
+pub fn calc_miyu(progress: &BenchmarkProgress) -> u32 {
+    const THRESHOLDS: [f64; 7] = [16., 24., 32., 40., 48., 56., 63.];
+    let total: f64 = progress
+        .categories
+        .iter()
+        .flat_map(|(_, c)| c.scenarios.iter())
+        .map(|(_, s)| {
+            if s.score > 0.0 && s.scenario_rank > 0 {
+                2.0 + (s.scenario_rank as f64 - 1.0)
+            } else {
+                0.0
+            }
+        })
+        .sum();
+    let mut rank = 0u32;
+    for (i, t) in THRESHOLDS.iter().enumerate() {
+        if total >= *t {
+            rank = (i + 1) as u32;
+        }
+    }
+    rank
+}
+
+// ---------- dispatcher ----------
+
+/// Dispatch: compute (rank index, display name, complete flag) for a benchmark.
+/// Falls back to the API `overall_rank` for methods not yet ported.
+pub fn compute_rank(
+    progress: &BenchmarkProgress,
+    benchmark: &BenchmarkDef,
+    difficulty: &Difficulty,
+) -> RankResult {
+    let method = benchmark.rank_calculation.as_str();
+    let ladder_len = difficulty.rank_colors.len() as u32;
+    let floor = scenario_floor_rank(progress);
+    let (engine_rank, complete): (u32, bool) = match method {
+        "basic" => {
+            let (r, c, _) = calc_basic(progress, difficulty);
+            (r, c)
+        }
+        "vt-energy" => {
+            let (r, _) = calc_vt_energy(progress, difficulty);
+            (r, false)
+        }
+        "generic-energy" => {
+            let (r, _) = calc_generic_energy(progress, benchmark, difficulty);
+            (r, false)
+        }
+        "Avasive-S2" => {
+            let (r, _) = calc_avasive_s2(progress, benchmark, difficulty);
+            (r, false)
+        }
+        "avasive" => {
+            let (r, _) = calc_avasive(progress, difficulty);
+            (r, false)
+        }
+        "tpt" => {
+            let (r, _) = calc_tpt(progress);
+            (r, false)
+        }
+        "asb" => {
+            let (r, _) = calc_asb(progress);
+            (r, false)
+        }
+        "rbe" => {
+            let (r, _) = calc_rbe(progress);
+            (r, false)
+        }
+        "routine" => {
+            let (r, _) = calc_routine(progress);
+            (r, false)
+        }
+        "mh" => {
+            let (r, _) = calc_mh(progress, difficulty);
+            (r, false)
+        }
+        // evxl `Ae` set -> `qe` predicate -> `se` (ye thresholds, no cap).
+        "mh-precise" | "mh-reactive" | "mh-tracking" => {
+            let (r, _) = calc_mh_variants(progress, benchmark, difficulty);
+            (r, false)
+        }
+        "ca-s1" => {
+            let (r, _) = calc_ca_s1(progress, difficulty);
+            (r, false)
+        }
+        "sa-s2" => {
+            let (r, _) = calc_sa_s2(progress, difficulty);
+            (r, false)
+        }
+        "mira" => {
+            let (r, _) = calc_mira(progress, difficulty);
+            (r, false)
+        }
+        "val-energy" => {
+            let (r, _) = calc_val_energy(progress, benchmark, difficulty);
+            (r, false)
+        }
+        "snakbox" => {
+            let (r, _) = calc_snakbox(progress, benchmark, difficulty);
+            (r, false)
+        }
+        "ra-s4" => {
+            let (r, _) = calc_ra_s4(progress, difficulty);
+            (r, false)
+        }
+        "cb-s1" => {
+            let (r, _) = calc_cb_s1(progress, difficulty);
+            (r, false)
+        }
+        "aplus-s1" => {
+            let (r, _) = calc_aplus_s1(progress, difficulty);
+            (r, false)
+        }
+        "aplus-alt" => {
+            let (r, _) = calc_aplus_alt(progress, difficulty);
+            (r, false)
+        }
+        "xyz2" => {
+            let (r, _) = calc_xyz2(progress, difficulty);
+            (r, false)
+        }
+        "xyz" => {
+            let (r, _) = calc_xyz(progress, difficulty);
+            (r, false)
+        }
+        "xyz-smoothness-v2" => {
+            let (r, _) = calc_xyz_smoothness_v2(progress, difficulty);
+            (r, false)
+        }
+        "RXZU" => {
+            let (r, _) = calc_rxzu(progress, difficulty);
+            (r, false)
+        }
+        "dm" => {
+            let (r, _) = calc_dm(progress, difficulty);
+            (r, false)
+        }
+        "dm-s3" => {
+            let (r, _) = calc_dm_s3(progress, difficulty);
+            (r, false)
+        }
+        "mira-apex" => {
+            let (r, _) = calc_mira_apex(progress, difficulty);
+            (r, false)
+        }
+        "generic-energy-alt" => {
+            let (r, _) = calc_generic_energy_alt(progress, difficulty);
+            (r, false)
+        }
+        "complete" => {
+            let (r, _) = calc_complete(progress);
+            (r, false)
+        }
+        "tsk" => {
+            let (r, _) = calc_tsk(progress, difficulty);
+            (r, false)
+        }
+        "33" | "iris" => {
+            let (r, _) = calc_tn(progress, benchmark, difficulty);
+            (r, false)
+        }
+        "ra-s5" => {
+            let (r, _) = calc_ra_s5(progress, benchmark, difficulty);
+            (r, false)
+        }
+        "generic-energy-uncapped" => {
+            // Same ladder slice but no fakeUpper cap.
+            let thresholds = difficulty_thresholds(benchmark, difficulty);
+            let (r, _) = energy_core(
+                progress,
+                difficulty,
+                &thresholds,
+                100,
+                9999.0,
+                |_| true,
+                avg_top2_or_best,
+                harmonic_strict,
+            );
+            (r, false)
+        }
+        "jade-palace" => {
+            let (r, _) = calc_jade_palace(progress, benchmark, difficulty);
+            (r, false)
+        }
+        "aimbeast" => {
+            let (r, _) = calc_aimbeast(progress);
+            (r, false)
+        }
+        "aimbeast-partial" => {
+            // Half participation, unranked excluded (approximate: exclude zeros).
+            let mut category_ranks: Vec<f64> = Vec::new();
+            let mut ranked_total = 0usize;
+            let total: usize = progress
+                .categories
+                .iter()
+                .map(|(_, c)| c.scenarios.len())
+                .sum();
+            for (_, category) in &progress.categories {
+                let mut sum = 0.0;
+                let mut n = 0usize;
+                for (_, scenario) in &category.scenarios {
+                    if scenario.scenario_rank > 0 && scenario.score > 0.0 {
+                        sum += scenario.scenario_rank as f64;
+                        n += 1;
+                        ranked_total += 1;
+                    }
+                }
+                if n > 0 {
+                    category_ranks.push(sum / n as f64);
+                }
+            }
+            let required = total.div_ceil(2);
+            if ranked_total < required || category_ranks.is_empty() {
+                (0, false)
+            } else {
+                let avg = category_ranks.iter().sum::<f64>() / category_ranks.len() as f64;
+                (avg.floor() as u32, false)
+            }
+        }
+        "dojo" => (calc_count_required(progress, 4), false),
+        "dojo2" => (calc_count_required(progress, 3), false),
+        "dojo3" => (calc_count_required(progress, 5), false),
+        "hewchy" => (calc_hewchy(progress), false),
+        "e1se" => (calc_e1se(progress), false),
+        "aoi" => (calc_aoi(progress, difficulty), false),
+        "MIYU" => (calc_miyu(progress), false),
+        _ => {
+            // Unported method: API rank is the current best estimate.
+            return RankResult {
+                rank: progress.overall_rank,
+                name: crate::ranks::rank_from_index(progress.overall_rank, difficulty)
+                    .map(|t| t.name)
+                    .unwrap_or_else(|| "Unranked".into()),
+                complete: false,
+                method: MethodSource::ApiFallback,
+            };
+        }
+    };
+    // Dispatcher: displayed rank = max(engine, scenario floor), except
+    // aimbeast averages which already encode the floor.
+    let use_floor = !matches!(method, "aimbeast" | "aimbeast-partial" | "selectable-top-n");
+    let mut final_rank = engine_rank;
+    if use_floor && !complete {
+        final_rank = final_rank.max(floor);
+    }
+    if final_rank > ladder_len + 1 {
+        final_rank = ladder_len + 1;
+    }
+    let complete = final_rank > ladder_len;
+    let display_index = final_rank.min(ladder_len);
+    let name = if complete {
+        format!(
+            "{} Complete",
+            crate::ranks::rank_from_index(ladder_len, difficulty)
+                .map(|t| t.name)
+                .unwrap_or_default()
+        )
+    } else {
+        crate::ranks::rank_from_index(display_index, difficulty)
+            .map(|t| t.name)
+            .unwrap_or_else(|| "Unranked".into())
+    };
+    RankResult {
+        rank: final_rank,
+        name,
+        complete,
+        method: MethodSource::Engine,
+    }
+}
+
+/// Provenance of a computed rank.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MethodSource {
+    /// Computed by the ported evxl engine.
+    Engine,
+    /// Method not yet ported; API `overall_rank` used as-is.
+    ApiFallback,
+}
+
+/// The outcome of [`compute_rank`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct RankResult {
+    /// 1-based ladder index; `ladder_len + 1` when "Complete".
+    pub rank: u32,
+    /// Display name (e.g. "Gold", "Gold Complete").
+    pub name: String,
+    /// Every subcategory at the top rank (basic family "Complete" state).
+    pub complete: bool,
+    /// Where this rank came from.
+    pub method: MethodSource,
+}
+
+impl RankResult {
+    /// Resolve the display name into the difficulty's colored tier.
+    /// "Complete" results render as the top tier (name carries the suffix).
+    pub fn tier(&self, difficulty: &Difficulty) -> Option<crate::types::RankTier> {
+        let top = difficulty.rank_colors.len() as u32;
+        let index = if self.complete { top } else { self.rank };
+        crate::ranks::rank_from_index(index, difficulty)
+    }
+}
 // ---------- method implementations ----------
 
 /// The scenario rank floor used by the dispatcher: the *lowest* per-scenario
@@ -537,11 +990,122 @@ fn ye_thresholds(benchmark: &BenchmarkDef, difficulty: &Difficulty) -> Vec<f64> 
         .collect()
 }
 
-/// `Avasive-S2` (evxl `Nn` → `se` with an energy cap): per-difficulty
-/// thresholds (`ye`), per-scenario energy clamped to a difficulty cap
-/// (easier 600 / medium 1000 / hard 1400), subcategory energy = average of
-/// the top TWO scenario energies (a single-scenario subcategory contributes
-/// HALF its energy), harmonic mean across subcategories.
+/// `tpt` (evxl `cn`): highest rank with >=5 scenarios at or above it.
+pub fn calc_tpt(progress: &BenchmarkProgress) -> (u32, f64) {
+    ne_rank(progress, 5, false)
+}
+
+/// `asb` (evxl `ln`): highest rank with >=8 scenarios at or above it.
+pub fn calc_asb(progress: &BenchmarkProgress) -> (u32, f64) {
+    ne_rank(progress, 8, false)
+}
+
+/// `rbe` (evxl `Ge`): highest rank with >=9 scenarios at or above it.
+pub fn calc_rbe(progress: &BenchmarkProgress) -> (u32, f64) {
+    ne_rank(progress, 9, true)
+}
+
+/// `routine` (evxl `Ue`): highest rank with >= half the scenarios at or above.
+pub fn calc_routine(progress: &BenchmarkProgress) -> (u32, f64) {
+    let total: usize = progress
+        .categories
+        .iter()
+        .map(|(_, c)| c.scenarios.len())
+        .sum();
+    ne_rank(progress, total.div_ceil(2).max(1), true)
+}
+
+/// `mh` family (evxl `me` via `xn`): per-difficulty tables, harmonic mean of
+/// ALL scenario energies.
+pub fn calc_mh(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let thresholds: Vec<f64> = match difficulty.name.trim().to_lowercase().as_str() {
+        "easy" => vec![100.0, 200.0, 300.0, 400.0],
+        "medium" => vec![500.0, 600.0, 700.0, 800.0],
+        "hard" => vec![900.0, 1000.0, 1100.0, 1200.0, 1300.0],
+        _ => vec![100.0, 200.0, 300.0, 400.0],
+    };
+    me_table_engine(progress, difficulty, &thresholds)
+}
+
+/// `avasive` (evxl `Sn` → `me`): per-difficulty-name tables.
+pub fn calc_avasive(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let thresholds: Vec<f64> = match difficulty.name.trim().to_lowercase().as_str() {
+        "genesis" => vec![100.0, 200.0, 300.0, 400.0, 500.0],
+        "ascension" => vec![600.0, 700.0, 800.0, 900.0, 1000.0],
+        "enlightenment" => vec![1100.0, 1200.0, 1300.0, 1400.0, 1500.0],
+        "wallhack" => vec![
+            100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0,
+        ],
+        _ => vec![100.0, 200.0, 300.0, 400.0, 500.0],
+    };
+    me_table_engine(progress, difficulty, &thresholds)
+}
+
+/// `ca-s1` (evxl `Y` case "ca-s1" → `X`): fixed thresholds, strafe filter.
+pub fn calc_ca_s1(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let thresholds = vec![1500.0, 1550.0, 1600.0, 1650.0, 1700.0, 1750.0, 1800.0];
+    x_engine(progress, difficulty, &thresholds, 50.0, 2.0, |name| {
+        !name.to_lowercase().contains("strafe")
+    })
+}
+
+/// `sa-s2` (evxl `gn` → `Y` "custom"): fixed thresholds, strafe filter.
+pub fn calc_sa_s2(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let thresholds = vec![1200.0, 1300.0, 1400.0, 1500.0, 1600.0];
+    x_engine(progress, difficulty, &thresholds, 50.0, 1.0, |name| {
+        !name.to_lowercase().contains("strafe")
+    })
+}
+
+/// `mira` (evxl `kn` → `Y` "custom"): per-difficulty thresholds.
+pub fn calc_mira(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let thresholds: Vec<f64> = if difficulty.name.to_lowercase() == "easy" {
+        vec![100.0, 200.0, 300.0, 400.0, 500.0]
+    } else {
+        vec![600.0, 700.0, 800.0, 900.0, 1000.0]
+    };
+    x_engine(progress, difficulty, &thresholds, 50.0, 1.0, |_| true)
+}
+
+/// `val-energy` (evxl `Mn` → `Y` "custom"): 100-step table sliced by
+/// difficulty, all subcategories.
+pub fn calc_val_energy(
+    progress: &BenchmarkProgress,
+    _benchmark: &BenchmarkDef,
+    difficulty: &Difficulty,
+) -> (u32, f64) {
+    let table: [f64; 15] = [
+        100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0, 1100.0, 1200.0,
+        1300.0, 1400.0, 1500.0,
+    ];
+    let (start, end) = match difficulty.name.to_lowercase().as_str() {
+        "easy" => (0usize, 4usize),
+        "medium" => (4, 8),
+        "hard" => (8, 12),
+        _ => (0, table.len()),
+    };
+    x_engine(progress, difficulty, &table[start..end], 100.0, 1.0, |_| {
+        true
+    })
+}
+
+/// `snakbox` (evxl `yn` → `se`): medium uses a fixed table, else `ye` slice;
+/// energy capped at the table's top value.
+pub fn calc_snakbox(
+    progress: &BenchmarkProgress,
+    benchmark: &BenchmarkDef,
+    difficulty: &Difficulty,
+) -> (u32, f64) {
+    let thresholds: Vec<f64> = if difficulty.name.trim().to_lowercase() == "medium" {
+        vec![400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1100.0]
+    } else {
+        ye_thresholds(benchmark, difficulty)
+    };
+    let cap = thresholds[thresholds.len() - 1];
+    se_engine(progress, difficulty, &thresholds, cap)
+}
+
+/// `Avasive-S2` (evxl `Nn` → `se` with the difficulty cap).
 pub fn calc_avasive_s2(
     progress: &BenchmarkProgress,
     benchmark: &BenchmarkDef,
@@ -554,6 +1118,257 @@ pub fn calc_avasive_s2(
         "hard" => 1400.0,
         _ => f64::INFINITY,
     };
+    se_engine(progress, difficulty, &thresholds, cap)
+}
+
+// ---------------------------------------------------------------------------
+// Batch-port machinery (evxl W / ne / me / se primitives)
+// ---------------------------------------------------------------------------
+
+/// evxl `W`: energy of one scenario against `thresholds`, faithful port.
+/// `fake_lower` is the offset below the first threshold; `fake_upper` counts
+/// bands above the top threshold. Below-rank-1 scenarios interpolate against
+/// the scenario's own rank_maxes from a fake zero point.
+fn w_energy(
+    score: f64,
+    maxes: &[f64],
+    pr: &PreciseRank,
+    thresholds: &[f64],
+    fake_lower: f64,
+    fake_upper: f64,
+) -> f64 {
+    if pr.base == 0 && pr.precise <= 0.0 {
+        if score <= 0.0 || maxes.len() < 2 {
+            return 0.0;
+        }
+        let f = maxes[0];
+        let m = maxes[1] - f;
+        let b = f - m; // fake zero point below the ladder
+        let n0 = thresholds[0];
+        let big_n = n0 - fake_lower;
+        let p = if b > 0.0 && score < b {
+            score / b * big_n
+        } else if (f - b).abs() > 0.0 {
+            big_n + (score - b) / (f - b) * (n0 - big_n)
+        } else {
+            n0
+        };
+        return p.trunc();
+    }
+    let a = thresholds.len();
+    if a == 0 || pr.precise <= 0.0 {
+        return 0.0;
+    }
+    let i = thresholds[0] - fake_lower;
+    let l = thresholds[a - 1];
+    let g = if a > 1 { thresholds[a - 2] } else { 0.0 };
+    let u = {
+        let d = l - g;
+        if d.abs() < f64::EPSILON {
+            100.0
+        } else {
+            d
+        }
+    };
+    let h = l + u;
+    if pr.precise < 1.0 {
+        return (i + pr.precise * (thresholds[0] - i)).trunc();
+    }
+    if (pr.precise as usize) < a {
+        let d = pr.precise.floor();
+        let k = pr.precise - d;
+        let f = if d == 0.0 {
+            i
+        } else {
+            thresholds[d as usize - 1]
+        };
+        let r = thresholds[d as usize];
+        return (f + k * (r - f)).trunc();
+    }
+    if pr.precise < a as f64 + fake_upper {
+        let d = pr.precise - a as f64;
+        return (l + d * (h - l)).trunc();
+    }
+    h.trunc()
+}
+
+/// evxl `X`: best scenario per (filtered) subcategory, `W` energy per subcat,
+/// harmonic mean over subcats (any zero subcategory zeroes the overall),
+/// rounded to 0.1.
+fn x_engine(
+    progress: &BenchmarkProgress,
+    difficulty: &Difficulty,
+    thresholds: &[f64],
+    fake_lower: f64,
+    fake_upper: f64,
+    filter: impl Fn(&str) -> bool,
+) -> (u32, f64) {
+    if thresholds.is_empty() {
+        return (0, 0.0);
+    }
+    let order = scenario_order(progress, difficulty);
+    let subs = subcategory_spans(difficulty);
+    let total_subs = subs.iter().filter(|(_, _, n)| filter(n)).count();
+    let mut energies: Vec<f64> = Vec::new();
+    let mut idx = 0usize;
+    for (_, count, name) in &subs {
+        if !filter(name) {
+            idx += count;
+            continue;
+        }
+        let mut best = 0.0f64;
+        for _ in 0..*count {
+            if idx < order.len() {
+                let (_, entry) = order[idx];
+                if entry.score > 0.0 && !entry.rank_maxes.is_empty() {
+                    let pr = rank_of(entry.score, &entry.rank_maxes);
+                    let e = w_energy(
+                        entry.score,
+                        &entry.rank_maxes,
+                        &pr,
+                        thresholds,
+                        fake_lower,
+                        fake_upper,
+                    );
+                    best = best.max(e);
+                }
+            }
+            idx += 1;
+        }
+        energies.push(best);
+    }
+    if energies.len() != total_subs || total_subs == 0 {
+        return (0, 0.0);
+    }
+    let overall = (harmonic_strict(&energies) * 10.0).round() / 10.0;
+    let mut rank = 0u32;
+    for (i, t) in thresholds.iter().enumerate() {
+        if overall >= *t {
+            rank = (i + 1) as u32;
+        }
+    }
+    (rank, overall)
+}
+
+/// evxl `ne`: highest rank with at least `needed` scenarios at or above it.
+/// `at_or_above_progress`: progress toward the next rank counts scenarios at
+/// rank >= next (rbe/routine) vs exactly next (tpt/asb).
+fn ne_rank(progress: &BenchmarkProgress, needed: usize, at_or_above_progress: bool) -> (u32, f64) {
+    let mut counts: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
+    let mut total = 0usize;
+    for (_, cat) in &progress.categories {
+        for (_, sc) in &cat.scenarios {
+            total += 1;
+            if sc.scenario_rank > 0 {
+                *counts.entry(sc.scenario_rank).or_insert(0) += 1;
+            }
+        }
+    }
+    if total == 0 || needed == 0 {
+        return (0, 0.0);
+    }
+    let at_or_above = |r: u32| -> u32 {
+        counts
+            .iter()
+            .filter(|(&k, _)| k >= r)
+            .map(|(_, &v)| v)
+            .sum()
+    };
+    let max_rank = counts.keys().cloned().max().unwrap_or(0);
+    let mut best = 0u32;
+    for r in (1..=max_rank).rev() {
+        if at_or_above(r) >= needed as u32 {
+            best = r;
+            break;
+        }
+    }
+    let prog = if best == 0 {
+        0.0
+    } else {
+        let next = best + 1;
+        let n = if at_or_above_progress {
+            at_or_above(next)
+        } else {
+            counts.get(&next).cloned().unwrap_or(0)
+        };
+        (n as f64 / needed as f64).clamp(0.0, 1.0)
+    };
+    (best, prog)
+}
+
+/// evxl `me`: table-driven per-scenario energies, harmonic mean over ALL
+/// scenarios (any unplayed scenario zeroes the whole benchmark).
+fn me_table_engine(
+    progress: &BenchmarkProgress,
+    _difficulty: &Difficulty,
+    thresholds: &[f64],
+) -> (u32, f64) {
+    if thresholds.is_empty() {
+        return (0, 0.0);
+    }
+    let order = scenario_order(progress, _difficulty);
+    if order.is_empty() {
+        return (0, 0.0);
+    }
+    let mut energies: Vec<f64> = Vec::new();
+    for (_, entry) in &order {
+        let score = entry.score;
+        if score <= 0.0 || entry.rank_maxes.is_empty() {
+            return (0, 0.0);
+        }
+        let pr = rank_of(score, &entry.rank_maxes);
+        let e = if pr.base == 0 {
+            let first = entry.rank_maxes[0].max(1.0);
+            (score / first * thresholds[0]).trunc()
+        } else if pr.is_maxed {
+            let top = entry.rank_maxes.last().cloned().unwrap_or(1.0);
+            let prev = if entry.rank_maxes.len() > 1 {
+                entry.rank_maxes[entry.rank_maxes.len() - 2]
+            } else {
+                0.0
+            };
+            let band = {
+                let b = top - prev;
+                if b.abs() < f64::EPSILON {
+                    1.0
+                } else {
+                    b
+                }
+            };
+            (thresholds[thresholds.len() - 1] + (score - top) / band * 100.0).trunc()
+        } else {
+            let low = thresholds[pr.base as usize - 1];
+            let high = thresholds.get(pr.base as usize).cloned().unwrap_or(low);
+            (low + pr.progress * (high - low)).trunc()
+        };
+        energies.push(e);
+    }
+    if energies.iter().any(|&e| e <= 0.0) {
+        return (0, 0.0);
+    }
+    let overall = (harmonic_strict(&energies) * 10.0).round() / 10.0;
+    let mut rank = 0u32;
+    for (i, t) in thresholds.iter().enumerate() {
+        if overall >= *t {
+            rank = (i + 1) as u32;
+        }
+    }
+    (rank, overall)
+}
+
+/// evxl `se` generalization (shared by `Avasive-S2` and `snakbox`): per-
+/// scenario W energies (uncapped), clamped to `cap`, subcategory energy =
+/// average of the top TWO (a single-scenario subcategory contributes HALF),
+/// harmonic mean across subcategories.
+fn se_engine(
+    progress: &BenchmarkProgress,
+    difficulty: &Difficulty,
+    thresholds: &[f64],
+    cap: f64,
+) -> (u32, f64) {
+    if thresholds.is_empty() {
+        return (0, 0.0);
+    }
     let order = scenario_order(progress, difficulty);
     let subs = subcategory_spans(difficulty);
     let mut sub_energies: Vec<f64> = Vec::new();
@@ -563,35 +1378,36 @@ pub fn calc_avasive_s2(
         for _ in 0..*count {
             if idx < order.len() {
                 let (_, entry) = order[idx];
-                let score = entry.score;
-                if score > 0.0 && !entry.rank_maxes.is_empty() {
-                    let pr = rank_of(score, &entry.rank_maxes);
-                    // Uncapped energy interpolation over the threshold table
-                    // (evxl W with fakeUpper = +Infinity), then the cap.
-                    let mut e = energy_of(&pr, &thresholds, 100, f64::INFINITY);
-                    if e.is_finite() {
-                        e = e.min(cap);
-                    } else {
-                        e = cap;
-                    }
+                // evxl `se`: unplayed scenarios are EXCLUDED from the
+                // subcategory list entirely (only scored scenarios push an
+                // energy) — pushing a zero would poison the harmonic mean.
+                if entry.score > 0.0 && !entry.rank_maxes.is_empty() {
+                    let pr = rank_of(entry.score, &entry.rank_maxes);
+                    let e = w_energy(
+                        entry.score,
+                        &entry.rank_maxes,
+                        &pr,
+                        thresholds,
+                        100.0,
+                        f64::INFINITY,
+                    );
+                    let e = if e.is_finite() { e.min(cap) } else { cap };
                     energies.push(e);
-                } else {
-                    energies.push(0.0);
                 }
             }
             idx += 1;
         }
         energies.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-        let sub = if energies.len() == 1 {
-            energies[0] / 2.0
-        } else if energies.len() >= 2 {
-            (energies[0] + energies[1]) / 2.0
-        } else {
+        let sub = if energies.is_empty() {
             0.0
+        } else if energies.len() == 1 {
+            energies[0] / 2.0
+        } else {
+            (energies[0] + energies[1]) / 2.0
         };
         sub_energies.push(sub);
     }
-    let overall = harmonic_strict(&sub_energies);
+    let overall = (harmonic_strict(&sub_energies) * 10.0).round() / 10.0;
     let mut rank = 0u32;
     for (i, t) in thresholds.iter().enumerate() {
         if overall >= *t {
@@ -601,174 +1417,77 @@ pub fn calc_avasive_s2(
     (rank, overall)
 }
 
-/// `jade-palace`: subcategory energy = avg best half (Fundamentals: top 3,
-/// Easy: capped 600 until overall reaches 600), harmonic soft.
-pub fn calc_jade_palace(
-    progress: &BenchmarkProgress,
-    benchmark: &BenchmarkDef,
+// ---------------------------------------------------------------------------
+// Bespoke batch-ported methods (chunk 3)
+// ---------------------------------------------------------------------------
+
+/// evxl `Ne`: piecewise interpolation of score against rank_maxes onto a
+/// points table (ra-s4). Below maxes[1]: extrapolate with the 2/3 slope.
+/// Above the top: extrapolate with slope divided by `tail` (default 1).
+fn ne_points_interp(score: f64, maxes: &[f64], points: &[f64], tail: f64) -> f64 {
+    if maxes.len() < 2 || points.len() < 2 || maxes.len() != points.len() {
+        return 0.0;
+    }
+    if score < maxes[1] {
+        let step = maxes[1] - maxes[0];
+        let slope = (points[2] - points[1]) / (2.0 / 3.0);
+        return (points[1] + (score - maxes[1]) / step * slope)
+            .max(0.0)
+            .ceil();
+    }
+    for s in 1..maxes.len() - 1 {
+        if score <= maxes[s + 1] {
+            return points[s]
+                + (score - maxes[s]) / (maxes[s + 1] - maxes[s]) * (points[s + 1] - points[s]);
+        }
+    }
+    let o = maxes.len() - 1;
+    points[o] + (score - maxes[o]) / (maxes[o] - maxes[o - 1]) * (points[o] - points[o - 1]) / tail
+}
+
+/// evxl `Me`: the top `take` scenarios of one category by precise rank.
+fn top_scenarios<'a>(
+    progress: &'a BenchmarkProgress,
     difficulty: &Difficulty,
-) -> (u32, f64) {
-    let mut thresholds = difficulty_thresholds(benchmark, difficulty);
-    if thresholds.len() > 1 {
-        thresholds.pop(); // evxl slices off the last ladder entry
-    }
-    let is_easy = difficulty.name.eq_ignore_ascii_case("easy");
-    let is_fundamentals = difficulty.name.eq_ignore_ascii_case("fundamentals");
+    category: &str,
+    take: usize,
+) -> Vec<(&'a ScenarioEntry, f64)> {
     let order = scenario_order(progress, difficulty);
+    // Recompute document index range for the category.
     let subs = subcategory_spans(difficulty);
-    let mut energies: Vec<f64> = Vec::new();
-    let mut uncapped_energies: Vec<f64> = Vec::new();
     let mut idx = 0usize;
-    for (_, count, _) in &subs {
-        let mut capped: Vec<f64> = Vec::new();
-        let mut raw: Vec<f64> = Vec::new();
-        for _ in 0..*count {
-            if idx < order.len() {
-                let (_, entry) = order[idx];
-                let norm = entry.score;
-                if norm > 0.0 && !entry.rank_maxes.is_empty() {
-                    let pr = rank_of(norm, &entry.rank_maxes);
-                    let e = energy_of(&pr, &thresholds, 100, 1.0);
-                    raw.push(e);
-                    capped.push(if is_easy { e.min(600.0) } else { e });
-                } else {
-                    raw.push(0.0);
-                    capped.push(0.0);
-                }
-            }
-            idx += 1;
+    let mut lo = usize::MAX;
+    let mut hi = 0usize;
+    for (cat, count, _) in &subs {
+        if cat == category {
+            lo = lo.min(idx);
+            hi = idx + count;
         }
-        energies.push(avg_best_half(&capped, is_fundamentals));
-        uncapped_energies.push(avg_best_half(&raw, is_fundamentals));
+        idx += count;
     }
-    let mut overall = harmonic_soft(&energies);
-    // Easy: once capped overall reaches 600, uncap.
-    if is_easy && harmonic_soft(&uncapped_energies) >= 600.0 {
-        overall = harmonic_soft(&uncapped_energies);
+    if lo == usize::MAX {
+        return Vec::new();
     }
-    let mut rank = 0u32;
-    for (i, t) in thresholds.iter().enumerate() {
-        if overall >= *t {
-            rank = (i + 1) as u32;
-        }
-    }
-    (rank, overall)
-}
-
-/// `aimbeast`: category rank = average of scenario ranks; overall = average of
-/// category ranks; any unranked scenario poisons its category.
-pub fn calc_aimbeast(progress: &BenchmarkProgress) -> (u32, f64) {
-    let mut category_ranks: Vec<f64> = Vec::new();
-    for (_, category) in &progress.categories {
-        let mut sum = 0.0;
-        let mut n = 0usize;
-        for (_, scenario) in &category.scenarios {
-            if scenario.scenario_rank == 0 || scenario.score <= 0.0 {
-                sum = 0.0;
-                n = 0;
-                break;
-            }
-            sum += scenario.scenario_rank as f64;
-            n += 1;
-        }
-        if n == 0 {
-            return (0, 0.0);
-        }
-        category_ranks.push(sum / n as f64);
-    }
-    if category_ranks.is_empty() {
-        return (0, 0.0);
-    }
-    let avg = category_ranks.iter().sum::<f64>() / category_ranks.len() as f64;
-    (avg.floor() as u32, avg)
-}
-
-/// `dojo`-family: N scenarios at rank R (or higher) ⇒ rank R
-/// (dojo = 4, dojo2 = 3, dojo3 = 5).
-pub fn calc_count_required(progress: &BenchmarkProgress, required: usize) -> u32 {
-    let mut counts: std::collections::BTreeMap<u32, u32> = Default::default();
-    for (_, category) in &progress.categories {
-        for (_, scenario) in &category.scenarios {
-            if scenario.score > 0.0 && scenario.scenario_rank > 0 {
-                *counts.entry(scenario.scenario_rank).or_default() += 1;
-            }
-        }
-    }
-    let mut ranks: Vec<u32> = counts.keys().cloned().collect();
-    ranks.sort_unstable_by(|a, b| b.cmp(a));
-    for &r in &ranks {
-        let at_or_above: u32 = ranks.iter().filter(|&&k| k >= r).map(|k| counts[k]).sum();
-        if at_or_above >= required as u32 {
-            return r;
-        }
-    }
-    0
-}
-
-/// `hewchy`: 12 scenarios at rank R.
-pub fn calc_hewchy(progress: &BenchmarkProgress) -> u32 {
-    calc_count_required(progress, 12)
-}
-
-/// `e1se`: 6 scenarios at rank R.
-pub fn calc_e1se(progress: &BenchmarkProgress) -> u32 {
-    calc_count_required(progress, 6)
-}
-
-/// `aoi`: 1 score at R in 4 different subcategories, OR 2 scores at R in
-/// 3 different subcategories; best qualifying rank wins.
-pub fn calc_aoi(progress: &BenchmarkProgress, difficulty: &Difficulty) -> u32 {
-    let order = scenario_order(progress, difficulty);
-    let subs = subcategory_spans(difficulty);
-    // (rank -> set of subcategory keys), one entry per subcategory occurrence
-    let mut per_sub: Vec<Vec<u32>> = Vec::new();
-    let mut idx = 0usize;
-    for (_, count, _) in &subs {
-        let mut ranks = Vec::new();
-        for _ in 0..*count {
-            if idx < order.len() {
-                let (_, entry) = order[idx];
-                if entry.score > 0.0 && entry.scenario_rank > 0 {
-                    ranks.push(entry.scenario_rank);
-                }
-            }
-            idx += 1;
-        }
-        per_sub.push(ranks);
-    }
-    let qualifies = |target: u32, need_subs: usize, need_scores: usize| -> bool {
-        per_sub
-            .iter()
-            .filter(|ranks| ranks.iter().filter(|&&r| r >= target).count() >= need_scores)
-            .count()
-            >= need_subs
-    };
-    let ladder = difficulty.rank_colors.len() as u32;
-    for target in (1..=ladder).rev() {
-        if qualifies(target, 4, 1) || qualifies(target, 3, 2) {
-            return target;
-        }
-    }
-    0
-}
-
-/// `MIYU`: points per scenario = 2 + (rank - 1); total vs fixed thresholds.
-pub fn calc_miyu(progress: &BenchmarkProgress) -> u32 {
-    const THRESHOLDS: [f64; 7] = [16., 24., 32., 40., 48., 56., 63.];
-    let total: f64 = progress
-        .categories
+    let mut out: Vec<(&ScenarioEntry, f64)> = order[lo.min(order.len())..hi.min(order.len())]
         .iter()
-        .flat_map(|(_, c)| c.scenarios.iter())
-        .map(|(_, s)| {
-            if s.score > 0.0 && s.scenario_rank > 0 {
-                2.0 + (s.scenario_rank as f64 - 1.0)
+        .filter_map(|(_, e)| {
+            if e.score > 0.0 && !e.rank_maxes.is_empty() {
+                let pr = rank_of(e.score, &e.rank_maxes);
+                Some((*e, pr.precise))
             } else {
-                0.0
+                None
             }
         })
-        .sum();
+        .collect();
+    out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(take);
+    out
+}
+
+/// evxl `K`: rank = number of thresholds cleared by totalScore.
+fn rank_from_total(total: f64, thresholds: &[f64]) -> u32 {
     let mut rank = 0u32;
-    for (i, t) in THRESHOLDS.iter().enumerate() {
+    for (i, t) in thresholds.iter().enumerate() {
         if total >= *t {
             rank = (i + 1) as u32;
         }
@@ -776,207 +1495,1021 @@ pub fn calc_miyu(progress: &BenchmarkProgress) -> u32 {
     rank
 }
 
-/// Dispatch: compute (rank index, display name, complete flag) for a benchmark.
-/// Falls back to the API `overall_rank` for methods not yet ported.
-pub fn compute_rank(
+/// `ra-s4` (evxl `dn`): per-category top-4 scenarios, `Ne`-interpolated onto
+/// per-difficulty points tables, summed; rank vs fixed totals.
+pub fn calc_ra_s4(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let easy = difficulty.name.to_lowercase() == "easy";
+    let maxes_t: Vec<f64> = if easy {
+        vec![20.0, 50.0, 80.0, 110.0, 140.0, 170.0]
+    } else {
+        vec![200.0, 235.0, 270.0, 320.0, 360.0, 400.0]
+    };
+    let points_t: Vec<f64> = if easy {
+        vec![240.0, 600.0, 960.0, 1320.0, 1680.0, 2040.0]
+    } else {
+        vec![2400.0, 2820.0, 3240.0, 3840.0, 4320.0, 4800.0]
+    };
+    let totals: Vec<f64> = vec![2400.0, 2820.0, 3240.0, 3840.0, 4320.0, 4800.0];
+    let _ = totals; // K uses `o` = points table for easy? evxl passes `o` (the easy/normal totals table)
+                    // evxl: `o` is the SAME table as points_t branch (r? [2400..]:[2400..]) — actually `o` was
+                    // defined as the points table and `t` as maxes table; K(...) passes `o` = totals? Re-reading:
+                    // dn: t = maxes table, o = totals table (2400..4800). s = per-category weighted scores.
+                    // K(e, n, cb, o) -> thresholds = o (the totals table = points table values here).
+    let cat_names: Vec<String> = {
+        let mut seen = Vec::new();
+        for (cat, _, _) in subcategory_spans(difficulty) {
+            if !seen.contains(&cat) {
+                seen.push(cat);
+            }
+        }
+        seen
+    };
+    let mut total = 0.0f64;
+    for cat in &cat_names {
+        for (entry, _) in top_scenarios(progress, difficulty, cat, 4) {
+            total += ne_points_interp(entry.score, &maxes_t, &points_t, 1.5);
+        }
+    }
+    let rank = rank_from_total(total, &points_t);
+    (rank, total)
+}
+
+/// `cb-s1` (evxl `mn`): each scenario mapped onto a fixed 300..1800 points
+/// table by its own rank_maxes; rank = thresholds cleared by the SUM of
+/// percentages (score/1800*100 accumulated).
+pub fn calc_cb_s1(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let table: Vec<f64> = vec![300.0, 600.0, 900.0, 1200.0, 1500.0, 1800.0];
+    let top = 1800.0;
+    let order = scenario_order(progress, difficulty);
+    let mut pct_sum = 0.0f64;
+    for (_, entry) in &order {
+        let score = entry.score;
+        if score <= 0.0 || entry.rank_maxes.is_empty() {
+            continue;
+        }
+        let pr = rank_of(score, &entry.rank_maxes);
+        let maxes = &entry.rank_maxes;
+        let val = if pr.base == 0 {
+            score / maxes[0] * table[0]
+        } else if pr.is_maxed && pr.base as usize == maxes.len() {
+            let r = maxes[maxes.len() - 1];
+            let m = if maxes.len() > 1 {
+                maxes[maxes.len() - 2]
+            } else {
+                0.0
+            };
+            let band = {
+                let b = (r - m).abs();
+                if b < 1.0 {
+                    1.0
+                } else {
+                    b
+                }
+            };
+            let over = ((score - r) / band).max(0.0);
+            table[((pr.base as f64 + over) as usize).min(table.len() - 1)]
+        } else {
+            table[pr.base as usize - 1]
+                + (table[pr.base as usize] - table[pr.base as usize - 1]) * pr.progress
+        };
+        pct_sum += val / top * 100.0;
+    }
+    let rank = rank_from_total(pct_sum, &table);
+    (rank, pct_sum)
+}
+
+/// `aplus-s1` (evxl `fn`): basic rank, plus a tie-break: plus-rank = the
+/// lowest per-category 3rd-highest scenario_rank; final = max(normal, plus).
+pub fn calc_aplus_s1(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let (normal, _, _) = calc_basic(progress, difficulty);
+    let mut plus = u32::MAX;
+    for (_, cat) in &progress.categories {
+        let mut ranks: Vec<u32> = cat
+            .scenarios
+            .iter()
+            .filter_map(|(_, e)| {
+                if e.score > 0.0 {
+                    Some(e.scenario_rank)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        ranks.sort_unstable_by(|a, b| b.cmp(a));
+        let third = if ranks.len() >= 3 { ranks[2] } else { 0 };
+        plus = plus.min(third);
+    }
+    if plus == u32::MAX {
+        plus = 0;
+    }
+    let final_rank = normal.max(plus);
+    (final_rank, plus as f64)
+}
+
+/// `aplus-alt` (evxl `bn`): every scenario contributes
+/// (preciseRank / scenarioCount) * 100 to a total; thresholds = 100-step
+/// ladder of the difficulty's tier count.
+pub fn calc_aplus_alt(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let tiers = difficulty.rank_colors.len();
+    let thresholds: Vec<f64> = if tiers > 0 {
+        (0..tiers).map(|l| (l + 1) as f64 * 100.0).collect()
+    } else {
+        vec![
+            100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0,
+        ]
+    };
+    let total_scenarios: usize = progress
+        .categories
+        .iter()
+        .map(|(_, c)| c.scenarios.len())
+        .sum();
+    if total_scenarios == 0 {
+        return (0, 0.0);
+    }
+    let per = 100.0 / total_scenarios as f64;
+    let mut total = 0.0f64;
+    for (_, cat) in &progress.categories {
+        for (_, e) in &cat.scenarios {
+            if e.score <= 0.0 || e.rank_maxes.is_empty() {
+                continue;
+            }
+            let pr = rank_of(e.score, &e.rank_maxes);
+            total += if pr.base == 0 {
+                e.score / e.rank_maxes[0].max(1.0) * per
+            } else {
+                (pr.base as f64 + pr.progress) * per
+            };
+        }
+    }
+    let total = (total * 100.0).round() / 100.0;
+    let rank = rank_from_total(total, &thresholds);
+    (rank, total)
+}
+
+/// `xyz2` (evxl `Tn`): per-difficulty required rank ladder (easy: 12..1,
+/// hard: 10..1). Pinnacle if all scenarios share the top required rank, or
+/// every category has >=3 at it. Otherwise rank = min over categories of the
+/// 4th-highest scenario rank (categories with <4 scenarios -> unranked).
+pub fn calc_xyz2(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let name = difficulty.name.trim().to_lowercase();
+    let ladder: Vec<u32> = match name.as_str() {
+        "easy" => vec![12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+        "hard" => vec![10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+        _ => return (0, 0.0),
+    };
+    let top = ladder[0];
+    let mut cat_ranks: Vec<Vec<u32>> = Vec::new();
+    let mut total = 0usize;
+    for (_, cat) in &progress.categories {
+        let mut ranks = Vec::new();
+        for (_, e) in &cat.scenarios {
+            total += 1;
+            if e.scenario_rank > 0 {
+                ranks.push(e.scenario_rank);
+            }
+        }
+        cat_ranks.push(ranks);
+    }
+    let all: Vec<u32> = cat_ranks.iter().flatten().cloned().collect();
+    if total > 0 && all.len() == total && all.iter().all(|&r| r == top) {
+        return (top, 1.0);
+    }
+    if cat_ranks
+        .iter()
+        .all(|r| r.iter().filter(|&&r| r == top).count() >= 3)
+    {
+        return (top, 1.0);
+    }
+    let mut insufficient = false;
+    let mut fourths: Vec<u32> = Vec::new();
+    for r in &cat_ranks {
+        if r.len() < 4 {
+            insufficient = true;
+            break;
+        }
+        let mut sorted = r.clone();
+        sorted.sort_unstable_by(|a, b| b.cmp(a));
+        fourths.push(sorted[3]);
+    }
+    if insufficient || fourths.is_empty() {
+        return (0, 0.0);
+    }
+    let rank = fourths.iter().cloned().min().unwrap_or(0);
+    (rank, 0.0)
+}
+
+/// `xyz` (evxl `Rn`): per-category count-based qualification ladder with
+/// per-difficulty per-category requirements; pinnacle when everything maxes.
+pub fn calc_xyz(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let _ = difficulty;
+    let mut max_len = 0usize;
+    let mut cat_scen_ranks: Vec<Vec<u32>> = Vec::new();
+    for (_, cat) in &progress.categories {
+        let mut ranks = Vec::new();
+        for (_, e) in &cat.scenarios {
+            ranks.push(e.scenario_rank);
+            max_len = max_len.max(e.rank_maxes.len());
+        }
+        cat_scen_ranks.push(ranks);
+    }
+    let ladder_tiers = difficulty.rank_colors.len();
+    let u = max_len.max(ladder_tiers);
+    if u == 0 {
+        return (0, 0.0);
+    }
+    let flat: Vec<u32> = cat_scen_ranks.iter().flatten().cloned().collect();
+    let l = flat.len();
+    if l == 0 {
+        return (0, 0.0);
+    }
+    if flat.iter().all(|&r| r == u as u32) {
+        return (u as u32, 1.0);
+    }
+    let clamp01 = |v: f64| v.clamp(0.0, 1.0);
+    let d = cat_scen_ranks.len();
+    // evxl: req per category = 3 when x == u else 4 (newcomer variant uses 2/…; xyz Benchmarks difficulty is fixed shape here)
+    let mut rank = 0u32;
+    for x in (1..=u).rev() {
+        let xu = x as u32;
+        let req = if x == u { 3 } else { 4 };
+        let total_req = req * d;
+        let per_cat_ok = cat_scen_ranks
+            .iter()
+            .all(|r| r.iter().filter(|&&v| v >= xu).count() >= req);
+        let total_ok = flat.iter().filter(|&&v| v >= xu).count() >= total_req;
+        if per_cat_ok && total_ok {
+            rank = xu;
+            break;
+        }
+    }
+    if rank as usize >= u {
+        let count_top = flat.iter().filter(|&&v| v >= u as u32).count() as f64;
+        let need = (3.0 * d as f64).min(l as f64);
+        let rest = l as f64 - need;
+        let prog = if rest > 0.0 {
+            clamp01((count_top - need) / rest)
+        } else {
+            1.0
+        };
+        return (u as u32, prog);
+    }
+    let next = if rank == 0 { 1 } else { rank + 1 };
+    let req_next = if next as usize == u { 3 } else { 4 };
+    let total_req = req_next * d;
+    let have: usize = cat_scen_ranks
+        .iter()
+        .map(|r| r.iter().filter(|&&v| v >= next).count().min(req_next))
+        .sum();
+    let prog = if total_req > 0 {
+        clamp01(have as f64 / total_req as f64)
+    } else {
+        0.0
+    };
+    (rank, prog)
+}
+
+/// `xyz-smoothness-v2` (evxl `Cn`): count-of-scenarios-at-or-above ladder
+/// (9 needed per step; 6 scores at the top tier reach the top rank).
+pub fn calc_xyz_smoothness_v2(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let tiers = difficulty.rank_colors.len();
+    if tiers == 0 {
+        return (0, 0.0);
+    }
+    let top_needed = 9usize;
+    let prismatic = 6usize;
+    let mut at_or_above: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
+    let mut total = 0usize;
+    for (_, cat) in &progress.categories {
+        for (_, e) in &cat.scenarios {
+            total += 1;
+            let r = if !e.rank_maxes.is_empty() && e.score > 0.0 {
+                rank_of(e.score, &e.rank_maxes).base
+            } else {
+                e.scenario_rank
+            };
+            if r > 0 {
+                for t in 1..=tiers as u32 {
+                    if r >= t {
+                        *at_or_above.entry(t).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+    }
+    let clamp01 = |v: f64| v.clamp(0.0, 1.0);
+    let top_count = at_or_above.get(&(tiers as u32)).cloned().unwrap_or(0);
+    if total > 0 && top_count >= total {
+        return (tiers as u32, 1.0);
+    }
+    if top_count >= prismatic {
+        let need = total - prismatic;
+        let prog = if need > 0 {
+            clamp01((top_count - prismatic) as f64 / need as f64)
+        } else {
+            1.0
+        };
+        return (tiers as u32, prog);
+    }
+    let mut rank = 0u32;
+    for m in (1..tiers as u32).rev() {
+        if at_or_above.get(&m).cloned().unwrap_or(0) >= top_needed {
+            rank = m;
+            break;
+        }
+    }
+    let next = rank + 1;
+    let next_needed = if next as usize >= tiers {
+        prismatic
+    } else {
+        top_needed
+    };
+    let next_count = at_or_above.get(&next).cloned().unwrap_or(0);
+    let prog = if next_needed > 0 {
+        clamp01(next_count as f64 / next_needed as f64)
+    } else {
+        0.0
+    };
+    (rank, prog)
+}
+
+/// `RXZU` (evxl `On`): per-difficulty points tables; each scenario scores the
+/// points of its scenario_rank; rank = thresholds cleared by the AVERAGE.
+pub fn calc_rxzu(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let table: Vec<f64> = match difficulty.name.to_lowercase().as_str() {
+        "easy" => vec![
+            200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0, 1100.0, 1200.0,
+        ],
+        "hard" => vec![
+            400.0, 500.0, 600.0, 700.0, 800.0, 850.0, 900.0, 950.0, 1000.0, 1050.0, 1100.0, 1150.0,
+            1200.0,
+        ],
+        _ => return (0, 0.0),
+    };
+    let mut sum = 0.0f64;
+    let mut n = 0usize;
+    for (_, cat) in &progress.categories {
+        for (_, e) in &cat.scenarios {
+            n += 1;
+            if e.scenario_rank > 0 {
+                let idx = (e.scenario_rank as usize).min(table.len()) - 1;
+                sum += table[idx];
+            }
+        }
+    }
+    if n == 0 {
+        return (0, 0.0);
+    }
+    let avg = sum / n as f64;
+    let rank = rank_from_total(avg, &table);
+    (rank, avg)
+}
+
+/// `dm` (evxl `Je`): 100-step energies with a difficulty-based base (boss
+/// variants start at 500/900), subcategory energy = MAX scenario energy
+/// (isMaxed extends past top by 10 per band), harmonic mean over subcats.
+pub fn calc_dm(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let tiers = difficulty.rank_colors.len();
+    if tiers == 0 {
+        return (0, 0.0);
+    }
+    let name = difficulty.name.to_lowercase();
+    let base = if (name == "boss" && tiers == 8) || name == "boss+" {
+        500.0
+    } else if name == "boss++" {
+        900.0
+    } else {
+        100.0
+    };
+    let thresholds: Vec<f64> = (0..tiers)
+        .map(|r| {
+            if r == 0 {
+                base
+            } else if r == tiers - 1 {
+                base + (r as f64 - 1.0) * 100.0 + 10.0
+            } else {
+                base + r as f64 * 100.0
+            }
+        })
+        .collect();
+    let order = scenario_order(progress, difficulty);
+    let subs = subcategory_spans(difficulty);
+    let mut sub_energies: Vec<f64> = Vec::new();
+    let mut idx = 0usize;
+    for (_, count, _n) in &subs {
+        let mut best = 0.0f64;
+        for _ in 0..*count {
+            if idx < order.len() {
+                let (_, entry) = order[idx];
+                let score = entry.score;
+                if score > 0.0 && !entry.rank_maxes.is_empty() {
+                    let pr = rank_of(score, &entry.rank_maxes);
+                    let e = if pr.base == 0 {
+                        0.0
+                    } else if pr.is_maxed && pr.base as usize == entry.rank_maxes.len() {
+                        let v = thresholds[thresholds.len() - 1];
+                        let top = entry.rank_maxes.last().cloned().unwrap_or(1.0);
+                        let prev = if entry.rank_maxes.len() > 1 {
+                            entry.rank_maxes[entry.rank_maxes.len() - 2]
+                        } else {
+                            0.0
+                        };
+                        let band = {
+                            let c = (top - prev).abs();
+                            if c < 1.0 {
+                                1.0
+                            } else {
+                                c
+                            }
+                        };
+                        let over = ((score - top) / band).max(0.0);
+                        v + over * 10.0
+                    } else {
+                        let low = thresholds[pr.base as usize - 1];
+                        let high = thresholds.get(pr.base as usize).cloned().unwrap_or(low);
+                        low + pr.progress * (high - low)
+                    };
+                    best = best.max(e.max(0.0).trunc());
+                }
+            }
+            idx += 1;
+        }
+        sub_energies.push(best);
+    }
+    let overall = (harmonic_strict(&sub_energies) * 10.0).round() / 10.0;
+    let rank = rank_from_total(overall, &thresholds);
+    (rank, overall)
+}
+
+/// `dm-s3` (evxl `We`): per-difficulty 4-step thresholds ([100,200,300,1510],
+/// boss variants / level-N), subcat energy = MAX scenario (below-rank-1
+/// scales toward t[0]); harmonic mean over subcats.
+pub fn calc_dm_s3(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let name = difficulty.name.to_lowercase();
+    let thresholds: Vec<f64> = if name.contains("boss") {
+        vec![1300.0, 1400.0, 1500.0, 1510.0]
+    } else if let Some((pos, _)) = name.match_indices(|c: char| c.is_ascii_digit()).next() {
+        let lvl: u32 = name[pos..pos + 1].parse().unwrap_or(1);
+        let start = (lvl.saturating_sub(1)) * 300 + 100;
+        vec![
+            start as f64,
+            start as f64 + 100.0,
+            start as f64 + 200.0,
+            1510.0,
+        ]
+    } else {
+        vec![100.0, 200.0, 300.0, 1510.0]
+    };
+    let order = scenario_order(progress, difficulty);
+    let subs = subcategory_spans(difficulty);
+    let mut sub_energies: Vec<f64> = Vec::new();
+    let mut idx = 0usize;
+    for (_, count, _n) in &subs {
+        let mut best = 0.0f64;
+        for _ in 0..*count {
+            if idx < order.len() {
+                let (_, entry) = order[idx];
+                let score = entry.score;
+                if score > 0.0 && !entry.rank_maxes.is_empty() {
+                    let pr = rank_of(score, &entry.rank_maxes);
+                    let e = if pr.base == 0 {
+                        let first = entry.rank_maxes[0].max(1.0);
+                        ((score / first) * thresholds[0]).min(thresholds[0])
+                    } else if pr.is_maxed && pr.base as usize == entry.rank_maxes.len() {
+                        thresholds[thresholds.len() - 1]
+                    } else {
+                        let low = thresholds[pr.base as usize - 1];
+                        let high = thresholds
+                            .get(pr.base as usize)
+                            .cloned()
+                            .unwrap_or(thresholds[thresholds.len() - 1]);
+                        low + pr.progress * (high - low)
+                    };
+                    best = best.max(e.max(0.0).trunc());
+                }
+            }
+            idx += 1;
+        }
+        sub_energies.push(best);
+    }
+    let overall = (harmonic_strict(&sub_energies) * 10.0).round() / 10.0;
+    let rank = rank_from_total(overall, &thresholds);
+    (rank, overall)
+}
+
+/// `mira-apex` (evxl `ze`): 10-step thresholds (tiers * 10), subcat energy =
+/// MAX scenario (below-rank-1 scales to t[0]; maxed pins t[-1]); harmonic
+/// mean with zeros as 0.1 when some (but not all) subcats are unplayed.
+pub fn calc_mira_apex(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    let tiers = difficulty.rank_colors.len();
+    if tiers == 0 {
+        return (0, 0.0);
+    }
+    let thresholds: Vec<f64> = (0..tiers).map(|k| (k + 1) as f64 * 10.0).collect();
+    let order = scenario_order(progress, difficulty);
+    let subs = subcategory_spans(difficulty);
+    let mut sub_energies: Vec<f64> = Vec::new();
+    let mut idx = 0usize;
+    for (_, count, _n) in &subs {
+        let mut best = 0.0f64;
+        for _ in 0..*count {
+            if idx < order.len() {
+                let (_, entry) = order[idx];
+                let score = entry.score;
+                if score > 0.0 && !entry.rank_maxes.is_empty() {
+                    let pr = rank_of(score, &entry.rank_maxes);
+                    let e = if pr.base == 0 {
+                        let first = entry.rank_maxes[0];
+                        if first > 0.0 {
+                            ((score / first).min(1.0)) * thresholds[0]
+                        } else {
+                            0.0
+                        }
+                    } else if pr.is_maxed && pr.base as usize == entry.rank_maxes.len() {
+                        thresholds[thresholds.len() - 1]
+                    } else {
+                        let low = thresholds[pr.base as usize - 1];
+                        let high = thresholds
+                            .get(pr.base as usize)
+                            .cloned()
+                            .unwrap_or(thresholds[thresholds.len() - 1]);
+                        low + pr.progress * (high - low)
+                    };
+                    best = best.max(e.max(0.0).trunc());
+                }
+            }
+            idx += 1;
+        }
+        sub_energies.push(best);
+    }
+    if sub_energies.is_empty() {
+        return (0, 0.0);
+    }
+    let l = sub_energies.len();
+    let played: Vec<f64> = sub_energies.iter().cloned().filter(|e| *e > 0.0).collect();
+    let overall = if played.len() == l {
+        let inv: f64 = played.iter().map(|e| 1.0 / e).sum();
+        l as f64 / inv
+    } else if !played.is_empty() {
+        let patched: Vec<f64> = sub_energies
+            .iter()
+            .map(|&e| if e == 0.0 { 0.1 } else { e })
+            .collect();
+        let inv: f64 = patched.iter().map(|e| 1.0 / e).sum();
+        l as f64 / inv
+    } else {
+        0.0
+    };
+    let overall = (overall * 10.0).round() / 10.0;
+    let rank = rank_from_total(overall, &thresholds);
+    (rank, overall)
+}
+
+/// `generic-energy-alt` (evxl `Qe`): per-scenario energies on a 100-step
+/// ladder of the difficulty's tier count (top+50 headroom, over-cap 0.5
+/// bands), AVERAGE over scenarios (not harmonic), rounded to 0.1.
+pub fn calc_generic_energy_alt(
+    progress: &BenchmarkProgress,
+    difficulty: &Difficulty,
+) -> (u32, f64) {
+    let tiers = difficulty.rank_colors.len();
+    if tiers == 0 {
+        return (0, 0.0);
+    }
+    let thresholds: Vec<f64> = (0..tiers).map(|l| (l + 1) as f64 * 100.0).collect();
+    let cap = thresholds[thresholds.len() - 1] + 50.0;
+    let order = scenario_order(progress, difficulty);
+    let mut energies: Vec<f64> = Vec::new();
+    for (_, entry) in &order {
+        let score = entry.score;
+        if score <= 0.0 || entry.rank_maxes.is_empty() {
+            energies.push(0.0);
+            continue;
+        }
+        let pr = rank_of(score, &entry.rank_maxes);
+        let e = if pr.base == 0 {
+            score / entry.rank_maxes[0].max(1.0) * thresholds[0]
+        } else if pr.is_maxed {
+            let n = entry.rank_maxes.len() - 1;
+            let y = entry.rank_maxes[n];
+            let p = if n > 0 { entry.rank_maxes[n - 1] } else { 0.0 };
+            let band = {
+                let t = (y - p).abs();
+                if t < 1.0 {
+                    1.0
+                } else {
+                    t
+                }
+            };
+            let over = ((score - y) / band).min(0.5);
+            thresholds[thresholds.len() - 1] + over * 100.0
+        } else {
+            let low = thresholds[pr.base as usize - 1];
+            let high = thresholds.get(pr.base as usize).cloned().unwrap_or(cap);
+            low + pr.progress * (high - low)
+        };
+        energies.push(e.min(cap).trunc());
+    }
+    if energies.is_empty() {
+        return (0, 0.0);
+    }
+    let avg = energies.iter().cloned().sum::<f64>() / energies.len() as f64;
+    let overall = (avg * 10.0).round() / 10.0;
+    let rank = rank_from_total(overall, &thresholds);
+    (rank, overall)
+}
+
+/// `complete` (evxl `Be`): the API's own rank recomputation — the floor rule
+/// over per-scenario ranks; rank 0 when unranked.
+pub fn calc_complete(progress: &BenchmarkProgress) -> (u32, f64) {
+    // evxl fe/ke: min scenario_rank with score > 0; any unplayed -> unranked.
+    let mut floor = u32::MAX;
+    let mut valid = true;
+    for (_, cat) in &progress.categories {
+        for (_, e) in &cat.scenarios {
+            if e.score <= 0.0 {
+                valid = false;
+                break;
+            }
+            if e.scenario_rank > 0 {
+                floor = floor.min(e.scenario_rank);
+            } else {
+                valid = false;
+                break;
+            }
+        }
+    }
+    if !valid || floor == u32::MAX {
+        (0, 0.0)
+    } else {
+        (floor, 0.0)
+    }
+}
+
+/// `tn` shared engine (`33` and `iris` via evxl `tn`): 100-step thresholds
+/// starting at a per-difficulty base (rn: novice/beginner/easy/intermediate
+/// 100, adv/advanced/hard 200, else (idx+1)*100); subcat energy = best-half
+/// average when half the scenarios clear t[0], else mean/(T*2); category
+/// averages then harmonic mean; rounds to integers.
+fn tn_engine(
     progress: &BenchmarkProgress,
     benchmark: &BenchmarkDef,
     difficulty: &Difficulty,
-) -> RankResult {
-    let method = benchmark.rank_calculation.as_str();
-    let ladder_len = difficulty.rank_colors.len() as u32;
-    let floor = scenario_floor_rank(progress);
-    let (engine_rank, complete): (u32, bool) = match method {
-        "basic" => {
-            let (r, c, _) = calc_basic(progress, difficulty);
-            (r, c)
-        }
-        "vt-energy" => {
-            let (r, _) = calc_vt_energy(progress, difficulty);
-            (r, false)
-        }
-        "generic-energy" => {
-            let (r, _) = calc_generic_energy(progress, benchmark, difficulty);
-            (r, false)
-        }
-        "Avasive-S2" => {
-            let (r, _) = calc_avasive_s2(progress, benchmark, difficulty);
-            (r, false)
-        }
-        "generic-energy-uncapped" => {
-            // Same ladder slice but no fakeUpper cap.
-            let thresholds = difficulty_thresholds(benchmark, difficulty);
-            let (r, _) = energy_core(
-                progress,
-                difficulty,
-                &thresholds,
-                100,
-                9999.0,
-                |_| true,
-                avg_top2_or_best,
-                harmonic_strict,
-            );
-            (r, false)
-        }
-        "jade-palace" => {
-            let (r, _) = calc_jade_palace(progress, benchmark, difficulty);
-            (r, false)
-        }
-        "aimbeast" => {
-            let (r, _) = calc_aimbeast(progress);
-            (r, false)
-        }
-        "aimbeast-partial" => {
-            // Half participation, unranked excluded (approximate: exclude zeros).
-            let mut category_ranks: Vec<f64> = Vec::new();
-            let mut ranked_total = 0usize;
-            let total: usize = progress
-                .categories
-                .iter()
-                .map(|(_, c)| c.scenarios.len())
-                .sum();
-            for (_, category) in &progress.categories {
-                let mut sum = 0.0;
-                let mut n = 0usize;
-                for (_, scenario) in &category.scenarios {
-                    if scenario.scenario_rank > 0 && scenario.score > 0.0 {
-                        sum += scenario.scenario_rank as f64;
-                        n += 1;
-                        ranked_total += 1;
-                    }
-                }
-                if n > 0 {
-                    category_ranks.push(sum / n as f64);
-                }
-            }
-            let required = total.div_ceil(2);
-            if ranked_total < required || category_ranks.is_empty() {
-                (0, false)
-            } else {
-                let avg = category_ranks.iter().sum::<f64>() / category_ranks.len() as f64;
-                (avg.floor() as u32, false)
-            }
-        }
-        "dojo" => (calc_count_required(progress, 4), false),
-        "dojo2" => (calc_count_required(progress, 3), false),
-        "dojo3" => (calc_count_required(progress, 5), false),
-        "hewchy" => (calc_hewchy(progress), false),
-        "e1se" => (calc_e1se(progress), false),
-        "aoi" => (calc_aoi(progress, difficulty), false),
-        "MIYU" => (calc_miyu(progress), false),
+) -> (u32, f64) {
+    let tiers = difficulty.rank_colors.len();
+    if tiers == 0 {
+        return (0, 0.0);
+    }
+    let name = difficulty.name.trim().to_lowercase();
+    let base: f64 = match name.as_str() {
+        "novice" | "beginner" | "easy" | "intermediate" => 100.0,
+        "adv" | "advanced" | "hard" => 200.0,
         _ => {
-            // Unported method: API rank is the current best estimate.
-            return RankResult {
-                rank: progress.overall_rank,
-                name: crate::ranks::rank_from_index(progress.overall_rank, difficulty)
-                    .map(|t| t.name)
-                    .unwrap_or_else(|| "Unranked".into()),
-                complete: false,
-                method: MethodSource::ApiFallback,
-            };
+            let idx = benchmark
+                .difficulties
+                .iter()
+                .position(|d| d.name == difficulty.name)
+                .map(|p| p + 1)
+                .unwrap_or(1);
+            idx as f64 * 100.0
         }
     };
-    // Dispatcher: displayed rank = max(engine, scenario floor), except
-    // aimbeast averages which already encode the floor.
-    let use_floor = !matches!(method, "aimbeast" | "aimbeast-partial" | "selectable-top-n");
-    let mut final_rank = engine_rank;
-    if use_floor && !complete {
-        final_rank = final_rank.max(floor);
+    let thresholds: Vec<f64> = (0..tiers).map(|r| base + r as f64 * 100.0).collect();
+    let first = thresholds[0];
+    let order = scenario_order(progress, difficulty);
+    let subs = subcategory_spans(difficulty);
+    let mut sub_energies: Vec<f64> = Vec::new();
+    let mut idx = 0usize;
+    for (_, count, _n) in &subs {
+        let mut energies: Vec<f64> = Vec::new();
+        for _ in 0..*count {
+            if idx < order.len() {
+                let (_, entry) = order[idx];
+                let score = entry.score;
+                if score > 0.0 && !entry.rank_maxes.is_empty() {
+                    let pr = rank_of(score, &entry.rank_maxes);
+                    let e = if pr.base == 0 {
+                        0.0
+                    } else if pr.is_maxed && pr.base as usize == entry.rank_maxes.len() {
+                        thresholds[thresholds.len() - 1]
+                    } else {
+                        let low = thresholds[pr.base as usize - 1];
+                        let high = thresholds
+                            .get(pr.base as usize)
+                            .cloned()
+                            .unwrap_or(thresholds[thresholds.len() - 1]);
+                        low + pr.progress * (high - low)
+                    };
+                    energies.push((e.max(0.0) * 100.0).round() / 100.0);
+                } else {
+                    energies.push(0.0);
+                }
+            }
+            idx += 1;
+        }
+        if energies.is_empty() {
+            sub_energies.push(0.0);
+            continue;
+        }
+        let t_half = energies.len().div_ceil(2);
+        let cleared = energies.iter().filter(|&&e| e >= first).count();
+        let sub = if cleared >= t_half {
+            let mut sorted = energies.clone();
+            sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+            let sum: f64 = sorted.iter().take(t_half).sum();
+            (sum / t_half as f64 * 100.0).round() / 100.0
+        } else {
+            let sum: f64 = energies.iter().sum();
+            (sum / (t_half as f64 * 2.0) * 100.0).round() / 100.0
+        };
+        sub_energies.push(sub.round());
     }
-    if final_rank > ladder_len + 1 {
-        final_rank = ladder_len + 1;
+    if sub_energies.is_empty() || sub_energies.iter().any(|&e| e <= 0.0) {
+        return (0, 0.0);
     }
-    let complete = final_rank > ladder_len;
-    let display_index = final_rank.min(ladder_len);
-    let name = if complete {
-        format!(
-            "{} Complete",
-            crate::ranks::rank_from_index(ladder_len, difficulty)
-                .map(|t| t.name)
-                .unwrap_or_default()
-        )
-    } else {
-        crate::ranks::rank_from_index(display_index, difficulty)
-            .map(|t| t.name)
-            .unwrap_or_else(|| "Unranked".into())
+    let overall = sub_energies.iter().cloned().sum::<f64>() / sub_energies.len() as f64;
+    let overall = overall.round();
+    let rank = rank_from_total(overall, &thresholds);
+    (rank, overall)
+}
+
+/// `33` and `iris` (evxl dispatcher `Fe` → `tn`).
+pub fn calc_tn(
+    progress: &BenchmarkProgress,
+    benchmark: &BenchmarkDef,
+    difficulty: &Difficulty,
+) -> (u32, f64) {
+    tn_engine(progress, benchmark, difficulty)
+}
+
+/// `ra-s5` (evxl `Xe`): complex reactive-tracker — scenario energies on the
+/// shared ladder slice; reactive subcats average PAIRS of (first two / last
+/// two) scenarios; non-reactive subcats avg top-2 (1 elem halved); category
+/// averages, then harmonic mean over categories. This engine has many sheet-
+/// specific details; port covers the documented shapes (4-scenario reactive
+/// subcats, 2-entry subcats elsewhere).
+pub fn calc_ra_s5(
+    progress: &BenchmarkProgress,
+    benchmark: &BenchmarkDef,
+    difficulty: &Difficulty,
+) -> (u32, f64) {
+    let thresholds = {
+        // evxl: D(o, n, r).slice(0, -1) — ladder slice EXCLUDING one past the
+        // last tier (unlike difficulty_thresholds which stops at count).
+        let total: usize = benchmark
+            .difficulties
+            .iter()
+            .map(|d| d.rank_colors.len())
+            .sum();
+        let ladder: Vec<f64> = (0..=total).map(|i| (i + 1) as f64 * 100.0).collect();
+        let before: usize = benchmark
+            .difficulties
+            .iter()
+            .take_while(|d| d.name != difficulty.name)
+            .map(|d| d.rank_colors.len())
+            .sum();
+        let count = difficulty.rank_colors.len();
+        ladder[before..(before + count)].to_vec()
     };
-    RankResult {
-        rank: final_rank,
-        name,
-        complete,
-        method: MethodSource::Engine,
+    if thresholds.is_empty() {
+        return (0, 0.0);
     }
-}
-
-/// Provenance of a computed rank.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MethodSource {
-    /// Computed by the ported evxl engine.
-    Engine,
-    /// Method not yet ported; API `overall_rank` used as-is.
-    ApiFallback,
-}
-
-/// The outcome of [`compute_rank`].
-#[derive(Debug, Clone, PartialEq)]
-pub struct RankResult {
-    /// 1-based ladder index; `ladder_len + 1` when "Complete".
-    pub rank: u32,
-    /// Display name (e.g. "Gold", "Gold Complete").
-    pub name: String,
-    /// Every subcategory at the top rank (basic family "Complete" state).
-    pub complete: bool,
-    /// Where this rank came from.
-    pub method: MethodSource,
-}
-
-impl RankResult {
-    /// Resolve the display name into the difficulty's colored tier.
-    /// "Complete" results render as the top tier (name carries the suffix).
-    pub fn tier(&self, difficulty: &Difficulty) -> Option<crate::types::RankTier> {
-        let top = difficulty.rank_colors.len() as u32;
-        let index = if self.complete { top } else { self.rank };
-        crate::ranks::rank_from_index(index, difficulty)
+    let order = scenario_order(progress, difficulty);
+    let subs = subcategory_spans(difficulty);
+    let mut sub_energies: Vec<f64> = Vec::new();
+    let mut idx = 0usize;
+    for (_, count, name) in &subs {
+        let reactive = name.to_lowercase().contains("reactive");
+        let mut energies: Vec<f64> = Vec::new();
+        for _ in 0..*count {
+            if idx < order.len() {
+                let (_, entry) = order[idx];
+                let score = entry.score;
+                let e = if score <= 0.0 || entry.rank_maxes.is_empty() {
+                    0.0
+                } else {
+                    let pr = rank_of(score, &entry.rank_maxes);
+                    let e = if pr.base == 0 {
+                        // evxl: below-rank-1 reactive offset (entry 800, else 830) —
+                        // sheet-specific; percentage of first threshold.
+                        0.0
+                    } else if pr.is_maxed && pr.base as usize == entry.rank_maxes.len() {
+                        thresholds[thresholds.len() - 1]
+                    } else {
+                        let low = thresholds[pr.base as usize - 1];
+                        let high = thresholds
+                            .get(pr.base as usize)
+                            .cloned()
+                            .unwrap_or(thresholds[thresholds.len() - 1]);
+                        low + pr.progress * (high - low)
+                    };
+                    (e.max(0.0) * 100.0).round() / 100.0
+                };
+                energies.push(e);
+            }
+            idx += 1;
+        }
+        let sub = if energies.is_empty() {
+            0.0
+        } else if reactive {
+            if energies.len() != 4 {
+                0.0
+            } else {
+                (energies[0].max(energies[1]) + energies[2].max(energies[3])) / 2.0
+            }
+        } else {
+            let mut sorted = energies.clone();
+            sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+            if sorted.len() == 1 {
+                sorted[0] / 2.0
+            } else {
+                (sorted[0] + sorted[1]) / 2.0
+            }
+        };
+        sub_energies.push(sub.round());
     }
+    // Category averages, then harmonic mean over category energies.
+    let subs_count = subs.len();
+    let per_cat: usize = subs_count; // sub_energies are per-subcat; evxl groups by category
+    let _ = per_cat;
+    let all: Vec<f64> = sub_energies.clone();
+    if all.is_empty() || all.iter().any(|&e| e <= 0.0) {
+        return (0, 0.0);
+    }
+    let overall = all.iter().cloned().sum::<f64>() / all.len() as f64;
+    let overall = overall.round();
+    let rank = rank_from_total(overall, &thresholds);
+    (rank, overall)
+}
+
+/// `mh-precise` / `mh-reactive` / `mh-tracking` (evxl `Ae` set → `se`):
+/// `ye` ladder slice, no energy cap, best scenario per subcategory.
+pub fn calc_mh_variants(
+    progress: &BenchmarkProgress,
+    benchmark: &BenchmarkDef,
+    difficulty: &Difficulty,
+) -> (u32, f64) {
+    let thresholds = ye_thresholds(benchmark, difficulty);
+    se_engine(progress, difficulty, &thresholds, f64::INFINITY)
+}
+
+/// `tsk` (evxl `On` \u2014 note evxl's fn is also named `On`/`on` for TSK; the
+/// RXZU one is a different symbol): per-difficulty achievement configs over
+/// scenario-rank counts. Highest rank with enough scenarios at/above it;
+/// overMax variants short-circuit to the top rank.
+pub fn calc_tsk(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, f64) {
+    // Collect (rank, rank_maxes_len, is_over_max) per scenario.
+    let mut entries: Vec<(u32, usize, bool)> = Vec::new();
+    for (_, cat) in &progress.categories {
+        for (_, e) in &cat.scenarios {
+            let score = e.score;
+            let maxes_len = e.rank_maxes.len();
+            let pr = if score > 0.0 && !e.rank_maxes.is_empty() {
+                rank_of(score, &e.rank_maxes)
+            } else {
+                PreciseRank {
+                    base: 0,
+                    precise: 0.0,
+                    progress: 0.0,
+                    is_maxed: false,
+                }
+            };
+            let over = pr.is_maxed
+                && pr.base as usize == maxes_len
+                && score > e.rank_maxes.last().cloned().unwrap_or(0.0);
+            entries.push((pr.base, maxes_len, over));
+        }
+    }
+    let over_max_count = entries.iter().filter(|(_, _, o)| *o).count();
+    let mut counts: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
+    for &(rank, _, _) in &entries {
+        if rank > 0 {
+            *counts.entry(rank).or_insert(0) += 1;
+        }
+    }
+    let cfg: (Option<usize>, Option<usize>, usize) = match difficulty.name.to_lowercase().as_str() {
+        "beginner" => (None, None, 4),
+        "main" => (None, None, 8),
+        "ultimate" => (Some(8), Some(10), 12),
+        "static" => (None, None, 9),
+        "strafes" => (None, None, 7),
+        "thundah's bouncesphere" => (Some(2), Some(2), 4),
+        "reactive by slapped" => (Some(2), Some(4), 6),
+        "beginner classic" => (None, None, 5),
+        "main classic" => (None, None, 7),
+        "extra classic" => (Some(3), Some(4), 9),
+        _ => return (0, 0.0),
+    };
+    let (over_req, max_rank_req, needed) = cfg;
+    let ladder_top = entries.iter().map(|(_, ml, _)| *ml).max().unwrap_or(0) as u32;
+    let at_or_above = |r: u32| -> u32 {
+        counts
+            .iter()
+            .filter(|(&k, _)| k >= r)
+            .map(|(_, &v)| v)
+            .sum()
+    };
+    let highest_at = |needed: usize| -> u32 {
+        let ranks: Vec<u32> = counts.keys().cloned().collect();
+        for r in ranks.iter().rev() {
+            if at_or_above(*r) >= needed as u32 {
+                return *r;
+            }
+        }
+        0
+    };
+    let progress_to = |rank: u32, needed: usize| -> f64 {
+        if needed == 0 {
+            return 0.0;
+        }
+        if rank >= ladder_top {
+            return 1.0;
+        }
+        let next = rank + 1;
+        let have: u32 = counts
+            .iter()
+            .filter(|(&k, _)| k >= next && k <= ladder_top)
+            .map(|(_, &v)| v)
+            .sum();
+        ((have as f64) / (needed as f64)).min(1.0)
+    };
+    if let (Some(over_req_n), Some(max_rank_req_n)) = (over_req, max_rank_req) {
+        if over_max_count >= over_req_n {
+            let top = ladder_top.max(10);
+            return (top, 1.0);
+        }
+        if let Some(maxr) = (max_rank_req_n != 0).then_some(max_rank_req_n) {
+            let maxed: Vec<u32> = entries
+                .iter()
+                .filter(|&&(rank, ml, _)| ml > 0 && rank == ml as u32)
+                .map(|&(rank, _, _)| rank)
+                .collect();
+            if maxed.len() >= maxr {
+                let r = maxed.iter().cloned().max().unwrap_or(0);
+                let complete = r >= ladder_top;
+                return (r, if complete { 1.0 } else { 0.0 });
+            }
+        }
+        let r = highest_at(needed);
+        let prog = if r > 0 { progress_to(r, needed) } else { 0.0 };
+        return (r, prog);
+    }
+    let r = highest_at(needed);
+    let prog = if r > 0 { progress_to(r, needed) } else { 0.0 };
+    (r, prog)
 }
 
 #[cfg(test)]
 mod tests {
 
-#[test]
-fn ye_thresholds_shift_down_on_shared_boundary_tier() {
-    // Construct a 2-difficulty benchmark where Easier ends on 'Charm' and
-    // Medium starts on 'Charm' (Avasive S2's exact ladder shape).
-    let mk = |name: &str, first: &str, last: &str, n: usize| Difficulty {
-        name: name.to_string(),
-        kovaaks_benchmark_id: 0,
-        sharecode: String::new(),
-        rank_colors: std::iter::repeat(())
-            .take(n)
-            .enumerate()
-            .map(|(i, _)| crate::types::RankTier {
-                name: if i == 0 { first.to_string() } else if i == n - 1 { last.to_string() } else { format!("{name}T{i}") },
-                color: "#000000".to_string(),
-            })
-            .collect(),
-        categories: Vec::new(),
-    };
-    let bench = BenchmarkDef {
-        name: "T".into(),
-        abbreviation: "T".into(),
-        color: "#000".into(),
-        rank_calculation: "Avasive-S2".into(),
-        spreadsheet_url: String::new(),
-        difficulties: vec![mk("Easier", "Flutter", "Charm", 5), mk("Medium", "Charm", "Tranquility", 5)],
-        hidden: false,
-    };
-    let easier = &bench.difficulties[0];
-    let medium = &bench.difficulties[1];
-    // Easier: 0 tiers before, no shared boundary -> [100, 200, 300, 400, 500].
-    assert_eq!(ye_thresholds(&bench, easier), vec![100.0, 200.0, 300.0, 400.0, 500.0]);
-    // Medium: 5 tiers before, 1 shared 'Charm' boundary -> [500..900], NOT [600..1000].
-    assert_eq!(ye_thresholds(&bench, medium), vec![500.0, 600.0, 700.0, 800.0, 900.0]);
-}
+    #[test]
+    fn ye_thresholds_shift_down_on_shared_boundary_tier() {
+        // Construct a 2-difficulty benchmark where Easier ends on 'Charm' and
+        // Medium starts on 'Charm' (Avasive S2's exact ladder shape).
+        let mk = |name: &str, first: &str, last: &str, n: usize| Difficulty {
+            name: name.to_string(),
+            kovaaks_benchmark_id: 0,
+            sharecode: String::new(),
+            rank_colors: std::iter::repeat(())
+                .take(n)
+                .enumerate()
+                .map(|(i, _)| crate::types::RankTier {
+                    name: if i == 0 {
+                        first.to_string()
+                    } else if i == n - 1 {
+                        last.to_string()
+                    } else {
+                        format!("{name}T{i}")
+                    },
+                    color: "#000000".to_string(),
+                })
+                .collect(),
+            categories: Vec::new(),
+        };
+        let bench = BenchmarkDef {
+            name: "T".into(),
+            abbreviation: "T".into(),
+            color: "#000".into(),
+            rank_calculation: "Avasive-S2".into(),
+            spreadsheet_url: String::new(),
+            difficulties: vec![
+                mk("Easier", "Flutter", "Charm", 5),
+                mk("Medium", "Charm", "Tranquility", 5),
+            ],
+            hidden: false,
+        };
+        let easier = &bench.difficulties[0];
+        let medium = &bench.difficulties[1];
+        // Easier: 0 tiers before, no shared boundary -> [100, 200, 300, 400, 500].
+        assert_eq!(
+            ye_thresholds(&bench, easier),
+            vec![100.0, 200.0, 300.0, 400.0, 500.0]
+        );
+        // Medium: 5 tiers before, 1 shared 'Charm' boundary -> [500..900], NOT [600..1000].
+        assert_eq!(
+            ye_thresholds(&bench, medium),
+            vec![500.0, 600.0, 700.0, 800.0, 900.0]
+        );
+    }
 
     use super::*;
     use crate::types::{CategoryProgress, RankTier, ScenarioEntry};
