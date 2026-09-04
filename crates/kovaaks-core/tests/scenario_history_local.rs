@@ -74,7 +74,8 @@ fn zero_score_scenario_falls_back_to_local_plays() {
     assert_eq!(out[0].source.as_str(), "local");
     assert_eq!(out[0].points.len(), 2, "only new highs kept");
     assert_eq!(out[0].points[0].1, 800);
-    assert_eq!(out[0].points[1].1, 805);
+    // 805.6 rounds (not truncates) to 806 — matching how the sync echoes it.
+    assert_eq!(out[0].points[1].1, 806);
     assert_eq!(out[0].category, "Evasive", "category from the snapshot row");
 }
 

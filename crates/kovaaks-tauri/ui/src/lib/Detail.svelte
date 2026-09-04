@@ -138,10 +138,12 @@
     // snapshot-backed or local — so all charts behave uniformly. Snapshot
     // echoes of a play (same score) were already dropped backend-side.
     // Running high + 7-day avg derive from the merged runs.
+    // Same-run rule must mirror the backend's is_same_run: the sync echoes
+    // plays as ROUNDED integers (1558.668 -> 1559), so compare rounded values.
     const snapPts =
       seriesSource === 'local'
         ? raw
-        : raw.filter((s) => !playPts.some((p) => Math.abs(p.y - s.y) < 0.01))
+        : raw.filter((s) => !playPts.some((p) => Math.round(p.y) === Math.round(s.y)))
     const trend = [...playPts, ...snapPts].sort((a, b) => a.x - b.x)
     // Magenta dots mark play-sourced runs; hidden when the cyan line already
     // is those plays (local-backed series) or there are no plays at all.

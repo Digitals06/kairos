@@ -168,23 +168,24 @@ pub fn improving_only(series: &[(DateTime<Utc>, f64)]) -> Vec<(DateTime<Utc>, f6
     kept
 }
 
-/// Two scores within this epsilon are the same run. KovaaK's scenario scores
-/// are precise floats, so a sync snapshot matching a local play's score is the
-/// SAME run observed twice — no matter how much later the sync ran.
-///
-/// Note: in `build_scenario_history` the comparison runs against *i64-
-/// truncated* values (StoredScenario.score / play scores as i64), so on that
-/// path this behaves as exact integer equality.
-pub const SAME_RUN_EPSILON: f64 = 0.01;
+/// Two scores are the same run when they round to the same integer. KovaaK's
+/// scenario scores are precise floats locally, but the sync API echoes them
+/// ROUNDED TO INTEGERS (play 1558.668 syncs as 1559, 805.628 as 806) — so a
+/// raw-epsilon comparison never matches the echo. Rounding both sides first
+/// makes the rule exact: the same float always rounds to the same integer,
+/// and a genuinely different run (e.g. 1125.70 vs 1125.29) rounds apart.
+pub fn is_same_run(a: f64, b: f64) -> bool {
+    (a.round() - b.round()).abs() < 0.5
+}
 
 /// Merge local plays with (already new-high-filtered) snapshot points into one
 /// chronological series, dropping snapshot points that duplicate a local play.
 ///
-/// A snapshot whose score equals a local play's score (see
-/// [`SAME_RUN_EPSILON`]) is the SAME scenario run observed twice — keeping
-/// both would add a phantom sample at the sync timestamp and truncate the
-/// real average improvement, so the snapshot point is skipped and the play
-/// (exact time) is kept. Plays are always kept verbatim.
+/// A snapshot that is the same run as a local play (see [`is_same_run`]) is
+/// the same scenario run observed twice — keeping both would add a phantom
+/// sample at the sync timestamp and truncate the real average improvement, so
+/// the snapshot point is skipped and the play (exact time) is kept. Plays are
+/// always kept verbatim.
 pub fn merge_plays_snapshots_dedup(
     plays: &[(String, DateTime<Utc>, f64)],
     snapshots: &[(DateTime<Utc>, f64)],
@@ -194,7 +195,7 @@ pub fn merge_plays_snapshots_dedup(
     for &(at, score) in snapshots {
         let dup = plays
             .iter()
-            .any(|(_, _, pscore)| (*pscore - score).abs() < SAME_RUN_EPSILON);
+            .any(|(_, _, pscore)| is_same_run(*pscore, score));
         if !dup {
             merged.push((at, score));
         }
@@ -250,7 +251,7 @@ fn series_for_scenario(
         .filter(|(_, v)| {
             !plays_pts
                 .iter()
-                .any(|(_, pv)| (*pv as f64 - *v as f64).abs() < SAME_RUN_EPSILON)
+                .any(|(_, pv)| crate::metrics::is_same_run(*pv as f64, *v as f64))
         })
         .collect();
     let (source, points) = if pts.is_empty() {
@@ -379,7 +380,10 @@ fn local_points(
         ScenarioSeriesSource::Local,
         improving_only(&raw)
             .into_iter()
-            .map(|(t, v)| (t, v as i64))
+            // Round (not truncate): the sync echoes plays as rounded integers,
+            // so truncation would break same-run matching (805.628 -> 805 vs
+            // echo 806). KovaaK's rounds the same float the same way.
+            .map(|(t, v)| (t, v.round() as i64))
             .collect(),
     )
 }

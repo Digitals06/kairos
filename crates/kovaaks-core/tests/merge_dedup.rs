@@ -39,11 +39,21 @@ fn snapshot_with_new_score_is_kept() {
 }
 
 #[test]
-fn similar_but_different_score_is_kept() {
-    // 805.60 vs 805.62 could be a genuine near-identical replay — only scores
-    // matching to 2dp count as the same run.
-    let plays = vec![("S".to_string(), utc(100), 805.6)];
-    let snapshots = vec![(utc(120), 805.62)];
+fn decimal_play_matches_rounded_sync_echo() {
+    // The sync echoes plays as rounded integers: play 1558.668 -> echo 1559.
+    // The echo must be dropped even though the raw values differ by 0.332.
+    let plays = vec![("S".to_string(), utc(100), 1558.668)];
+    let snapshots = vec![(utc(120), 1559.0)];
+    let merged = merge_plays_snapshots_dedup(&plays, &snapshots);
+    assert_eq!(merged.len(), 1, "rounded echo dropped");
+    assert_eq!(merged[0].1, 1558.668);
+}
+
+#[test]
+fn genuinely_different_run_rounds_apart() {
+    // 1125.29 vs 1125.71 round to different integers -> two distinct runs.
+    let plays = vec![("S".to_string(), utc(100), 1125.29)];
+    let snapshots = vec![(utc(120), 1125.71)];
     let merged = merge_plays_snapshots_dedup(&plays, &snapshots);
     assert_eq!(merged.len(), 2);
 }
