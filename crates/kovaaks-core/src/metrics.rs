@@ -167,6 +167,172 @@ pub fn improving_only(series: &[(DateTime<Utc>, f64)]) -> Vec<(DateTime<Utc>, f6
     kept
 }
 
+// ---------- scenario history (charts) ----------
+
+/// Where a scenario's chart series came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScenarioSeriesSource {
+    /// Synced snapshot entries (score > 0, new-highs only).
+    Snapshot,
+    /// Local CSV plays — used when the scenario has no synced score.
+    Local,
+}
+
+impl ScenarioSeriesSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScenarioSeriesSource::Snapshot => "snapshot",
+            ScenarioSeriesSource::Local => "local",
+        }
+    }
+}
+
+/// A scenario's chart series: which scenario, its category label, where the
+/// points came from, and the (filtered) points themselves.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScenarioSeries {
+    pub scenario: String,
+    pub category: String,
+    pub source: ScenarioSeriesSource,
+    pub points: Vec<(DateTime<Utc>, i64)>,
+}
+
+/// Build per-scenario chart series for one benchmark.
+///
+/// Scenario order follows the latest snapshot (API document order); scenarios
+/// that appear only in local plays are appended after, alphabetically.
+///
+/// A scenario's points come from its synced snapshot scores (score > 0,
+/// new-highs only — see [`improving_only`]). When a scenario has NO synced
+/// score (score 0 in the latest snapshot, or absent from every snapshot) but
+/// has local CSV plays, its series is built from those plays instead — the
+/// chart still renders even though KovaaK's never reported a score for it.
+pub fn build_scenario_history(
+    history: &[crate::store::StoredSnapshot],
+    local_plays: &[(String, DateTime<Utc>, f64)],
+) -> Vec<ScenarioSeries> {
+    let Some(latest) = history.last() else {
+        return Vec::new();
+    };
+
+    // Scenarios seen anywhere in this benchmark's snapshot history but missing
+    // from the latest snapshot (API sometimes omits scenarios it has no data
+    // for). Category from the most recent snapshot that carried the scenario.
+    let mut extras: Vec<(String, String)> = Vec::new(); // (scenario, category)
+    for snap in history.iter().rev() {
+        for row in &snap.scenarios {
+            if latest.scenarios.iter().any(|r| r.scenario == row.scenario) {
+                continue;
+            }
+            if extras.iter().any(|(s, _)| s == &row.scenario) {
+                continue;
+            }
+            extras.push((row.scenario.clone(), row.category.clone()));
+        }
+    }
+
+    let mut out = Vec::new();
+    for row in &latest.scenarios {
+        let pts = snapshot_points(history, &row.scenario);
+        let (source, points) = if pts.is_empty() {
+            local_points(local_plays, &row.scenario)
+        } else {
+            (ScenarioSeriesSource::Snapshot, pts)
+        };
+        if points.is_empty() {
+            continue; // nothing synced AND nothing local: no chart
+        }
+        out.push(ScenarioSeries {
+            scenario: row.scenario.clone(),
+            category: row.category.clone(),
+            source,
+            points,
+        });
+    }
+    for (scenario, category) in extras {
+        let pts = snapshot_points(history, &scenario);
+        let (source, points) = if pts.is_empty() {
+            local_points(local_plays, &scenario)
+        } else {
+            (ScenarioSeriesSource::Snapshot, pts)
+        };
+        if points.is_empty() {
+            continue;
+        }
+        out.push(ScenarioSeries {
+            scenario,
+            category,
+            source,
+            points,
+        });
+    }
+    // Local-only scenarios (never in any snapshot, unattributable via rows):
+    // include when the player has plays for them — appended alphabetically.
+    let mut locals: Vec<&(String, DateTime<Utc>, f64)> = local_plays
+        .iter()
+        .filter(|(s, _, _)| !out.iter().any(|series| &series.scenario == s))
+        .collect();
+    locals.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut seen: Vec<&str> = Vec::new();
+    for (scenario, _at, _score) in locals {
+        if seen.contains(&scenario.as_str()) {
+            continue;
+        }
+        seen.push(scenario);
+        let (_, points) = local_points(local_plays, scenario);
+        if points.is_empty() {
+            continue;
+        }
+        out.push(ScenarioSeries {
+            scenario: scenario.clone(),
+            category: "Local".to_string(),
+            source: ScenarioSeriesSource::Local,
+            points,
+        });
+    }
+    out
+}
+
+/// New-high snapshot points with a positive score for one scenario.
+fn snapshot_points(
+    history: &[crate::store::StoredSnapshot],
+    scenario: &str,
+) -> Vec<(DateTime<Utc>, i64)> {
+    let raw: Vec<(DateTime<Utc>, f64)> = history
+        .iter()
+        .filter_map(|s| {
+            s.scenarios
+                .iter()
+                .find(|r| r.scenario == scenario)
+                .filter(|r| r.score > 0)
+                .map(|r| (s.captured_at, r.score as f64))
+        })
+        .collect();
+    improving_only(&raw)
+        .into_iter()
+        .map(|(t, v)| (t, v as i64))
+        .collect()
+}
+
+/// New-high local play points for one scenario.
+fn local_points(
+    local_plays: &[(String, DateTime<Utc>, f64)],
+    scenario: &str,
+) -> (ScenarioSeriesSource, Vec<(DateTime<Utc>, i64)>) {
+    let raw: Vec<(DateTime<Utc>, f64)> = local_plays
+        .iter()
+        .filter(|(s, _, _)| s == scenario)
+        .map(|(_, at, score)| (*at, *score))
+        .collect();
+    (
+        ScenarioSeriesSource::Local,
+        improving_only(&raw)
+            .into_iter()
+            .map(|(t, v)| (t, v as i64))
+            .collect(),
+    )
+}
+
 // ---------- internals ----------
 
 fn mean(values: impl Iterator<Item = f64>) -> f64 {
@@ -500,13 +666,13 @@ mod tests {
     fn improving_only_keeps_strict_highs_in_order() {
         let day = |d: u32| ts(2026, 1, d, 12);
         let series = vec![
-            (day(1), 0.0),    // unplayed: never a data point
-            (day(2), 500.0),  // baseline high: kept
-            (day(3), 500.0),  // stale repeat: dropped
-            (day(4), 400.0),  // below high: dropped
-            (day(5), 450.0),  // partial recovery, still stale: dropped
-            (day(6), 600.0),  // new high: kept
-            (day(7), 600.0),  // stale repeat: dropped
+            (day(1), 0.0),   // unplayed: never a data point
+            (day(2), 500.0), // baseline high: kept
+            (day(3), 500.0), // stale repeat: dropped
+            (day(4), 400.0), // below high: dropped
+            (day(5), 450.0), // partial recovery, still stale: dropped
+            (day(6), 600.0), // new high: kept
+            (day(7), 600.0), // stale repeat: dropped
         ];
         let kept = improving_only(&series);
         assert_eq!(

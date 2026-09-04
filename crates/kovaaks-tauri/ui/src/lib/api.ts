@@ -79,6 +79,8 @@ export interface ScenarioHistoryPoint {
 export interface ScenarioHistorySeries {
   scenario: string
   category: string
+  /** "snapshot" (synced scores) or "local" (CSV plays — no synced score). */
+  source: string
   points: ScenarioHistoryPoint[]
 }
 
@@ -136,6 +138,11 @@ export function getBenchmarkDetail(benchmarkId: number): Promise<BenchmarkDetail
 
 export function ingestStatus(): Promise<IngestStatus> {
   return invoke('ingest_status')
+}
+
+/** Re-scan the local KovaaK's stats CSVs (no network sync). */
+export function refreshLocal(): Promise<IngestStatus> {
+  return invoke('refresh_local')
 }
 
 export function getSettings(): Promise<AppSettings> {

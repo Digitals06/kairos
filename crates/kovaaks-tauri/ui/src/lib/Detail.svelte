@@ -138,6 +138,12 @@
     }
     if (raw.length === 0) return
 
+    const seriesSource = d.scenario_history.find((s) => s.scenario === chartScope)?.source
+    const sourceLabel = seriesSource === 'local' ? 'local highs' : 'sync snapshot'
+    // Magenta dots only when they ADD info (snapshot-backed series); when the
+    // series itself is local, the dots would just duplicate the line.
+    const showPlayDots = seriesSource !== 'local' 
+
     let high = -Infinity
     const highPts = raw.map((p) => ({ x: p.x, y: (high = Math.max(high, p.y)) }))
     const rolling = raw.map((p) => {
@@ -152,7 +158,7 @@
           {
             label: 'local play',
             type: 'scatter',
-            data: playPts,
+            data: showPlayDots ? playPts : [],
             showLine: false,
             pointRadius: 3.5,
             pointHoverRadius: 5,
@@ -179,7 +185,7 @@
             tension: 0.3,
           },
           {
-            label: 'sync snapshot',
+            label: sourceLabel,
             data: raw,
             borderColor: CYAN,
             backgroundColor: CYAN,

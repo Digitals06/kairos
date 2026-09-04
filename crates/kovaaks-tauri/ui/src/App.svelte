@@ -4,6 +4,7 @@
     getProfile,
     getOverview,
     ingestStatus,
+    refreshLocal,
     syncNow,
     getSettings,
     setSettings,
@@ -29,7 +30,7 @@
   let toast = $state<string | null>(null)
   let toastTimer: ReturnType<typeof setTimeout> | undefined
 
-  function showError(msg: string) {
+  function showToast(msg: string) {
     toast = msg
     clearTimeout(toastTimer)
     toastTimer = setTimeout(() => (toast = null), 5000)
@@ -76,16 +77,33 @@
       refreshLastSynced()
       await loadOverview()
       if (report.failed > 0) {
-        showError(`Sync finished with ${report.failed} failure(s): ${report.errors[0] ?? ''}`)
+        showToast(`Sync finished with ${report.failed} failure(s): ${report.errors[0] ?? ''}`)
       }
     } catch (err) {
-      showError(humanError(err))
+      showToast(humanError(err))
     } finally {
       syncing = false
     }
   }
 
-  // --- settings dropdown -----------------------------------------------------
+    let refreshingLocal = $state(false)
+
+  async function doRefreshLocal() {
+    if (refreshingLocal) return
+    refreshingLocal = true
+    try {
+      const status = await refreshLocal()
+      refreshLastSynced()
+      await loadOverview()
+      showToast(`Local refresh: ${status.csv_inserted} new play(s) from ${status.csv_seen} CSV file(s)`)
+    } catch (err) {
+      showToast(humanError(err))
+    } finally {
+      refreshingLocal = false
+    }
+  }
+
+// --- settings dropdown -----------------------------------------------------
   let settingsOpen = $state(false)
   let deepScan = $state(false)
   // `deep` is a per-call flag on sync_now, not persisted server-side; map the
@@ -112,7 +130,7 @@
       const s: AppSettings = await getSettings()
       await setSettings({ ...s, sync_interval_hours: on ? 0 : Math.max(1, s.sync_interval_hours || 6) })
     } catch (err) {
-      showError(`Could not save settings: ${String(err)}`)
+      showToast(`Could not save settings: ${String(err)}`)
     }
   }
 
@@ -142,7 +160,7 @@
     try {
       cards = sortCards(await getOverview())
     } catch (err) {
-      showError(`Failed to load overview: ${String(err)}`)
+      showToast(`Failed to load overview: ${String(err)}`)
     } finally {
       loadingOverview = false
     }
@@ -152,7 +170,7 @@
     try {
       profile = await getProfile()
     } catch (err) {
-      showError(String(err))
+      showToast(String(err))
       screen = 'setup'
       return
     }
@@ -190,7 +208,7 @@
       // Re-sort locally to match the backend ordering (favorites on top).
       cards = sortCards(cards)
     } catch (err) {
-      showError(humanError(err))
+      showToast(humanError(err))
     }
   }
 
@@ -234,6 +252,13 @@
             <span class="spinner" aria-hidden="true"></span>
           {/if}
           {syncing ? 'Syncing…' : 'Sync Now'}
+        </button>
+
+        <button class="btn" onclick={() => doRefreshLocal()} disabled={refreshingLocal}>
+          {#if refreshingLocal}
+            <span class="spinner" aria-hidden="true"></span>
+          {/if}
+          {refreshingLocal ? 'Scanning…' : 'Refresh Local'}
         </button>
 
         <div class="settings-wrap" bind:this={settingsEl}>

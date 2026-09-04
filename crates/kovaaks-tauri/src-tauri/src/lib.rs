@@ -84,6 +84,8 @@ pub struct ScenarioRank {
 pub struct ScenarioHistorySeries {
     pub scenario: String,
     pub category: String,
+    /// "snapshot" (synced scores) or "local" (CSV plays — no synced score).
+    pub source: String,
     pub points: Vec<ScenarioHistoryPoint>,
 }
 
@@ -335,10 +337,10 @@ fn db_path() -> PathBuf {
 /// a missing KovaaK's install — scan errors land on stderr and the counters
 /// stay at their previous values. Runs without a profile as a no-op; called
 /// again from `resolve_profile` once a player is connected.
-fn run_csv_scan(store: &Store) {
+fn run_csv_scan(store: &Store) -> Option<(usize, usize)> {
     let steam_id = match store.get_meta("steam_id") {
         Ok(Some(id)) if !id.is_empty() => id,
-        _ => return,
+        _ => return None,
     };
     let dir = {
         let settings: Option<AppSettings> = store
@@ -353,7 +355,7 @@ fn run_csv_scan(store: &Store) {
     };
     let cutoff = match csv_ingest::ensure_cutoff(store) {
         Ok(c) => c,
-        Err(_) => return,
+        Err(_) => return None,
     };
     let report = csv_ingest::scan_dir(&dir, cutoff, store, &steam_id);
     let _ = store.set_meta(INGEST_SEEN_KEY, &report.seen.to_string());
@@ -361,6 +363,7 @@ fn run_csv_scan(store: &Store) {
     for e in report.errors.iter().take(5) {
         eprintln!("csv ingest: {e}");
     }
+    Some((report.seen, report.inserted))
 }
 
 pub mod commands {
@@ -651,24 +654,24 @@ pub mod commands {
 
             // CSV plays for every scenario of the newest snapshot, merged +
             // sorted; each point keeps its scenario so the UI can scope the
-            // underlay to the selected scenario.
+            // underlay to the selected scenario. Scenarios missing from the
+            // snapshot entirely still need their plays, so scan ALL local
+            // plays of scenarios seen in any snapshot of this benchmark.
+            let mut benchmark_scenarios: std::collections::BTreeSet<String> =
+                std::collections::BTreeSet::new();
+            for snap in &history {
+                for row in &snap.scenarios {
+                    benchmark_scenarios.insert(row.scenario.clone());
+                }
+            }
             let mut plays: Vec<(String, chrono::DateTime<chrono::Utc>, f64)> = Vec::new();
-            if let Some(snapshot) = latest {
-                let mut scenarios: Vec<&str> = snapshot
-                    .scenarios
-                    .iter()
-                    .map(|s| s.scenario.as_str())
-                    .collect();
-                scenarios.sort_unstable();
-                scenarios.dedup();
-                for scenario in scenarios {
-                    for play in state
-                        .store
-                        .plays_history(&steam_id, scenario)
-                        .map_err(|e| e.to_string())?
-                    {
-                        plays.push((scenario.to_string(), play.played_at, play.score));
-                    }
+            for scenario in &benchmark_scenarios {
+                for play in state
+                    .store
+                    .plays_history(&steam_id, scenario)
+                    .map_err(|e| e.to_string())?
+                {
+                    plays.push((scenario.clone(), play.played_at, play.score));
                 }
             }
             plays.sort_by_key(|p| p.1);
@@ -712,38 +715,39 @@ pub mod commands {
 
             // Per-scenario score history across ALL snapshots of this
             // benchmark (issue #3: history was benchmark-aggregate only).
-            // Stale repeats are skipped: a snapshot that doesn't set a new
-            // high means the scenario wasn't replayed (local plays cover
-            // the average when it was).
-            let scenario_history: Vec<ScenarioHistorySeries> = latest
-                .map(|snap| {
-                    snap.scenarios
-                        .iter()
-                        .map(|row| ScenarioHistorySeries {
-                            scenario: row.scenario.clone(),
-                            category: row.category.clone(),
-                            points: {
-                                let raw: Vec<(chrono::DateTime<chrono::Utc>, f64)> = history
-                                    .iter()
-                                    .filter_map(|s| {
-                                        s.scenarios
-                                            .iter()
-                                            .find(|r| r.scenario == row.scenario)
-                                            .map(|r| (s.captured_at, r.score as f64))
-                                    })
-                                    .collect();
-                                kovaaks_core::improving_only(&raw)
-                                    .into_iter()
-                                    .map(|(captured_at, score)| ScenarioHistoryPoint {
-                                        captured_at: captured_at.to_rfc3339(),
-                                        score: score as i64,
-                                    })
-                                    .collect()
-                            },
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            // Per-scenario chart series: synced snapshot points, falling back
+            // to local CSV plays for scenarios without a synced score (see
+            // kovaaks_core::metrics::build_scenario_history).
+            let scenario_history: Vec<ScenarioHistorySeries> = {
+                let local: Vec<(String, chrono::DateTime<chrono::Utc>, f64)> = plays
+                    .iter()
+                    .map(|p| {
+                        (
+                            p.scenario.clone(),
+                            chrono::DateTime::parse_from_rfc3339(&p.played_at)
+                                .map(|t| t.with_timezone(&chrono::Utc))
+                                .unwrap_or_default(),
+                            p.score,
+                        )
+                    })
+                    .collect();
+                kovaaks_core::metrics::build_scenario_history(&history, &local)
+                    .into_iter()
+                    .map(|s| ScenarioHistorySeries {
+                        scenario: s.scenario,
+                        category: s.category,
+                        source: s.source.as_str().to_string(),
+                        points: s
+                            .points
+                            .into_iter()
+                            .map(|(captured_at, score)| ScenarioHistoryPoint {
+                                captured_at: captured_at.to_rfc3339(),
+                                score,
+                            })
+                            .collect(),
+                    })
+                    .collect()
+            };
 
             Ok(BenchmarkDetail {
                 card,
@@ -795,6 +799,32 @@ pub mod commands {
             csv_inserted: meta_num(INGEST_INSERTED_KEY),
             last_synced_at: state.store.get_meta(LAST_SYNCED_KEY).ok().flatten(),
         })
+    }
+
+    /// Re-scan the local KovaaK's stats CSVs (no network). Forward-only like
+    /// the sync-time scan; returns the refreshed ingest counters.
+    #[tauri::command]
+    pub async fn refresh_local(state: State<'_, AppState>) -> Result<IngestStatus, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            run_csv_scan(&state.store);
+            let meta_num = |key: &str| -> u64 {
+                state
+                    .store
+                    .get_meta(key)
+                    .ok()
+                    .flatten()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0)
+            };
+            Ok(IngestStatus {
+                csv_seen: meta_num(INGEST_SEEN_KEY),
+                csv_inserted: meta_num(INGEST_INSERTED_KEY),
+                last_synced_at: state.store.get_meta(LAST_SYNCED_KEY).ok().flatten(),
+            })
+        })
+        .await
+        .map_err(|e| format!("refresh join error: {e}"))?
     }
 
     /// Current app settings.
@@ -923,6 +953,7 @@ mod tests {
             scenario_history: vec![ScenarioHistorySeries {
                 scenario: "VT Pasu Novice S5".into(),
                 category: "Clicking".into(),
+                source: "snapshot".into(),
                 points: vec![ScenarioHistoryPoint {
                     captured_at: "2026-09-02T22:00:00Z".into(),
                     score: 1282,
@@ -1055,6 +1086,7 @@ pub fn run() {
             commands::get_overview,
             commands::get_benchmark_detail,
             commands::ingest_status,
+            commands::refresh_local,
             commands::get_settings,
             commands::set_settings,
             commands::toggle_favorite,
