@@ -8,7 +8,7 @@ If Kairos helps your grind, consider supporting development:
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q2S1237A82)
 
-![Kairos card list](docs/screenshots/card-list.png)
+![Kairos card list](docs/screenshots/overview-v014.png)
 
 ## Features
 
@@ -21,7 +21,7 @@ If Kairos helps your grind, consider supporting development:
 - **Search + favorites** — filter the grid by name, pin benchmarks to the top. Pins survive restarts.
 - **Private by design** — no accounts, no telemetry; only public APIs, and live API tests skip unless you opt in.
 
-![Kairos benchmark detail](docs/screenshots/benchmark-detail.png)
+![Kairos benchmark detail](docs/screenshots/detail-avasive-s2-jennclick-v014.png)
 
 ## How it works
 
