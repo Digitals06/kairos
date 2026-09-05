@@ -99,6 +99,10 @@ cargo clippy --workspace --offline      # linter (first time only: rustup compon
 
 Live API tests exist but are skipped by default (`#[ignore]`) so the suite never hammers the public servers.
 
+## Roadmap
+
+Planned features and quality-of-life work live in [ROADMAP.md](ROADMAP.md) — no dates, just what we intend to build next.
+
 ## Layout
 
 ```
