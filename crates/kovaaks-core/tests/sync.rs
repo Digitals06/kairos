@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -128,6 +128,10 @@ struct FakeSource {
     replies: HashMap<i64, FakeReply>,
     /// Attempt count per benchmark id (any call, success or failure).
     attempts: Mutex<HashMap<i64, usize>>,
+    /// Concurrency gauge: number of probes currently executing and the
+    /// maximum ever observed (deterministic bounded-parallelism check).
+    in_flight: AtomicUsize,
+    max_in_flight: AtomicUsize,
 }
 
 impl FakeSource {
@@ -135,7 +139,14 @@ impl FakeSource {
         Arc::new(Self {
             replies,
             attempts: Mutex::new(HashMap::new()),
+            in_flight: AtomicUsize::new(0),
+            max_in_flight: AtomicUsize::new(0),
         })
+    }
+
+    /// Peak number of probes that overlapped in time.
+    fn max_concurrent(&self) -> usize {
+        self.max_in_flight.load(Ordering::SeqCst)
     }
 
     fn attempts_for(&self, benchmark_id: i64) -> usize {
@@ -194,7 +205,11 @@ impl ProgressSource for FakeSource {
                     }
                 }
                 FakeReply::Slow(ms) => {
+                    // Concurrency gauge: track peak simultaneous probes.
+                    let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    self.max_in_flight.fetch_max(now, Ordering::SeqCst);
                     tokio::time::sleep(Duration::from_millis(ms)).await;
+                    self.in_flight.fetch_sub(1, Ordering::SeqCst);
                     Ok(prog(0.0, 0.0))
                 }
             }
@@ -456,16 +471,18 @@ async fn probes_run_bounded_in_parallel_not_serially() {
         .map(|bid| (*bid, FakeReply::Slow(150)))
         .collect();
     let src = FakeSource::new(replies);
-    let engine = SyncEngine::new(store.clone(), src, &Registry);
+    let engine = SyncEngine::new(store.clone(), src.clone(), &Registry);
 
-    let started = Instant::now();
     let report = engine.sync_stale(SID, 12, true).await.expect("sync");
-    let elapsed = started.elapsed();
     assert_eq!(report.ok, 8);
-    // 8 x 150ms serial = 1.2s; 4-way concurrency = ~300ms. Wide margin.
+    // Deterministic bounded-concurrency check: the peak number of probes
+    // executing simultaneously must be > 1 (parallel) and <= 4 (bounded).
+    // (A wall-clock assertion flaked on loaded CI runners; overlap is the
+    // actual property under test.)
+    let peak = src.max_concurrent();
     assert!(
-        elapsed < Duration::from_millis(900),
-        "probes must run with bounded concurrency (4), took {elapsed:?}"
+        (2..=4).contains(&peak),
+        "probes must run with bounded concurrency (4): peak in-flight = {peak}"
     );
     cleanup_db(&path);
 }
