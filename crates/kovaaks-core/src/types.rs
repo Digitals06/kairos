@@ -340,6 +340,14 @@ pub struct PlayerProfile {
     pub country: String,
 }
 
+/// Where a play record came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlaySource {
+    /// Parsed from a KovaaK's stats CSV on disk.
+    Csv,
+}
+
 /// One local play parsed from a KovaaK's stats CSV.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlayRecord {
@@ -353,8 +361,8 @@ pub struct PlayRecord {
     pub hit_count: u64,
     /// Footer `Avg FPS:` value.
     pub avg_fps: f64,
-    /// Ingest provenance; currently always `"csv"`.
-    pub source: String,
+    /// Ingest provenance; currently always [`PlaySource::Csv`].
+    pub source: PlaySource,
 }
 
 #[cfg(test)]
@@ -575,7 +583,7 @@ mod tests {
             score: 959.120239,
             hit_count: 145,
             avg_fps: 239.5,
-            source: "csv".into(),
+            source: PlaySource::Csv,
         };
         let json = serde_json::to_string(&rec).expect("serialize");
         let back: PlayRecord = serde_json::from_str(&json).expect("deserialize");

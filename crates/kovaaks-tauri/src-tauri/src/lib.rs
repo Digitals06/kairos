@@ -83,6 +83,16 @@ pub struct ScenarioRank {
     pub rank_maxes: Vec<f64>,
 }
 
+/// Where a chart series' points came from — wire form of
+/// [`kovaaks_core::metrics::ScenarioSeriesSource`]. Serialized lowercase so
+/// the frontend contract is unchanged ("snapshot" | "local").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScenarioHistorySource {
+    Snapshot,
+    Local,
+}
+
 /// One scenario's score history across snapshots (per-scenario trends).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -90,7 +100,7 @@ pub struct ScenarioHistorySeries {
     pub scenario: String,
     pub category: String,
     /// "snapshot" (synced scores) or "local" (CSV plays — no synced score).
-    pub source: String,
+    pub source: ScenarioHistorySource,
     pub points: Vec<ScenarioHistoryPoint>,
 }
 
@@ -761,7 +771,14 @@ pub mod commands {
                     .map(|s| ScenarioHistorySeries {
                         scenario: s.scenario,
                         category: s.category,
-                        source: s.source.as_str().to_string(),
+                        source: match s.source {
+                            kovaaks_core::metrics::ScenarioSeriesSource::Snapshot => {
+                                ScenarioHistorySource::Snapshot
+                            }
+                            kovaaks_core::metrics::ScenarioSeriesSource::Local => {
+                                ScenarioHistorySource::Local
+                            }
+                        },
                         points: s
                             .points
                             .into_iter()
@@ -998,7 +1015,7 @@ mod tests {
             scenario_history: vec![ScenarioHistorySeries {
                 scenario: "VT Pasu Novice S5".into(),
                 category: "Clicking".into(),
-                source: "snapshot".into(),
+                source: ScenarioHistorySource::Snapshot,
                 points: vec![ScenarioHistoryPoint {
                     captured_at: "2026-09-02T22:00:00Z".into(),
                     score: 1282,

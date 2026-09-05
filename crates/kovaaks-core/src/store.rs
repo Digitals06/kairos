@@ -383,7 +383,7 @@ impl Store {
                     score: row.get(2)?,
                     hit_count: row.get::<_, i64>(3)? as u64,
                     avg_fps: row.get(4)?,
-                    source: "csv".to_string(),
+                    source: crate::types::PlaySource::Csv,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;

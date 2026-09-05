@@ -667,7 +667,7 @@ mod tests {
             score: 100.0,
             hit_count: 50,
             avg_fps: 240.0,
-            source: "csv".to_string(),
+            source: crate::types::PlaySource::Csv,
         };
         store
             .record_play("76561190000000001", &play, "C:/fake/play-1.csv")

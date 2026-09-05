@@ -93,7 +93,7 @@ fn play(scenario_name: &str, at: DateTime<Utc>, score: f64, hits: u64, fps: f64)
         score,
         hit_count: hits,
         avg_fps: fps,
-        source: "csv".to_string(),
+        source: kovaaks_core::types::PlaySource::Csv,
     }
 }
 

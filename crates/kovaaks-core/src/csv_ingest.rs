@@ -203,7 +203,7 @@ pub fn scan_dir(dir: &Path, cutoff: DateTime<Utc>, store: &Store, steam_id: &str
                 score: parsed.score,
                 hit_count: parsed.hit_count.max(0) as u64,
                 avg_fps: parsed.avg_fps,
-                source: "csv".to_string(),
+                source: crate::types::PlaySource::Csv,
             },
             &csv_path,
         ) {
