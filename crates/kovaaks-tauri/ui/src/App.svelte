@@ -1,4 +1,5 @@
 <script lang="ts">
+import { listen } from '@tauri-apps/api/event'
   import { onMount } from 'svelte'
   import {
     getProfile,
@@ -48,6 +49,19 @@
   $effect(() => {
     const t = setInterval(() => (now = Date.now()), 60_000)
     return () => clearInterval(t)
+  })
+
+  // Live CSV watcher (backend): new local plays land -> refresh the current
+  // view without any click. Strictly local; ranks still change on Sync Now.
+  $effect(() => {
+    let unlisten: (() => void) | undefined
+    listen<{ seen: number; inserted: number }>('local-plays-updated', (e) => {
+      if (e.payload.inserted > 0) {
+        loadOverview()
+        refreshLastSynced()
+      }
+    }).then((fn) => (unlisten = fn))
+    return () => unlisten?.()
   })
 
   function refreshLastSynced() {

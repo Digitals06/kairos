@@ -18,6 +18,10 @@ use kovaaks_core::{
     EvxlClient, KovaaksClient, Registry, Store, SyncEngine, SyncReport,
 };
 
+use tauri::Manager;
+
+mod watcher;
+
 /// Meta key: JSON blob of app settings (stats dir override, sync interval).
 const SETTINGS_KEY: &str = "settings";
 /// Meta key: stats `csv_seen` counter from the last ingest scan.
@@ -298,7 +302,7 @@ impl AppState {
     }
 
     /// Resolve the active stats dir: settings override or default path.
-    fn stats_dir(&self) -> PathBuf {
+    pub(crate) fn stats_dir(&self) -> PathBuf {
         let settings = self.load_settings();
         if settings.stats_dir.trim().is_empty() {
             PathBuf::from(DEFAULT_STATS_DIR)
@@ -338,7 +342,7 @@ fn db_path() -> PathBuf {
 /// a missing KovaaK's install — scan errors land on stderr and the counters
 /// stay at their previous values. Runs without a profile as a no-op; called
 /// again from `resolve_profile` once a player is connected.
-fn run_csv_scan(store: &Store) -> Option<(usize, usize)> {
+pub(crate) fn run_csv_scan(store: &Store) -> Option<(usize, usize)> {
     let steam_id = match store.get_meta("steam_id") {
         Ok(Some(id)) if !id.is_empty() => id,
         _ => return None,
@@ -885,10 +889,13 @@ pub fn run() {
     let registry: &'static Registry = Box::leak(Box::new(Registry));
     let scan_store = store.clone();
     tauri::Builder::default()
-        .setup(move |_app| {
+        .setup(move |app| {
             // First-run CSV scan in the background (tolerates a missing
             // KovaaK's install; no-ops until a profile is connected).
             tauri::async_runtime::spawn_blocking(move || run_csv_scan(&scan_store));
+            // Live CSV watcher: emits local-plays-updated when new plays land.
+            let state = app.state::<AppState>().inner().clone();
+            watcher::spawn(app.handle().clone(), state);
             Ok(())
         })
         .manage(AppState {
