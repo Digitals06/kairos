@@ -1,5 +1,7 @@
 # Kairos
 
+[![CI](https://github.com/Digitals06/kairos/actions/workflows/ci.yml/badge.svg)](https://github.com/Digitals06/kairos/actions/workflows/ci.yml)
+
 A desktop companion for [KovaaK's FPS Aim Trainer](https://store.steampowered.com/app/824270/KovaKs/): track every benchmark, watch ranks climb, and see per-scenario improvement over time — all in a neon-soaked native app. No login, no accounts, your data stays in a local file on your PC.
 
 If Kairos helps your grind, consider supporting development:
@@ -10,11 +12,14 @@ If Kairos helps your grind, consider supporting development:
 
 ## Features
 
+- **evxl-accurate ranks, computed locally** — the rank engine reverse-engineered from evxl.app recomputes your rank from your scores (all major benchmark families: Voltaic energy, harmonic/top-N/count-based methods, …). The server's own rank is only a fallback, because it's wrong for most benchmarks.
+- **Rank-change toasts** — every sync diffs the two newest snapshots per benchmark; when your overall rank moves, you get a "RANK UP" toast with the old and new tier.
+- **Live local plays** — a background watcher reads KovaaK's `Stats` folder while the app is open: new sessions appear in charts on their own, no refresh click. (Ranks still update on Sync Now.)
 - **Full benchmark coverage** — every benchmark tracked on [evxl.app](https://evxl.app) (Voltaic, Revosect, PureG, Aimerz+, …), with official rank names and colors.
-- **One-click sync** — a quick pass for your main benchmarks, plus a Deep Scan for everything. If the server throttles, Kairos waits and retries politely on its own.
-- **Per-scenario detail** — score history chart (your local plays + sync snapshots), 7-day average, running high, avg/high scores, and 30-day improvement % for the selected scenario. Snapshots that don't set a new high are ignored, so stale syncs never pollute charts or averages.
-- **Local CSV ingest** — reads KovaaK's own `Stats` folder, so sessions you played offline still count.
+- **One-click sync** — a quick pass for your main benchmarks, plus a Deep Scan for everything. If the server throttles, Kairos waits and retries politely on its own. **Refresh Local** re-scans the stats folder without touching the network.
+- **Per-scenario detail** — score history chart (your local plays + sync snapshots, deduplicated so the same run never counts twice), 7-day average, running high, avg/high scores, and 30-day improvement % for the selected scenario. Snapshots that don't set a new high are ignored, so stale syncs never pollute charts or averages.
 - **Search + favorites** — filter the grid by name, pin benchmarks to the top. Pins survive restarts.
+- **Private by design** — no accounts, no telemetry; only public APIs, and live API tests skip unless you opt in.
 
 ![Kairos benchmark detail](docs/screenshots/benchmark-detail.png)
 
@@ -92,12 +97,18 @@ The `--features custom-protocol` part is required: it bakes the built frontend f
 **Running the tests** (from the repo root folder):
 
 ```powershell
-cd ..\..\..   # back to the kairos folder
+cd ..\..\..\   # back to the kairos folder
 cargo test --workspace --offline        # fast, no network
-cargo clippy --workspace --offline      # linter (first time only: rustup component add clippy)
+cargo clippy --workspace --all-targets -- -D warnings   # linter, CI gate
 ```
 
-Live API tests exist but are skipped by default (`#[ignore]`) so the suite never hammers the public servers.
+Live API tests exist but are skipped by default (`#[ignore]`) so the suite never hammers the public servers; a few of them read environment variables (`KAIROS_TEST_STEAM_ID`, `KAIROS_LIVE_DB`, `KAIROS_LIVE_STEAM_ID`) and skip cleanly when unset.
+
+## Development workflow
+
+CI runs on every push (rustfmt, clippy with warnings denied, the offline test suite, and a frontend build) and a Windows release build runs automatically on `v*` tags — the exe is attached to the GitHub release by the workflow itself.
+
+Debug/probe scripts are intentionally **not** part of the repo; keep local tooling outside git (`.gitignore` covers `/scripts/`).
 
 ## Roadmap
 
@@ -106,9 +117,10 @@ Planned features and quality-of-life work live in [ROADMAP.md](ROADMAP.md) — n
 ## Layout
 
 ```
-crates/kovaaks-core/    registry, API clients, SQLite store, sync engine, metrics
-crates/kovaaks-tauri/   Tauri v2 shell (src-tauri) + Svelte 5 UI (ui)
-docs/screenshots/       README images
+crates/kovaaks-core/    registry, API clients, SQLite store, sync engine, metrics,
+                        rank engine (rankcalc), rank-diff (rankdiff)
+crates/kovaaks-tauri/   Tauri v2 shell (src-tauri, incl. the CSV watcher) + Svelte 5 UI (ui)
+docs/                   rank-systems spec + README screenshots
 ```
 
 Built with Rust, Tauri v2, Svelte 5, Chart.js, and rusqlite.
