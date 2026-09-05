@@ -3,7 +3,6 @@
 //! Fully offline: every test opens its own throwaway SQLite database in the
 //! OS temp dir (unique file name per call — std only, no new dependencies).
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};

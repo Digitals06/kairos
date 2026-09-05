@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::Utc;
 use kovaaks_core::{BenchmarkProgress, Error, ProgressSource, Registry, Store, SyncEngine};
 
 const SID: &str = "76561190000000001";
@@ -108,11 +108,6 @@ fn prog(overall: f64, scen_score: f64) -> BenchmarkProgress {
     }
 }
 
-fn ts(secs: i64) -> DateTime<Utc> {
-    Utc.timestamp_opt(secs, 0)
-        .single()
-        .expect("valid timestamp")
-}
 
 // ---------- fake ProgressSource ----------
 

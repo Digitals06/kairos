@@ -863,6 +863,40 @@ pub mod commands {
 // Wiring
 // ---------------------------------------------------------------------------
 
+/// Tauri entry point: state, setup hooks, command registration.
+pub fn run() {
+    let store = Store::open(&db_path()).expect("open sqlite store");
+    csv_ingest::ensure_cutoff(&store).expect("seed first-run csv cutoff");
+    let registry: &'static Registry = Box::leak(Box::new(Registry));
+    let scan_store = store.clone();
+    tauri::Builder::default()
+        .setup(move |_app| {
+            // First-run CSV scan in the background (tolerates a missing
+            // KovaaK's install; no-ops until a profile is connected).
+            tauri::async_runtime::spawn_blocking(move || run_csv_scan(&scan_store));
+            Ok(())
+        })
+        .manage(AppState {
+            store,
+            registry,
+            evxl: EvxlClient::new().expect("evxl http client"),
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::resolve_profile,
+            commands::get_profile,
+            commands::sync_now,
+            commands::get_overview,
+            commands::get_benchmark_detail,
+            commands::ingest_status,
+            commands::refresh_local,
+            commands::get_settings,
+            commands::set_settings,
+            commands::toggle_favorite,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1047,38 +1081,4 @@ mod tests {
         assert_eq!(name, None);
         assert_eq!(delta, None);
     }
-}
-
-/// Tauri entry point: state, setup hooks, command registration.
-pub fn run() {
-    let store = Store::open(&db_path()).expect("open sqlite store");
-    csv_ingest::ensure_cutoff(&store).expect("seed first-run csv cutoff");
-    let registry: &'static Registry = Box::leak(Box::new(Registry));
-    let scan_store = store.clone();
-    tauri::Builder::default()
-        .setup(move |_app| {
-            // First-run CSV scan in the background (tolerates a missing
-            // KovaaK's install; no-ops until a profile is connected).
-            tauri::async_runtime::spawn_blocking(move || run_csv_scan(&scan_store));
-            Ok(())
-        })
-        .manage(AppState {
-            store,
-            registry,
-            evxl: EvxlClient::new().expect("evxl http client"),
-        })
-        .invoke_handler(tauri::generate_handler![
-            commands::resolve_profile,
-            commands::get_profile,
-            commands::sync_now,
-            commands::get_overview,
-            commands::get_benchmark_detail,
-            commands::ingest_status,
-            commands::refresh_local,
-            commands::get_settings,
-            commands::set_settings,
-            commands::toggle_favorite,
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
 }

@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: windows build + release upload
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: crates/kovaaks-tauri/ui/package-lock.json
+
+      - name: Build frontend
+        working-directory: crates/kovaaks-tauri/ui
+        run: |
+          npm ci
+          npm run build
+
+      # Mirrors the local production flow: npm run build, then cargo with the
+      # custom-protocol feature so the UI is embedded in the binary.
+      - name: Build release exe
+        run: cargo build --release -p kovaaks-tauri --features custom-protocol
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/kairos.exe
+          generate_release_notes: true

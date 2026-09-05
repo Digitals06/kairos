@@ -2469,8 +2469,7 @@ mod tests {
             name: name.to_string(),
             kovaaks_benchmark_id: 0,
             sharecode: String::new(),
-            rank_colors: std::iter::repeat(())
-                .take(n)
+            rank_colors: std::iter::repeat_n((), n)
                 .enumerate()
                 .map(|(i, _)| crate::types::RankTier {
                     name: if i == 0 {

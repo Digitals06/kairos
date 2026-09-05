@@ -673,7 +673,7 @@ mod tests {
             .record_play("76561190000000001", &play, "C:/fake/play-1.csv")
             .expect("record play");
 
-        let mut categories = vec![(
+        let categories = vec![(
             "Clicking".to_string(),
             crate::types::CategoryProgress {
                 benchmark_progress: 30000.0,
