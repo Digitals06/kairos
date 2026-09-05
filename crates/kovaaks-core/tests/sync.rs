@@ -108,7 +108,6 @@ fn prog(overall: f64, scen_score: f64) -> BenchmarkProgress {
     }
 }
 
-
 // ---------- fake ProgressSource ----------
 
 #[derive(Debug, Clone)]

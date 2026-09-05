@@ -36,6 +36,17 @@ export interface SyncReport {
   errors: string[]
 }
 
+/** Engine-computed rank change between two consecutive snapshots (post-sync toast). */
+export interface RankChange {
+  benchmarkId: number
+  benchmarkName: string
+  prevRank: number
+  curRank: number
+  prevName: string
+  curName: string
+  improved: boolean
+}
+
 export interface PlayerProfile {
   steam_id: string
   persona: string
@@ -126,6 +137,10 @@ export function getProfile(): Promise<PlayerProfile | null> {
 
 export function syncNow(deep: boolean): Promise<SyncReport> {
   return invoke('sync_now', { deep })
+}
+
+export function rankChanges(): Promise<RankChange[]> {
+  return invoke('rank_changes')
 }
 
 export function getOverview(): Promise<BenchmarkCard[]> {

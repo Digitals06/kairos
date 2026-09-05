@@ -6,6 +6,7 @@
     ingestStatus,
     refreshLocal,
     syncNow,
+    rankChanges,
     getSettings,
     setSettings,
     getBenchmarkDetail,
@@ -78,6 +79,27 @@
       await loadOverview()
       if (report.failed > 0) {
         showToast(`Sync finished with ${report.failed} failure(s): ${report.errors[0] ?? ''}`)
+      }
+      // Rank-up/down surfacing: engine-computed diffs between the last two
+      // snapshots per benchmark. Summary toast when several change at once.
+      try {
+        const changes = (await rankChanges()).filter((c) => c.curName || c.prevName)
+        const ups = changes.filter((c) => c.improved)
+        const downs = changes.filter((c) => !c.improved)
+        if (ups.length === 1 && downs.length === 0) {
+          const c = ups[0]
+          showToast(`RANK UP — ${c.benchmarkName}: ${c.prevName || 'Unranked'} → ${c.curName}`)
+        } else if (downs.length === 1 && ups.length === 0) {
+          const c = downs[0]
+          showToast(`${c.benchmarkName}: ${c.prevName} → ${c.curName}`)
+        } else if (changes.length > 1) {
+          const parts = changes.slice(0, 3).map((c) => `${c.benchmarkName} ${c.prevName || '—'}→${c.curName || '—'}`)
+          const extra = changes.length - 3
+          const dir = ups.length >= downs.length ? 'up' : 'down'
+          showToast(`${changes.length} rank changes (${ups.length} ${dir}): ${parts.join(', ')}${extra > 0 ? ` +${extra} more` : ''}`)
+        }
+      } catch {
+        /* rank diff is best-effort; never fail the sync toast path */
       }
     } catch (err) {
       showToast(humanError(err))

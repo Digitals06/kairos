@@ -12,6 +12,7 @@ use tauri::State;
 
 use kovaaks_core::{
     csv_ingest, metrics_for_benchmark, metrics_for_scenario_combined,
+    rankdiff::RankChange,
     store::StoredSnapshot,
     types::{Difficulty, RankTier},
     EvxlClient, KovaaksClient, Registry, Store, SyncEngine, SyncReport,
@@ -570,6 +571,20 @@ pub mod commands {
         }))
     }
 
+    /// Engine-computed rank diffs between the two newest snapshots of every
+    /// benchmark, for post-sync toast surfacing. Read-only.
+    #[tauri::command]
+    pub fn rank_changes(state: State<'_, AppState>) -> Result<Vec<RankChange>, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .map(|p| p.steam_id)
+            .ok_or("no profile connected")?;
+        let state = state.inner();
+        kovaaks_core::rankdiff::compute_rank_changes(&state.store, state.registry, &steam_id)
+            .map_err(|e| e.to_string())
+    }
+
     /// Overview grid: one card per played benchmark, sorted by benchmark name.
     /// Sync commands run on a thread-pool thread (not the main thread) so a
     /// wide card grid never blocks the webview event loop.
@@ -885,6 +900,7 @@ pub fn run() {
             commands::resolve_profile,
             commands::get_profile,
             commands::sync_now,
+            commands::rank_changes,
             commands::get_overview,
             commands::get_benchmark_detail,
             commands::ingest_status,

@@ -10,6 +10,7 @@ pub mod http;
 pub mod kovaaks;
 pub mod metrics;
 pub mod rankcalc;
+pub mod rankdiff;
 pub mod ranks;
 pub mod registry;
 pub mod steam;
@@ -23,6 +24,9 @@ pub use kovaaks::KovaaksClient;
 pub use metrics::{
     compute, compute_trailing_30d, compute_window, improving_only, metrics_for_benchmark,
     metrics_for_scenario_combined, metrics_for_scenario_plays, Metrics,
+};
+pub use rankdiff::{
+    compute_rank_changes, engine_rank_for_snapshot, stored_to_progress, RankChange,
 };
 pub use ranks::{rank_for, rank_from_index, scenario_rank_tier};
 pub use registry::Registry;
