@@ -1769,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "kovaaks-core"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1784,7 +1784,7 @@ dependencies = [
 
 [[package]]
 name = "kovaaks-tauri"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "kovaaks-core",
