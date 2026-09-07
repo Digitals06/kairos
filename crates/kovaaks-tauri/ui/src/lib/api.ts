@@ -85,6 +85,8 @@ export interface PlayPoint {
 export interface ScenarioHistoryPoint {
   captured_at: string
   score: number
+  /** True when this run came from a local CSV play (magenta dot). */
+  from_play: boolean
 }
 
 export interface ScenarioHistorySeries {

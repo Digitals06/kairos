@@ -111,6 +111,9 @@ pub struct ScenarioHistorySeries {
 pub struct ScenarioHistoryPoint {
     pub captured_at: String,
     pub score: i64,
+    /// True when this run came from a local CSV play (magenta dot on the
+    /// chart); false for a synced snapshot entry.
+    pub from_play: bool,
 }
 
 /// One category row in the benchmark detail view.
@@ -786,9 +789,10 @@ pub mod commands {
                         points: s
                             .points
                             .into_iter()
-                            .map(|(captured_at, score)| ScenarioHistoryPoint {
-                                captured_at: captured_at.to_rfc3339(),
-                                score,
+                            .map(|p| ScenarioHistoryPoint {
+                                captured_at: p.at.to_rfc3339(),
+                                score: p.score,
+                                from_play: p.from_play,
                             })
                             .collect(),
                     })
@@ -1023,6 +1027,7 @@ mod tests {
                 points: vec![ScenarioHistoryPoint {
                     captured_at: "2026-09-02T22:00:00Z".into(),
                     score: 1282,
+                    from_play: false,
                 }],
             }],
             rank_tiers: vec![
@@ -1060,6 +1065,7 @@ mod tests {
             "\"leaderboard_rank\"",
             "\"rank_tier\"",
             "\"snapshot_history\"",
+            "\"from_play\"",
         ] {
             assert!(json.contains(key), "missing {key} in {json}");
         }

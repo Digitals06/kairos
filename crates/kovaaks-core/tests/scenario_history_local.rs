@@ -54,9 +54,15 @@ fn snapshot_series_still_win_over_local_plays() {
     let out = build_scenario_history(&history, &local);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].source.as_str(), "snapshot");
-    // The 99999 local play must NOT leak into a snapshot-backed series.
-    assert_eq!(out[0].points.len(), 2);
-    assert_eq!(out[0].points[1].1, 1200);
+    // Merged history: snapshot new-highs + the play (a real run at t=150,
+    // not an echo — different score) with provenance.
+    assert_eq!(out[0].points.len(), 3);
+    assert_eq!(out[0].points[0].score, 1000);
+    assert!(!out[0].points[0].from_play);
+    assert_eq!(out[0].points[1].score, 99999);
+    assert!(out[0].points[1].from_play);
+    assert_eq!(out[0].points[2].score, 1200);
+    assert!(!out[0].points[2].from_play);
 }
 
 #[test]
@@ -73,9 +79,11 @@ fn zero_score_scenario_falls_back_to_local_plays() {
     assert_eq!(out.len(), 1, "scenario must survive with local points");
     assert_eq!(out[0].source.as_str(), "local");
     assert_eq!(out[0].points.len(), 2, "only new highs kept");
-    assert_eq!(out[0].points[0].1, 800);
+    assert_eq!(out[0].points[0].score, 800);
+    assert!(out[0].points[0].from_play);
     // 805.6 rounds (not truncates) to 806 — matching how the sync echoes it.
-    assert_eq!(out[0].points[1].1, 806);
+    assert_eq!(out[0].points[1].score, 806);
+    assert!(out[0].points[1].from_play);
     assert_eq!(out[0].category, "Evasive", "category from the snapshot row");
 }
 
@@ -91,6 +99,7 @@ fn scenario_never_synced_but_played_locally_appears() {
     let s = spiders.unwrap();
     assert_eq!(s.source.as_str(), "local");
     assert_eq!(s.points.len(), 2);
+    assert!(s.points.iter().all(|p| p.from_play));
     assert_eq!(
         s.category, "Local",
         "no snapshot row → placeholder category"
@@ -130,8 +139,16 @@ fn snapshot_series_drops_points_echoing_a_play_score() {
     let out = build_scenario_history(&history, &local);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].source.as_str(), "snapshot");
-    let scores: Vec<i64> = out[0].points.iter().map(|p| p.1).collect();
-    assert_eq!(scores, vec![1200], "echoed 1180 snapshot point dropped");
+    // Merged: the play (1180@150) kept verbatim; the echoing snapshot 1180@200
+    // dropped; the real new-high 1200@300 kept.
+    let scores: Vec<i64> = out[0].points.iter().map(|p| p.score).collect();
+    assert_eq!(
+        scores,
+        vec![1180, 1200],
+        "echoed 1180 snapshot point dropped"
+    );
+    assert!(out[0].points[0].from_play);
+    assert!(!out[0].points[1].from_play);
 }
 
 #[test]
@@ -143,5 +160,6 @@ fn snapshot_series_falls_back_to_local_when_all_points_echo_plays() {
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].source.as_str(), "local");
     assert_eq!(out[0].points.len(), 1);
-    assert_eq!(out[0].points[0].1, 1180);
+    assert_eq!(out[0].points[0].score, 1180);
+    assert!(out[0].points[0].from_play);
 }

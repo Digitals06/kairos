@@ -141,7 +141,10 @@ pub fn metrics_for_scenario_combined(
         .collect();
     // New-high snapshots only; snapshot points duplicating a local play (the
     // same run echoed by the sync) are dropped — see merge_plays_snapshots_dedup.
-    let series = merge_plays_snapshots_dedup(&plays, &improving_only(&snapshots));
+    let series = merge_plays_snapshots_dedup(&plays, &improving_only(&snapshots))
+        .into_iter()
+        .map(|(at, score, _)| (at, score))
+        .collect::<Vec<_>>();
     Ok(compute(&series))
 }
 
@@ -189,18 +192,20 @@ pub fn is_same_run(a: f64, b: f64) -> bool {
 pub fn merge_plays_snapshots_dedup(
     plays: &[(String, DateTime<Utc>, f64)],
     snapshots: &[(DateTime<Utc>, f64)],
-) -> Vec<(DateTime<Utc>, f64)> {
-    let mut merged: Vec<(DateTime<Utc>, f64)> =
-        plays.iter().map(|(_, at, score)| (*at, *score)).collect();
+) -> Vec<(DateTime<Utc>, f64, bool)> {
+    let mut merged: Vec<(DateTime<Utc>, f64, bool)> = plays
+        .iter()
+        .map(|(_, at, score)| (*at, *score, true))
+        .collect();
     for &(at, score) in snapshots {
         let dup = plays
             .iter()
             .any(|(_, _, pscore)| is_same_run(*pscore, score));
         if !dup {
-            merged.push((at, score));
+            merged.push((at, score, false));
         }
     }
-    merged.sort_by_key(|(t, _)| *t);
+    merged.sort_by_key(|(t, _, _)| *t);
     merged
 }
 
@@ -231,7 +236,22 @@ pub struct ScenarioSeries {
     pub scenario: String,
     pub category: String,
     pub source: ScenarioSeriesSource,
-    pub points: Vec<(DateTime<Utc>, i64)>,
+    /// Final merged run history (local plays + non-echo snapshot new-highs),
+    /// chronological. The single same-run rule lives in
+    /// [`merge_plays_snapshots_dedup`]; this series is its output.
+    pub points: Vec<ScenarioPoint>,
+}
+
+/// One merged run with its provenance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScenarioPoint {
+    pub at: DateTime<Utc>,
+    /// Score in display units, rounded to i64 (matches how the sync stores
+    /// echoes; KovaaK's rounds the same float the same way).
+    pub score: i64,
+    /// True when this run came from a local CSV play (exact time); false for
+    /// a synced snapshot entry.
+    pub from_play: bool,
 }
 
 /// One scenario's chart series: snapshot points with play-echoes dropped,
@@ -243,31 +263,64 @@ fn series_for_scenario(
     scenario: &str,
     category: String,
 ) -> Option<ScenarioSeries> {
-    let plays_pts = local_points(local_plays, scenario).1;
-    // Snapshot points that echo a local play (same score = same run) are
-    // dropped so the series never double-counts or renders a phantom run.
-    let pts: Vec<(DateTime<Utc>, i64)> = snapshot_points(history, scenario)
-        .into_iter()
-        .filter(|(_, v)| {
-            !plays_pts
-                .iter()
-                .any(|(_, pv)| crate::metrics::is_same_run(*pv as f64, *v as f64))
-        })
-        .collect();
-    let (source, points) = if pts.is_empty() {
-        local_points(local_plays, scenario)
-    } else {
-        (ScenarioSeriesSource::Snapshot, pts)
+    // The single merge (plays verbatim + non-echo snapshot new-highs) — the
+    // same rule every consumer shares. `improving_only` keeps snapshots
+    // new-highs-only; plays enter verbatim (they carry exact times + float
+    // scores and ARE the primary record).
+    let plays: Vec<(String, DateTime<Utc>, f64)> = {
+        let raw: Vec<(DateTime<Utc>, f64)> = local_plays
+            .iter()
+            .filter(|(s, _, _)| s == scenario)
+            .map(|(_, at, score)| (*at, *score))
+            .collect();
+        // New-highs only (as before): a non-improving replay would spray
+        // flat dots and drag the 7-day average down.
+        improving_only(&raw)
+            .into_iter()
+            .map(|(at, score)| (scenario.to_string(), at, score))
+            .collect()
     };
-    if points.is_empty() {
+    let snapshots = improving_only(&snapshot_points_raw(history, scenario));
+    let merged = merge_plays_snapshots_dedup(&plays, &snapshots);
+    if merged.is_empty() {
         return None; // nothing synced AND nothing local: no chart
     }
+    let has_snaps = merged.iter().any(|(_, _, fp)| !fp);
     Some(ScenarioSeries {
         scenario: scenario.to_string(),
         category,
-        source,
-        points,
+        source: if has_snaps {
+            ScenarioSeriesSource::Snapshot
+        } else {
+            ScenarioSeriesSource::Local
+        },
+        points: merged
+            .into_iter()
+            .map(|(at, score, from_play)| ScenarioPoint {
+                at,
+                score: score.round() as i64,
+                from_play,
+            })
+            .collect(),
     })
+}
+
+/// Raw per-snapshot scenario scores (score > 0), NOT new-high filtered —
+/// filtering happens inside the shared merge path.
+fn snapshot_points_raw(
+    history: &[crate::store::StoredSnapshot],
+    scenario: &str,
+) -> Vec<(DateTime<Utc>, f64)> {
+    history
+        .iter()
+        .filter_map(|s| {
+            s.scenarios
+                .iter()
+                .find(|r| r.scenario == scenario)
+                .filter(|r| r.score > 0)
+                .map(|r| (s.captured_at, r.score as f64))
+        })
+        .collect()
 }
 
 /// Build per-scenario chart series for one benchmark.
@@ -331,61 +384,21 @@ pub fn build_scenario_history(
         .map(|(s, _, _)| s.as_str())
         .collect();
     for scenario in locals {
-        let (_, points) = local_points(local_plays, scenario);
-        if points.is_empty() {
-            continue;
-        }
-        out.push(ScenarioSeries {
-            scenario: scenario.to_string(),
-            category: "Local".to_string(),
-            source: ScenarioSeriesSource::Local,
-            points,
-        });
-    }
-    out
-}
-
-/// New-high snapshot points with a positive score for one scenario.
-fn snapshot_points(
-    history: &[crate::store::StoredSnapshot],
-    scenario: &str,
-) -> Vec<(DateTime<Utc>, i64)> {
-    let raw: Vec<(DateTime<Utc>, f64)> = history
-        .iter()
-        .filter_map(|s| {
+        // Same single merge path as snapshot-backed scenarios — plays only.
+        let category = match history.iter().rev().find_map(|s| {
             s.scenarios
                 .iter()
                 .find(|r| r.scenario == scenario)
-                .filter(|r| r.score > 0)
-                .map(|r| (s.captured_at, r.score as f64))
-        })
-        .collect();
-    improving_only(&raw)
-        .into_iter()
-        .map(|(t, v)| (t, v as i64))
-        .collect()
-}
-
-/// New-high local play points for one scenario.
-fn local_points(
-    local_plays: &[(String, DateTime<Utc>, f64)],
-    scenario: &str,
-) -> (ScenarioSeriesSource, Vec<(DateTime<Utc>, i64)>) {
-    let raw: Vec<(DateTime<Utc>, f64)> = local_plays
-        .iter()
-        .filter(|(s, _, _)| s == scenario)
-        .map(|(_, at, score)| (*at, *score))
-        .collect();
-    (
-        ScenarioSeriesSource::Local,
-        improving_only(&raw)
-            .into_iter()
-            // Round (not truncate): the sync echoes plays as rounded integers,
-            // so truncation would break same-run matching (805.628 -> 805 vs
-            // echo 806). KovaaK's rounds the same float the same way.
-            .map(|(t, v)| (t, v.round() as i64))
-            .collect(),
-    )
+                .map(|r| r.category.clone())
+        }) {
+            Some(c) => c,
+            None => "Local".to_string(),
+        };
+        if let Some(series) = series_for_scenario(history, local_plays, scenario, category) {
+            out.push(series);
+        }
+    }
+    out
 }
 
 // ---------- internals ----------

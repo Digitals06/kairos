@@ -123,30 +123,20 @@
     // Series: the selected scenario only (chart is always scenario-scoped).
     if (!chartScope) return
     const series = d.scenario_history.find((s) => s.scenario === chartScope)
-    const raw = (series?.points ?? []).map((p) => ({
+    if (!series || series.points.length === 0) return
+    // The backend owns the merged run history (local plays + non-echo
+    // snapshot new-highs, same-run rule included) — points are plotted
+    // verbatim. No client-side dedupe or merging happens here.
+    const trend = series.points.map((p) => ({
       x: new Date(p.captured_at).getTime(),
       y: p.score,
+      fromPlay: p.from_play,
     }))
-    // Local plays for exactly this scenario.
-    const playPts = d.plays
-      .filter((p) => p.scenario === chartScope)
-      .map((p) => ({ x: new Date(p.played_at).getTime(), y: p.score }))
-    if (raw.length === 0 && playPts.length === 0) return
-
-    const seriesSource = series?.source
-    // The cyan "runs" line is the same merged series for every scenario —
-    // snapshot-backed or local — so all charts behave uniformly. Snapshot
-    // echoes of a play (same score) were already dropped backend-side.
-    // Running high + 7-day avg derive from the merged runs.
-    // Same-run rule must mirror the backend's is_same_run: the sync echoes
-    // plays as ROUNDED integers (1558.668 -> 1559), so compare rounded values.
-    const snapPts =
-      seriesSource === 'local'
-        ? raw
-        : raw.filter((s) => !playPts.some((p) => Math.round(p.y) === Math.round(s.y)))
-    const trend = [...playPts, ...snapPts].sort((a, b) => a.x - b.x)
-    // Magenta dots mark play-sourced runs; hidden when the cyan line already
-    // is those plays (local-backed series) or there are no plays at all.
+    const seriesSource = series.source
+    // Magenta dots mark play-sourced runs; hidden when every point is a
+    // play (local-backed series — the cyan line already is those plays).
+    const playPts = trend.filter((p) => p.fromPlay)
+    const snapPts = trend.filter((p) => !p.fromPlay)
     const showPlayDots = snapPts.length > 0 && playPts.length > 0
 
     let high = -Infinity
@@ -162,16 +152,6 @@
       type: 'line',
       data: {
         datasets: [
-          {
-            label: 'local play',
-            type: 'scatter',
-            data: showPlayDots ? playPts : [],
-            showLine: false,
-            pointRadius: 3.5,
-            pointHoverRadius: 5,
-            pointBackgroundColor: MAGENTA,
-            pointBorderColor: MAGENTA,
-          },
           {
             label: 'running high',
             data: highPts,
@@ -192,13 +172,22 @@
             stepped: 'before',
           },
           {
-            label: seriesSource === 'local' ? 'local highs' : 'sync snapshot',
+            // Merged run line. Play-sourced points get a bigger magenta
+            // marker (scriptable per-point color) — they sit exactly on the
+            // line now that the backend owns the merge, so a separate
+            // scatter dataset would paint under/over ambiguously.
+            label: 'runs',
             data: trend,
             borderColor: CYAN,
             backgroundColor: CYAN,
             borderWidth: 2,
-            pointRadius: 2.5,
-            pointHoverRadius: 4,
+            pointRadius: (ctx) =>
+              ctx.dataset.data[ctx.dataIndex]?.fromPlay ? 4 : 2.5,
+            pointHoverRadius: 5,
+            pointBackgroundColor: (ctx) =>
+              ctx.dataset.data[ctx.dataIndex]?.fromPlay ? MAGENTA : CYAN,
+            pointBorderColor: (ctx) =>
+              ctx.dataset.data[ctx.dataIndex]?.fromPlay ? MAGENTA : CYAN,
             tension: 0.25,
           },
         ],

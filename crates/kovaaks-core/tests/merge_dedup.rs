@@ -15,8 +15,10 @@ fn snapshot_duplicating_local_play_is_dropped() {
     let plays = vec![("S".to_string(), utc(100), 805.6)];
     let snapshots = vec![(utc(120), 805.6), (utc(300), 900.0)];
     let merged = merge_plays_snapshots_dedup(&plays, &snapshots);
-    let times: Vec<i64> = merged.iter().map(|(t, _)| t.timestamp()).collect();
+    let times: Vec<i64> = merged.iter().map(|(t, _, _)| t.timestamp()).collect();
     assert_eq!(times, vec![100, 300], "duplicate snapshot point removed");
+    assert!(merged[0].2, "kept point is the play");
+    assert!(!merged[1].2, "kept point is the snapshot");
 }
 
 #[test]
