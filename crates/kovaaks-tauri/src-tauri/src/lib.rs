@@ -459,12 +459,27 @@ pub mod commands {
         };
         let source = KovaaksClient::new().map_err(|e| e.to_string())?;
         let engine = SyncEngine::new(store.clone(), source, state.registry);
+        // Smart sync: scan local CSVs FIRST. New plays mean any benchmark
+        // might have changed → full sweep. No new plays → only rows not
+        // checked within the max-age window are re-probed (saves ~200
+        // probes per routine sync; the 2h max-age still catches remote-only
+        // rank changes).
+        let dir = state.stats_dir();
+        let scan = match csv_ingest::ensure_cutoff(&store) {
+            Ok(cutoff) => Some(csv_ingest::scan_dir(&dir, cutoff, &store, &steam_id)),
+            Err(_) => None,
+        };
+        if let Some(scan) = &scan {
+            let _ = store.set_meta(INGEST_SEEN_KEY, &scan.seen.to_string());
+            let _ = store.set_meta(INGEST_INSERTED_KEY, &scan.inserted.to_string());
+        }
+        let new_plays = scan.as_ref().map(|s| s.inserted).unwrap_or(0);
         let discovery = engine
             .discover(&steam_id, deep)
             .await
             .map_err(|e| e.to_string())?;
         let stale = engine
-            .sync_stale(&steam_id, SYNC_MAX_AGE_HOURS, true)
+            .sync_stale(&steam_id, SYNC_MAX_AGE_HOURS, deep || new_plays > 0)
             .await
             .map_err(|e| e.to_string())?;
         let report = SyncReportDto {
@@ -472,13 +487,7 @@ pub mod commands {
             failed: discovery.failed + stale.failed,
             errors: discovery.errors.into_iter().chain(stale.errors).collect(),
         };
-        // Cheap, idempotent local refresh alongside the network sync.
-        let dir = state.stats_dir();
-        if let Ok(cutoff) = csv_ingest::ensure_cutoff(&store) {
-            let scan = csv_ingest::scan_dir(&dir, cutoff, &store, &steam_id);
-            let _ = store.set_meta(INGEST_SEEN_KEY, &scan.seen.to_string());
-            let _ = store.set_meta(INGEST_INSERTED_KEY, &scan.inserted.to_string());
-        }
+
         let _ = store.set_meta(LAST_SYNCED_KEY, &chrono::Utc::now().to_rfc3339());
         eprintln!(
             "sync_now: ok={} failed={} in {:?}",
