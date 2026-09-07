@@ -21,17 +21,18 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 
 ## v0.1.5
 
-- Consolidate the same-run rule: `build_scenario_history` becomes the single
+- [x] Consolidate the same-run rule: `build_scenario_history` is the single
   owner of the merged-series logic; the frontend's client-side dedupe is
   removed (backend series is authoritative, covered by tests + screenshot
   verification)
-- Smart sync: only re-probe benchmarks whose local CSVs changed since the
+- [x] Smart sync: only re-probe benchmarks whose local CSVs changed since the
   last sync (mtime-based) — fewer rate-limited sweeps
-- Registry updater: fetch evxl's public registry in-app with a
+- [x] Registry updater: fetch evxl's public registry in-app with a
   version-stamped cache, so new benchmark seasons don't wait on a rebuild
-- Auto-sync on launch + a "last synced X ago" indicator
-- "What to grind next": design pass first — per-family score→rank inversion
-  is benchmark-specific, so this ships as a designed feature, not a guess
+- [x] Auto-sync on launch + a "last synced X ago" indicator
+- [x] "What to grind next": design pass complete (probe-based inversion,
+  see `.hermes/plans/2026-09-07_v015_grind-next-design.md`); implementation
+  follows in v0.1.6
 
 ## v0.2
 
