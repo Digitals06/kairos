@@ -50,6 +50,9 @@ static MAJOR_FAMILIES: &[&str] = &[
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Registry;
 
+/// Where a fetched registry override was persisted (set once at startup).
+static OVERRIDE_PATH: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+
 impl Registry {
     /// The 15 major benchmark family name prefixes, in plan order.
     pub fn major_families() -> &'static [&'static str] {
@@ -64,9 +67,30 @@ impl Registry {
     /// Every benchmark in the registry (registry order).
     pub fn all(&self) -> &[BenchmarkDef] {
         static REGISTRY: OnceLock<Vec<BenchmarkDef>> = OnceLock::new();
+        static OVERRIDE: OnceLock<Option<Vec<BenchmarkDef>>> = OnceLock::new();
+        let or = OVERRIDE.get_or_init(|| {
+            // Runtime override (fetched from evxl at startup); load eagerly
+            // here via the path installed by `install_override_path`.
+            crate::registry_update::load_override()
+                .and_then(|json| serde_json::from_str(&json).ok())
+        });
         REGISTRY.get_or_init(|| {
             serde_json::from_str(REGISTRY_JSON).expect("embedded registry must parse")
-        })
+        });
+        match or {
+            Some(v) => v,
+            None => REGISTRY.get().expect("registry initialized"),
+        }
+    }
+
+    /// Install the path the updater persists overrides to. Must be called
+    /// before the first `all()` (startup); later calls are no-ops.
+    pub fn install_override_path(path: std::path::PathBuf) {
+        OVERRIDE_PATH.get_or_init(|| Some(path));
+    }
+
+    pub(crate) fn override_path() -> Option<&'static std::path::PathBuf> {
+        OVERRIDE_PATH.get_or_init(|| None).as_ref()
     }
 
     /// Benchmarks evxl actually shows: `hidden != true`. This is the same

@@ -920,6 +920,10 @@ pub mod commands {
 pub fn run() {
     let store = Store::open(&db_path()).expect("open sqlite store");
     csv_ingest::ensure_cutoff(&store).expect("seed first-run csv cutoff");
+    // Runtime registry override: fetched from evxl on a previous launch.
+    kovaaks_core::Registry::install_override_path(
+        db_path().with_file_name("registry-override.json"),
+    );
     let registry: &'static Registry = Box::leak(Box::new(Registry));
     let scan_store = store.clone();
     tauri::Builder::default()
@@ -930,6 +934,22 @@ pub fn run() {
             // Live CSV watcher: emits local-plays-updated when new plays land.
             let state = app.state::<AppState>().inner().clone();
             watcher::spawn(app.handle().clone(), state);
+            // Registry update check (background, silent on failure): new
+            // benchmark seasons arrive without waiting on a rebuild.
+            tauri::async_runtime::spawn(async move {
+                match kovaaks_core::registry_update::fetch_live_registry().await {
+                    Ok(json) => {
+                        let path = db_path().with_file_name("registry-override.json");
+                        match kovaaks_core::registry_update::persist_override(&path, &json) {
+                            Ok(()) => {
+                                eprintln!("registry updated from evxl (takes effect next launch)")
+                            }
+                            Err(e) => eprintln!("registry persist failed: {e}"),
+                        }
+                    }
+                    Err(e) => eprintln!("registry update skipped: {e}"),
+                }
+            });
             Ok(())
         })
         .manage(AppState {

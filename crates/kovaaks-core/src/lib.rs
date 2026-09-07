@@ -13,6 +13,7 @@ pub mod rankcalc;
 pub mod rankdiff;
 pub mod ranks;
 pub mod registry;
+pub mod registry_update;
 pub mod steam;
 pub mod store;
 pub mod sync;
