@@ -24,6 +24,10 @@ fn candidates_under_library(root: &Path) -> Vec<PathBuf> {
 
 /// Parse Steam's `libraryfolders.vdf` and return every configured library
 /// path (any disk). Handles the VDF `\\` escaping.
+/// Platform-neutral pure logic; the production caller is Windows-only
+/// (`library_roots`), but the unit tests exercise it on every platform —
+/// hence the dead-code allow on non-Windows builds.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn library_paths_from_vdf(text: &str) -> Vec<PathBuf> {
     // Splitting on '"' yields [outside, inside, between, inside, …]. A
     // "path" key's value sits two chunks after the key chunk.
