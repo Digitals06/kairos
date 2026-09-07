@@ -20,6 +20,7 @@ use kovaaks_core::{
 
 use tauri::Manager;
 
+mod stats_detect;
 mod watcher;
 
 /// Meta key: JSON blob of app settings (stats dir override, sync interval).
@@ -314,11 +315,14 @@ impl AppState {
     /// Resolve the active stats dir: settings override or default path.
     pub(crate) fn stats_dir(&self) -> PathBuf {
         let settings = self.load_settings();
-        if settings.stats_dir.trim().is_empty() {
-            PathBuf::from(DEFAULT_STATS_DIR)
-        } else {
-            PathBuf::from(settings.stats_dir.trim())
+        if !settings.stats_dir.trim().is_empty() {
+            // Explicit override always wins.
+            return PathBuf::from(settings.stats_dir.trim());
         }
+        // Auto-detect KovaaK's across every Steam library / disk
+        // (registry Steam path + libraryfolders.vdf + per-drive probes).
+        // Fall back to the conventional default when nothing is found.
+        crate::stats_detect::detect_stats_dir().unwrap_or_else(|| PathBuf::from(DEFAULT_STATS_DIR))
     }
 }
 
