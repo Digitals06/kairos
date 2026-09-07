@@ -217,6 +217,10 @@ import { listen } from '@tauri-apps/api/event'
     screen = 'overview'
     refreshLastSynced()
     loadOverview()
+    // Auto-sync on launch: smart-sync keeps it cheap when nothing changed
+    // (no new CSVs -> only stale rows probed). Fire-and-forget; failures
+    // surface through the sync toast path.
+    void doSync(false)
   })
 
   function onConnected(p: PlayerProfile) {
