@@ -106,7 +106,11 @@ fn extract_registry_json(js: &str) -> Option<Result<String, crate::Error>> {
         let unescaped = raw.replace("\\`", "`").replace("\\${", "${");
         return Some(
             match serde_json::from_str::<serde_json::Value>(&unescaped) {
-                Ok(v) => validate_registry(&v),
+                // Validate structurally, then persist the RAW text: re-serializing
+                // through serde_json::Value would sort object keys alphabetically
+                // and DESTROY the rankColors ladder order (worst→best insertion
+                // order is the only ordering the wire carries).
+                Ok(v) => validate_registry(&v).map(|_| unescaped),
                 Err(_) => continue,
             },
         );
@@ -114,8 +118,9 @@ fn extract_registry_json(js: &str) -> Option<Result<String, crate::Error>> {
     None
 }
 
-/// Validate a parsed registry value and return it as pretty JSON.
-fn validate_registry(v: &serde_json::Value) -> Result<String, crate::Error> {
+/// Validate a parsed registry value (structure + size only; ordering lives in
+/// the raw text we persist).
+fn validate_registry(v: &serde_json::Value) -> Result<(), crate::Error> {
     let arr = v
         .as_array()
         .ok_or_else(|| crate::Error::Decode("registry override is not an array".into()))?;
@@ -134,8 +139,7 @@ fn validate_registry(v: &serde_json::Value) -> Result<String, crate::Error> {
             "registry override entries missing benchmarkName/difficulties".into(),
         ));
     }
-    serde_json::to_string_pretty(v)
-        .map_err(|e| crate::Error::Decode(format!("re-serialize failed: {e}")))
+    Ok(())
 }
 
 /// Relative `./x.js` imports inside a chunk body.
@@ -158,6 +162,14 @@ pub fn load_override() -> Option<String> {
     }
     // Cheap sanity: it must still be the benchmark array.
     if !text.contains("benchmarkName") {
+        return None;
+    }
+    // Reject artifacts of the v0.1.5 re-serialization bug (serde_json::Value
+    // sorts object keys alphabetically, destroying the rankColors ladder
+    // order). Those files were pretty-printed; the wire text is minified.
+    // A rejected override falls back to the embedded registry and the next
+    // launch re-fetches with the fixed extractor.
+    if text.contains("\n  ") || text.contains("\n    ") {
         return None;
     }
     Some(text)
@@ -212,8 +224,34 @@ mod tests {
             }));
         }
         let v = serde_json::json!(arr);
-        let out = validate_registry(&v).expect("valid");
-        assert!(out.contains("benchmarkName"));
+        validate_registry(&v).expect("valid");
+    }
+
+    #[test]
+    fn extraction_preserves_wire_key_order() {
+        // rankColors carries the ladder order in insertion order (worst→best).
+        // The persisted text must NOT be re-serialized through serde_json::Value
+        // (BTreeMap) — that would alphabetize the ladder and destroy ranks.
+        // Build a registry big enough to pass validation (150 entries with the
+        // ordered ladder on the first).
+        let mut items: Vec<String> = Vec::new();
+        items.push("{\"benchmarkName\":\"X\",\"rankColors\":{\"Bronze\":\"#1\",\"Silver\":\"#2\",\"Gold\":\"#3\"},\"difficulties\":[]}".to_string());
+        for i in 1..151 {
+            items.push(format!(
+                "{{\"benchmarkName\":\"B{i}\",\"difficulties\":[]}}"
+            ));
+        }
+        let big = format!("const o=JSON.parse(`[{}]`);", items.join(","));
+        let out = extract_registry_json(&big).expect("found").expect("valid");
+        // Wire order preserved: Bronze appears BEFORE Silver BEFORE Gold, and
+        // NOT alphabetical (Bronze, Gold, Silver).
+        let bronze = out.find("\"Bronze\"").expect("bronze");
+        let silver = out.find("\"Silver\"").expect("silver");
+        let gold = out.find("\"Gold\"").expect("gold");
+        assert!(
+            bronze < silver && silver < gold,
+            "ladder order preserved, got: {out}"
+        );
     }
 
     #[test]
