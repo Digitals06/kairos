@@ -8,7 +8,7 @@ Audience stance: public but small. Docs, CI, and releases are maintained as
 if strangers will arrive; features stay focused on a single connected
 player. No onboarding flows, no multi-user support, no telemetry — ever.
 
-## v0.1.4 — current release
+## v0.1.4
 
 - [x] CI: fmt + clippy (`-D warnings`) + test gate on every push; Windows
       release build attached to GitHub releases on tags
@@ -19,7 +19,7 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
       no refresh click. Strictly local — ranks still change on Sync Now
 - [x] Typed `Source` enums replacing stringly-typed provenance fields
 
-## v0.1.5
+## v0.1.5 — released
 
 - [x] Consolidate the same-run rule: `build_scenario_history` is the single
   owner of the merged-series logic; the frontend's client-side dedupe is
@@ -33,6 +33,14 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 - [x] "What to grind next": design pass complete (probe-based inversion,
   see `.hermes/plans/2026-09-07_v015_grind-next-design.md`); implementation
   follows in v0.1.6
+
+## v0.1.6
+
+- Benchmark-type filter on the overview (evxl-style: Mixed, Clicking, Tracking,
+  Switching, Dynamic, Static, Smoothness, Precise, Reactive, Micro, Evasive,
+  Speed, Flick, Other) — classified from each benchmark's registry
+  categories/subcategories; multi-select, combined with the name search
+- "What to grind next" implementation per the v0.1.5 design pass
 
 ## v0.2
 
