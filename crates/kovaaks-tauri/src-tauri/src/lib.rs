@@ -68,6 +68,9 @@ pub struct BenchmarkCard {
     /// Full snapshot history so the UI can draw sparklines without an N+1 of
     /// per-card detail calls (those starve the main thread on 70-card grids).
     pub snapshot_history: Vec<SnapshotPoint>,
+    /// evxl-style benchmark types (Clicking, Tracking, …) from the registry's
+    /// categories/subcategories — powers the overview type filter.
+    pub benchmark_types: Vec<String>,
 }
 
 /// One scenario row in the benchmark detail view.
@@ -590,6 +593,10 @@ pub mod commands {
             high_improvement_pct: metrics.high_improvement_pct,
             samples: metrics.samples,
             last_synced: latest.map(|s| s.captured_at.to_rfc3339()),
+            benchmark_types: kovaaks_core::bench_type::benchmark_types_for_def(bench)
+                .into_iter()
+                .map(String::from)
+                .collect(),
             is_favorite: favorite_ids.contains(&benchmark_id),
             snapshot_history: history
                 .iter()
@@ -1005,10 +1012,12 @@ mod tests {
             last_synced: None,
             is_favorite: false,
             snapshot_history: vec![],
+            benchmark_types: vec!["Clicking".into(), "Tracking".into()],
         };
         let json = serde_json::to_string(&card).unwrap();
         for key in [
             "\"benchmark_id\"",
+            "\"benchmark_types\":",
             "\"benchmark_name\"",
             "\"difficulty_name\"",
             "\"benchmark_progress\"",

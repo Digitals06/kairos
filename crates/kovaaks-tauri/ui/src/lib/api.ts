@@ -28,6 +28,8 @@ export interface BenchmarkCard {
   last_synced: string | null
   is_favorite: boolean
   snapshot_history: SnapshotPoint[]
+  /** evxl-style types (Clicking, Tracking, …) — powers the type filter. */
+  benchmark_types: string[]
 }
 
 export interface SyncReport {
