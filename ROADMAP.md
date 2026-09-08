@@ -34,13 +34,20 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
   see `.hermes/plans/2026-09-07_v015_grind-next-design.md`); implementation
   follows in v0.1.6
 
-## v0.1.6
+## v0.1.6 — released
 
-- Benchmark-type filter on the overview (evxl-style: Mixed, Clicking, Tracking,
-  Switching, Dynamic, Static, Smoothness, Precise, Reactive, Micro, Evasive,
-  Speed, Flick, Other) — classified from each benchmark's registry
-  categories/subcategories; multi-select, combined with the name search
-- "What to grind next" implementation per the v0.1.5 design pass
+- [x] Benchmark-type filter on the overview using evxl's own 12-tab taxonomy
+  (Mixed, Tracking, Static, Clicking, Ground, Precise, Smooth, Micro, Dynamic,
+  Reactive, Evasive, Switching) — curated tag assignments match evxl's live
+  filter exactly; multi-select, combined with the name search
+- [x] "What to grind next" panel per the v0.1.5 design pass
+
+## v0.1.7
+
+- [x] Grind-next reachability: targets are capped at each scenario's ladder
+  top (the best score a real player can set), so the panel never suggests a
+  game-impossible number; scenarios already at their ladder top are skipped,
+  and no-single-scenario-path states are reported honestly
 
 ## v0.2
 
