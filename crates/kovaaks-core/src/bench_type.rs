@@ -188,16 +188,25 @@ pub fn benchmark_types_for_def(bench: &crate::types::BenchmarkDef) -> Vec<&'stat
                 .get("categoryName")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let subs = obj.get("subcategories").and_then(|s| s.as_array());
-            for sub in subs.into_iter().flatten() {
-                let sub_name = sub
-                    .get("subcategoryName")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let ty = classify_pair(cat_name, sub_name);
-                if !out.contains(&ty) {
-                    out.push(ty);
-                }
+            let subs: Vec<String> = obj
+                .get("subcategories")
+                .and_then(|s| s.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .map(|s| {
+                            s.get("subcategoryName")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let sub_refs: Vec<&str> = subs.iter().map(|s| s.as_str()).collect();
+            // One type per category (evxl groups by category, not per subcat).
+            let ty = classify_category_of_benchmark(cat_name, &bench.name, &sub_refs);
+            if !out.contains(&ty) {
+                out.push(ty);
             }
         }
     }
@@ -261,7 +270,26 @@ pub fn pure_style(bench: &crate::types::BenchmarkDef) -> Option<&'static str> {
                 .get("categoryName")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let ty = classify_category(cat_name);
+            let subs: Vec<String> = obj
+                .get("subcategories")
+                .and_then(|s| s.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .map(|s| {
+                            s.get("subcategoryName")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let sub_refs: Vec<&str> = subs.iter().map(|s| s.as_str()).collect();
+            let ty = classify_category_of_benchmark(cat_name, &bench.name, &sub_refs);
+            // "Other" is the catch-all, not a real style: never a pure style.
+            if ty == "Other" {
+                return None;
+            }
             match style {
                 None => style = Some(ty),
                 Some(prev) if prev == ty => {}
@@ -290,6 +318,91 @@ fn classify_category(category: &str) -> &'static str {
         return "Speed";
     }
     classify_pair(category, "")
+}
+
+/// Category names are author-written and often junk ("", "<:", "Category",
+/// "cs/val", or the benchmark's own name repeated). Those carry no type signal.
+fn category_name_is_junk(category: &str, benchmark_name: &str) -> bool {
+    let c = category.trim();
+    let l = c.to_lowercase();
+    if l.len() < 2 {
+        return true;
+    }
+    if l == "category" || l == "specific" {
+        return true;
+    }
+    if l.contains('<') || l.contains('/') {
+        return true;
+    }
+    !benchmark_name.is_empty() && c.eq_ignore_ascii_case(benchmark_name.trim())
+}
+
+/// Famous pure-static scenario families (gridshot-style clicking bots).
+const STATIC_SCENARIO_KEYWORDS: &[&str] = &[
+    "gridshot",
+    "frenzy",
+    "6 sphere",
+    "six sphere",
+    "popping",
+    "spheric",
+    "switchback",
+];
+
+/// Full per-category type resolution for a benchmark's category: categoryName
+/// first (when it carries signal), then a majority vote over subcategories (in
+/// both the category and benchmark-name context), then the benchmark name, then
+/// classic static scenario names. This mirrors how evxl's own grouping treats
+/// the benchmark name as the type carrier when categories are unnamed.
+fn classify_category_of_benchmark(
+    category: &str,
+    benchmark_name: &str,
+    subcategories: &[&str],
+) -> &'static str {
+    if !category_name_is_junk(category, benchmark_name) {
+        let t = classify_category(category);
+        if t != "Other" {
+            return t;
+        }
+    }
+    // Majority vote over subcategories. Try the benchmark name as context first
+    // (unnamed categories), then the raw category name.
+    let mut votes: Vec<&'static str> = Vec::new();
+    for context in [benchmark_name, category] {
+        for sub in subcategories {
+            let v = classify_pair(context, sub);
+            if v != "Other" {
+                votes.push(v);
+            }
+        }
+    }
+    if !votes.is_empty() {
+        let mut counts = std::collections::BTreeMap::new();
+        for v in &votes {
+            *counts.entry(v).or_insert(0) += 1;
+        }
+        let best = counts
+            .iter()
+            .max_by_key(|(ty, n)| (**n, std::cmp::Reverse(**ty)))
+            .map(|(ty, _)| **ty);
+        let best_count = counts.values().copied().max().unwrap_or(0);
+        // A strict majority of subcategories, or a unanimous small vote.
+        if let Some(v) = best {
+            if best_count * 2 > votes.len()
+                || (best_count == votes.len() && subcategories.len() <= 2)
+            {
+                return v;
+            }
+        }
+    }
+    let name_type = classify_category(benchmark_name);
+    if name_type != "Other" {
+        return name_type;
+    }
+    let joined = format!("{} {}", benchmark_name, subcategories.join(" ")).to_lowercase();
+    if re_contains(&joined, STATIC_SCENARIO_KEYWORDS) {
+        return "Static";
+    }
+    "Other"
 }
 
 #[cfg(test)]
@@ -363,10 +476,51 @@ mod tests {
     }
 
     #[test]
+    fn unnamed_categories_fall_back_to_benchmark_name() {
+        let registry = Registry;
+        // "Deadman's Static Benchmarks S1" has an EMPTY categoryName; the type
+        // lives in the benchmark name.
+        let deadman = registry
+            .all()
+            .iter()
+            .find(|b| b.name.contains("Deadman"))
+            .expect("Deadman's");
+        assert_eq!(pure_style(deadman), Some("Static"));
+        // Junk category names ("Category", "<:", "cs/val") fall back to subcats
+        // / benchmark name. Mastering Gridshot is pure static clicking.
+        let grid = registry
+            .all()
+            .iter()
+            .find(|b| b.name.contains("Mastering Gridshot"))
+            .expect("Mastering Gridshot");
+        assert_eq!(pure_style(grid), Some("Static"));
+        // 350fs: junk categories "cs/val", subcats click/switch/track -> multi.
+        let fs = registry
+            .all()
+            .iter()
+            .find(|b| b.name == "350fs")
+            .expect("350fs");
+        assert_eq!(pure_style(fs), None);
+    }
+
+    #[test]
+    fn other_is_never_a_pure_style() {
+        // "Other" is the catch-all, not a style: style purity always resolves
+        // to a concrete type or None.
+        let registry = Registry;
+        let n = registry
+            .all()
+            .iter()
+            .filter(|b| pure_style(b) == Some("Other"))
+            .count();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
     fn every_style_tab_has_at_least_one_pure_benchmark() {
         let registry = Registry;
         for ty in BENCHMARK_TYPES {
-            if is_family_type(ty) {
+            if is_family_type(ty) || *ty == "Other" {
                 continue;
             }
             let n = registry
