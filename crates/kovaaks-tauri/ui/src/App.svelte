@@ -234,10 +234,43 @@ import { listen } from '@tauri-apps/api/event'
   let selectedBenchmarkId = $state<number | null>(null)
 
   // --- search filter + favorites ----------------------------------------------
+  // Benchmark-type filter (evxl-style tabs): empty selection = show all.
+  const ALL_TYPES = [
+    'Mixed',
+    'Clicking',
+    'Tracking',
+    'Switching',
+    'Micro',
+    'Static',
+    'Dynamic',
+    'Smoothness',
+    'Precise',
+    'Reactive',
+    'Speed',
+    'Control',
+    'Evasive',
+    'Flick',
+    'Other',
+  ] as const
+  let activeTypes = $state<string[]>([])
+
+  function toggleType(ty: string) {
+    activeTypes = activeTypes.includes(ty)
+      ? activeTypes.filter((x) => x !== ty)
+      : [...activeTypes, ty]
+  }
+
   const filteredCards = $derived.by(() => {
     const q = searchQuery.trim().toLowerCase()
-    if (!q) return cards
-    return cards.filter((c) => c.benchmark_name.toLowerCase().includes(q))
+    return cards.filter((c) => {
+      if (q && !c.benchmark_name.toLowerCase().includes(q)) return false
+      if (
+        activeTypes.length > 0 &&
+        !c.benchmark_types.some((ty) => activeTypes.includes(ty))
+      )
+        return false
+      return true
+    })
   })
 
   async function toggleFavoriteLocal(benchmarkId: number) {
@@ -348,13 +381,32 @@ import { listen } from '@tauri-apps/api/event'
             placeholder="Filter benchmarks…"
             bind:value={searchQuery}
           />
-          {#if searchQuery}
-            <button class="btn btn-small" onclick={() => (searchQuery = '')}>clear</button>
+          {#if searchQuery || activeTypes.length > 0}
+            <button
+              class="btn btn-small"
+              onclick={() => {
+                searchQuery = ''
+                activeTypes = []
+              }}>clear</button
+            >
           {/if}
+        </div>
+        <div class="type-tabs">
+          {#each ALL_TYPES as ty (ty)}
+            <button
+              class="type-tab"
+              class:active={activeTypes.includes(ty)}
+              onclick={() => toggleType(ty)}>{ty}</button
+            >
+          {/each}
         </div>
         {#if filteredCards.length === 0}
           <div class="empty panel">
-            <p>No benchmarks match “{searchQuery}”.</p>
+            <p>
+              No benchmarks match “{searchQuery}”{activeTypes.length > 0
+                ? ` in ${activeTypes.join(', ')}`
+                : ''}.
+            </p>
           </div>
         {:else}
           <div class="grid">
@@ -519,6 +571,35 @@ import { listen } from '@tauri-apps/api/event'
   }
 
   /* --- search ---------------------------------------------------------------- */
+  .type-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0 14px;
+  }
+  .type-tab {
+    font: inherit;
+    font-size: 12px;
+    padding: 3px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border, #1f2937);
+    background: transparent;
+    color: var(--muted-foreground, #9ca3af);
+    cursor: pointer;
+    transition:
+      color 0.15s,
+      border-color 0.15s,
+      background 0.15s;
+  }
+  .type-tab:hover {
+    color: var(--foreground);
+  }
+  .type-tab.active {
+    color: #0a0e14;
+    background: var(--accent, #ff2e88);
+    border-color: var(--accent, #ff2e88);
+    font-weight: 600;
+  }
   .search-row {
     display: flex;
     gap: 8px;
