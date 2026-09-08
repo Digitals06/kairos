@@ -237,20 +237,17 @@ import { listen } from '@tauri-apps/api/event'
   // Benchmark-type filter (evxl-style tabs): empty selection = show all.
   const ALL_TYPES = [
     'Mixed',
-    'Clicking',
     'Tracking',
-    'Switching',
-    'Micro',
     'Static',
-    'Dynamic',
-    'Smoothness',
+    'Clicking',
+    'Ground',
     'Precise',
+    'Smooth',
+    'Micro',
+    'Dynamic',
     'Reactive',
-    'Speed',
-    'Control',
     'Evasive',
-    'Flick',
-    'Other',
+    'Switching',
   ] as const
   let activeTypes = $state<string[]>([])
 
@@ -264,18 +261,11 @@ import { listen } from '@tauri-apps/api/event'
     const q = searchQuery.trim().toLowerCase()
     return cards.filter((c) => {
       if (q && !c.benchmark_name.toLowerCase().includes(q)) return false
-      if (activeTypes.length > 0) {
-        // evxl semantics: family tabs (Mixed, Clicking, Tracking, Switching)
-        // match any benchmark featuring the type; style tabs (Static, Dynamic,
-        // Micro, …) match only benchmarks that are purely that style.
-        const FAMILY = ['Mixed', 'Clicking', 'Tracking', 'Switching']
-        const matches = activeTypes.some((ty) =>
-          FAMILY.includes(ty)
-            ? c.benchmark_types.includes(ty)
-            : c.pure_type === ty
-        )
-        if (!matches) return false
-      }
+      if (
+        activeTypes.length > 0 &&
+        !c.benchmark_types.some((ty) => activeTypes.includes(ty))
+      )
+        return false
       return true
     })
   })
