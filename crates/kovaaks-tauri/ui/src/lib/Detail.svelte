@@ -1,6 +1,6 @@
 <script lang="ts">
   import Chart from 'chart.js/auto'
-  import { getBenchmarkDetail, type BenchmarkDetail } from '../lib/api'
+  import { getBenchmarkDetail, grindNext, type BenchmarkDetail, type GrindNext } from '../lib/api'
   import RankBadge from './RankBadge.svelte'
 
   let { benchmarkId, onback }: { benchmarkId: number; onback: () => void } = $props()
@@ -114,6 +114,19 @@
   const DAY_MS = 7 * 24 * 60 * 60 * 1000
 
   let lineCanvas: HTMLCanvasElement | undefined = $state()
+  let grind = $state<GrindNext | null>(null)
+
+  // "What to grind next": engine-computed per-scenario targets for this benchmark.
+  $effect(() => {
+    const id = detail?.card.benchmark_id
+    if (!id) {
+      grind = null
+      return
+    }
+    grindNext(id)
+      .then((g) => (grind = g))
+      .catch(() => (grind = null))
+  })
   let lineChart: Chart | undefined
 
   $effect(() => {
@@ -308,6 +321,42 @@
         </div>
       {/if}
     </div>
+
+    {#if grind && !grind.complete}
+      <section class="panel grind-panel">
+        <h3>What to grind next</h3>
+        <p class="grind-head">
+          <span class="grind-current">{grind.currentRank}</span>
+          <span class="grind-arrow">→</span>
+          <span class="grind-next">{grind.nextRank}</span>
+        </p>
+        {#if grind.targets.length === 0}
+          <p class="grind-note">
+            No single-scenario path to the next rank — raise several scenarios
+            together.
+          </p>
+        {:else}
+          <ul class="grind-list">
+            {#each grind.targets.slice(0, 5) as t (t.scenario)}
+              <li>
+                <span class="grind-scenario">{t.scenario}</span>
+                <span class="num grind-scores">
+                  {t.currentScore.toLocaleString()} →
+                  {t.targetScore.toLocaleString()}
+                  <span class="grind-delta">(+{t.delta.toLocaleString()})</span>
+                </span>
+              </li>
+            {/each}
+            {#if grind.targets.length > 5}
+              <li class="grind-more">+{grind.targets.length - 5} more…</li>
+            {/if}
+          </ul>
+          <p class="grind-note">
+            Minimal score per scenario to reach {grind.nextRank} (others held).
+          </p>
+        {/if}
+      </section>
+    {/if}
 
     {#if detail.snapshot_history.length === 0}
       <div class="empty-state panel">

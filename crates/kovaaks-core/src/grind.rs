@@ -120,7 +120,8 @@ pub fn next_targets(
         current.rank + 1
     };
     let next_name = if next_index > ladder_len {
-        format!("{} Complete", current.name)
+        // Already at the top: no next tier — UI shows the panel as complete.
+        current.name.clone()
     } else {
         difficulty
             .rank_colors

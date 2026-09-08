@@ -147,6 +147,24 @@ export function rankChanges(): Promise<RankChange[]> {
   return invoke('rank_changes')
 }
 
+export interface GrindTarget {
+  scenario: string
+  currentScore: number
+  targetScore: number
+  delta: number
+}
+
+export interface GrindNext {
+  currentRank: string
+  nextRank: string
+  complete: boolean
+  targets: GrindTarget[]
+}
+
+export function grindNext(benchmarkId: number): Promise<GrindNext | null> {
+  return invoke('grind_next', { benchmarkId })
+}
+
 export function getOverview(): Promise<BenchmarkCard[]> {
   return invoke('get_overview')
 }

@@ -519,3 +519,57 @@ input {
 .detail-skeleton {
   height: 420px;
 }
+
+
+/* --- grind-next panel (Detail) --- */
+.grind-panel h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground, #9ca3af);
+}
+.grind-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+.grind-current {
+  color: var(--muted-foreground, #9ca3af);
+}
+.grind-arrow {
+  color: var(--muted-foreground, #9ca3af);
+}
+.grind-next {
+  font-weight: 700;
+  color: var(--accent, #ff2e88);
+}
+.grind-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.grind-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border, #1f2937);
+}
+.grind-scenario {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grind-delta {
+  color: var(--accent, #ff2e88);
+}
+.grind-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted-foreground, #9ca3af);
+}
+.grind-more {
+  color: var(--muted-foreground, #9ca3af);
+}

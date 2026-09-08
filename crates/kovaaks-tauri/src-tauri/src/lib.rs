@@ -87,6 +87,26 @@ pub struct ScenarioRank {
     pub rank_maxes: Vec<f64>,
 }
 
+/// Wire DTO for the grind-next panel.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrindTargetDto {
+    pub scenario: String,
+    pub current_score: i64,
+    pub target_score: i64,
+    pub delta: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrindNextDto {
+    pub current_rank: String,
+    pub next_rank: String,
+    /// True when the benchmark already sits at the top of its ladder.
+    pub complete: bool,
+    pub targets: Vec<GrindTargetDto>,
+}
+
 /// Where a chart series' points came from — wire form of
 /// [`kovaaks_core::metrics::ScenarioSeriesSource`]. Serialized lowercase so
 /// the frontend contract is unchanged ("snapshot" | "local").
@@ -622,6 +642,49 @@ pub mod commands {
             .map_err(|e| e.to_string())
     }
 
+    /// "What to grind next" for one benchmark: per-scenario minimal scores
+    /// that flip the overall rank to the next tier. Engine-computed, read-only.
+    #[tauri::command]
+    pub fn grind_next(
+        state: State<'_, AppState>,
+        benchmark_id: i64,
+    ) -> Result<Option<GrindNextDto>, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .map(|p| p.steam_id)
+            .ok_or("no profile connected")?;
+        let state = state.inner();
+        let Some((bench, difficulty)) = state.registry.by_id(benchmark_id as u64) else {
+            return Ok(None);
+        };
+        let history = state
+            .store
+            .history(&steam_id, benchmark_id)
+            .map_err(|e| e.to_string())?;
+        let Some(latest) = history.last() else {
+            return Ok(None);
+        };
+        let base = stored_to_progress(latest);
+        let result = kovaaks_core::grind::next_targets(&base, bench, &difficulty);
+        let complete = result.targets.is_empty() && result.next_rank == result.current_rank;
+        Ok(Some(GrindNextDto {
+            current_rank: result.current_rank,
+            next_rank: result.next_rank,
+            complete,
+            targets: result
+                .targets
+                .into_iter()
+                .map(|t| GrindTargetDto {
+                    scenario: t.scenario,
+                    current_score: t.current_score,
+                    target_score: t.target_score,
+                    delta: t.delta,
+                })
+                .collect(),
+        }))
+    }
+
     /// Overview grid: one card per played benchmark, sorted by benchmark name.
     /// Sync commands run on a thread-pool thread (not the main thread) so a
     /// wide card grid never blocks the webview event loop.
@@ -969,6 +1032,7 @@ pub fn run() {
             commands::get_profile,
             commands::sync_now,
             commands::rank_changes,
+            commands::grind_next,
             commands::get_overview,
             commands::get_benchmark_detail,
             commands::ingest_status,
