@@ -7,6 +7,7 @@
 pub mod bench_type;
 pub mod csv_ingest;
 pub mod error;
+pub mod grind;
 pub mod http;
 pub mod kovaaks;
 pub mod metrics;
