@@ -30,6 +30,9 @@ export interface BenchmarkCard {
   snapshot_history: SnapshotPoint[]
   /** evxl-style types (Clicking, Tracking, …) — powers the type filter. */
   benchmark_types: string[]
+  /** Single style (Static, Dynamic, …) when purely that style; null otherwise.
+   *  Style tabs only match pure benchmarks (evxl semantics). */
+  pure_type: string | null
 }
 
 export interface SyncReport {

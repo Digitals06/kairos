@@ -71,6 +71,11 @@ pub struct BenchmarkCard {
     /// evxl-style benchmark types (Clicking, Tracking, …) from the registry's
     /// categories/subcategories — powers the overview type filter.
     pub benchmark_types: Vec<String>,
+    /// The benchmark's single style (Static, Dynamic, Micro, …) when it is
+    /// purely that style — style filter tabs only match pure benchmarks.
+    /// None for multi-style benchmarks (they only match family tabs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pure_type: Option<String>,
 }
 
 /// One scenario row in the benchmark detail view.
@@ -617,6 +622,7 @@ pub mod commands {
                 .into_iter()
                 .map(String::from)
                 .collect(),
+            pure_type: kovaaks_core::bench_type::pure_style(bench).map(String::from),
             is_favorite: favorite_ids.contains(&benchmark_id),
             snapshot_history: history
                 .iter()
@@ -1077,6 +1083,7 @@ mod tests {
             is_favorite: false,
             snapshot_history: vec![],
             benchmark_types: vec!["Clicking".into(), "Tracking".into()],
+            pure_type: None,
         };
         let json = serde_json::to_string(&card).unwrap();
         for key in [

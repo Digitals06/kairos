@@ -241,6 +241,57 @@ pub fn benchmark_types_for_def(bench: &crate::types::BenchmarkDef) -> Vec<&'stat
     ordered
 }
 
+/// Family tabs: matching is "features this family" (union semantics, evxl shows
+/// any benchmark containing the family). All other tabs are STYLE tabs: matching is
+/// "the benchmark is purely this style" — every category must classify to the style
+/// (evxl's Static tab shows only benchmarks consisting of static scenarios).
+pub fn is_family_type(ty: &str) -> bool {
+    matches!(ty, "Mixed" | "Clicking" | "Tracking" | "Switching")
+}
+
+/// The pure style of a benchmark: Some(T) when every category across all
+/// difficulties classifies to the same style T (style tabs only match these).
+/// Benchmarks spanning several styles return None (they only match family tabs).
+pub fn pure_style(bench: &crate::types::BenchmarkDef) -> Option<&'static str> {
+    let mut style: Option<&'static str> = None;
+    for difficulty in &bench.difficulties {
+        for cat in &difficulty.categories {
+            let Some(obj) = cat.as_object() else { continue };
+            let cat_name = obj
+                .get("categoryName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let ty = classify_category(cat_name);
+            match style {
+                None => style = Some(ty),
+                Some(prev) if prev == ty => {}
+                Some(_) => return None,
+            }
+        }
+    }
+    style
+}
+
+/// Classify a top-level category name (the style carrier for pure benchmarks:
+/// "Static", "Static Clicking", "Dynamic", "Micro", "SpeedTS", ...). Style words
+/// win over family words here: "Static Clicking" is Static, not Clicking.
+fn classify_category(category: &str) -> &'static str {
+    let c = category.to_lowercase();
+    if re_contains(&c, &["static"]) {
+        return "Static";
+    }
+    if re_contains(&c, &["dynamic"]) {
+        return "Dynamic";
+    }
+    if re_contains(&c, &["micro", "tiny", "fingertip"]) {
+        return "Micro";
+    }
+    if re_contains(&c, &["speed", "fast"]) && !c.contains("smooth") {
+        return "Speed";
+    }
+    classify_pair(category, "")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +332,50 @@ mod tests {
             types.contains(&"Evasive") || types.contains(&"Switching"),
             "{types:?}"
         );
+    }
+
+    #[test]
+    fn pure_style_matches_evxl_tab_semantics() {
+        let registry = Registry;
+        // Pure static benchmarks classify cleanly to Static.
+        let ca = registry
+            .all()
+            .iter()
+            .find(|b| b.name.contains("cA Static"))
+            .expect("cA Static");
+        assert_eq!(pure_style(ca), Some("Static"));
+        let setsunai = registry
+            .all()
+            .iter()
+            .find(|b| b.name.contains("Setsunai"))
+            .expect("Setsunai");
+        assert_eq!(pure_style(setsunai), Some("Static"));
+        // Multi-family benchmarks are not pure (they only match family tabs).
+        let vt5 = registry.by_id(460).expect("VT S5").0;
+        assert_eq!(pure_style(vt5), None);
+        // Pure tracking benchmark.
+        let precise = registry
+            .all()
+            .iter()
+            .find(|b| b.name.contains("Aimerz+ Precise"))
+            .expect("Aimerz+ Precise");
+        assert_eq!(pure_style(precise), Some("Precise"));
+    }
+
+    #[test]
+    fn every_style_tab_has_at_least_one_pure_benchmark() {
+        let registry = Registry;
+        for ty in BENCHMARK_TYPES {
+            if is_family_type(ty) {
+                continue;
+            }
+            let n = registry
+                .all()
+                .iter()
+                .filter(|b| pure_style(b) == Some(*ty))
+                .count();
+            assert!(n > 0, "style tab {ty} has no pure benchmark");
+        }
     }
 
     #[test]
