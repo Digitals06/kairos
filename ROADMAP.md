@@ -48,6 +48,9 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
   top (the best score a real player can set), so the panel never suggests a
   game-impossible number; scenarios already at their ladder top are skipped,
   and no-single-scenario-path states are reported honestly
+- [x] Combined step-by-step plans for floor/harmonic benchmarks: when no
+  single scenario can flip the tier, the panel produces numbered rung-by-rung
+  steps (each within its ladder) that reach the next rank together
 
 ## v0.2
 
