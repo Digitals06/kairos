@@ -130,24 +130,40 @@ pub fn next_targets(
             .unwrap_or_default()
     };
 
-    let mut scenarios: Vec<(String, i64)> = Vec::new();
+    // Per-scenario (name, current score, reachable ceiling). The scenario's own
+    // ladder top is the highest score a real player can set; probing beyond it
+    // produces mathematically-flipping but game-impossible targets, so it caps
+    // the search. Scenarios without a ladder fall back to a fixed ceiling.
+    const CEILING: i64 = 100_000;
+    let mut scenarios: Vec<(String, i64, i64)> = Vec::new();
     for (_, cat) in &base.categories {
         for (name, entry) in &cat.scenarios {
             let score = entry.score as i64;
-            match scenarios.iter_mut().find(|(n, _)| n == name) {
-                Some((_, s)) => *s = (*s).max(score),
-                None => scenarios.push((name.clone(), score)),
+            let cap = entry
+                .rank_maxes
+                .last()
+                .map(|m| *m as i64)
+                .unwrap_or(CEILING)
+                .max(CEILING.min(1))
+                .max(score);
+            match scenarios.iter_mut().find(|(n, _, _)| n == name) {
+                Some((_, s, c)) => {
+                    *s = (*s).max(score);
+                    *c = (*c).max(cap);
+                }
+                None => scenarios.push((name.clone(), score, cap)),
             }
         }
     }
 
-    const CEILING: i64 = 100_000;
-
     let mut targets = Vec::new();
     if !current.complete {
-        for (name, cur) in &scenarios {
+        for (name, cur, cap) in &scenarios {
+            if cur >= cap {
+                continue; // already at the ladder top: no reachable headroom
+            }
             if let Some(target) =
-                minimal_score_for_rank(base, benchmark, difficulty, name, next_index, *cur, CEILING)
+                minimal_score_for_rank(base, benchmark, difficulty, name, next_index, *cur, *cap)
             {
                 if target > *cur {
                     targets.push(GrindTarget {
@@ -331,6 +347,98 @@ mod tests {
         );
         assert!(!result.current_rank.is_empty());
         assert!(!result.next_rank.is_empty());
+    }
+
+    /// Real regression (Aimerz+ SpeedTS, id 584, aplus-alt family): before the
+    /// reachability cap, one scenario probed to ~98k — far beyond its ladder.
+    /// Every target must stay within its scenario's top rung.
+    #[test]
+    fn targets_never_exceed_scenario_ladder() {
+        let registry = crate::Registry;
+        let (bench, difficulty) = registry.by_id(584).expect("Aimerz+ SpeedTS");
+        // Live snapshot shape: (name, score, rank_maxes) as stored by sync.
+        let entries: Vec<(&str, f64, &[f64])> = vec![
+            (
+                "StaticSwitchingVox xxSmall",
+                121.0,
+                &[96.0, 101.0, 106.0, 112.0, 117.0, 123.0, 154.0],
+            ),
+            (
+                "DotTS 30% Larger",
+                2836.0,
+                &[2200.0, 2350.0, 2450.0, 2600.0, 2700.0, 2850.0, 3600.0],
+            ),
+            (
+                "voxTS Viscose Varied",
+                124.0,
+                &[86.0, 94.0, 100.0, 106.0, 112.0, 120.0, 154.0],
+            ),
+            (
+                "patCircleSwitch NR",
+                114.0,
+                &[80.0, 84.0, 90.0, 96.0, 102.0, 108.0, 146.0],
+            ),
+            (
+                "patTargetSwitch 90 LowTTK",
+                3064.0,
+                &[2350.0, 2500.0, 2650.0, 2800.0, 2950.0, 3100.0, 4240.0],
+            ),
+            (
+                "beanTS",
+                148.0,
+                &[94.0, 104.0, 114.0, 122.0, 132.0, 140.0, 186.0],
+            ),
+            (
+                "Target Switching 360",
+                14733.0,
+                &[
+                    11400.0, 12100.0, 12800.0, 13600.0, 14200.0, 15000.0, 19600.0,
+                ],
+            ),
+            (
+                "voxTargetSwitch 2",
+                130.0,
+                &[83.0, 92.0, 102.0, 111.0, 117.0, 125.0, 161.0],
+            ),
+            (
+                "Aimerz+ goaTS Med S1",
+                113.0,
+                &[81.0, 85.0, 90.0, 96.0, 102.0, 110.0, 148.0],
+            ),
+            (
+                "Aimerz+ nuTS Med S1",
+                110.0,
+                &[80.0, 86.0, 92.0, 98.0, 106.0, 112.0, 156.0],
+            ),
+            (
+                "Aimerz+ Week #5 - Static Switching",
+                15441.0,
+                &[
+                    12500.0, 12900.0, 13400.0, 14200.0, 15000.0, 15800.0, 18600.0,
+                ],
+            ),
+            (
+                "360 Static TS",
+                2900.0,
+                &[2200.0, 2350.0, 2500.0, 2650.0, 2800.0, 2950.0, 3800.0],
+            ),
+        ];
+        let base = progress_from(&entries);
+        let result = next_targets(&base, bench, &difficulty);
+        for t in &result.targets {
+            let top = entries
+                .iter()
+                .find(|(n, _, _)| *n == t.scenario)
+                .map(|(_, _, m)| m.last().unwrap())
+                .expect("fixture scenario");
+            assert!(
+                (t.target_score as f64) <= *top,
+                "target {} on {} exceeds its ladder top {}",
+                t.target_score,
+                t.scenario,
+                top
+            );
+        }
     }
 
     /// Complete benchmarks expose no targets.
