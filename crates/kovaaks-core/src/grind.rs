@@ -252,10 +252,36 @@ fn combined_plan(
         }
     }
     if prev_rank >= next_index {
-        plan
+        consolidate_plan(plan)
     } else {
         Vec::new() // even maxing step-by-step didn't reach it: no honest plan
     }
+}
+
+/// Fold the plan's rung-by-rung steps so each scenario appears once: its
+/// `current_score` is the score at its first step, `target_score` the score
+/// after its last step. First-appearance order is preserved.
+fn consolidate_plan(plan: Vec<GrindTarget>) -> Vec<GrindTarget> {
+    let mut order: Vec<String> = Vec::new();
+    let mut acc: std::collections::HashMap<String, (i64, i64)> = std::collections::HashMap::new();
+    for step in plan {
+        let e = acc.entry(step.scenario.clone()).or_insert_with(|| {
+            order.push(step.scenario.clone());
+            (step.current_score, step.current_score)
+        });
+        e.1 = step.target_score;
+    }
+    order
+        .into_iter()
+        .filter_map(|name| {
+            acc.remove(&name).map(|(from, to)| GrindTarget {
+                delta: to - from,
+                current_score: from,
+                target_score: to,
+                scenario: name,
+            })
+        })
+        .collect()
 }
 
 /// Compute grind targets for one benchmark difficulty from a stored progress
@@ -638,8 +664,17 @@ mod tests {
                 !result.plan.is_empty(),
                 "floor family with headroom must produce a combined plan"
             );
-            // Replay the plan: every step within ladder, scores monotone per
-            // scenario, final state reaches next_rank_index.
+            // Each scenario appears at most once in the plan.
+            let mut names: Vec<&str> = result.plan.iter().map(|s| s.scenario.as_str()).collect();
+            names.sort_unstable();
+            names.dedup();
+            assert_eq!(
+                names.len(),
+                result.plan.len(),
+                "duplicate scenarios in plan"
+            );
+            // Replay the plan: every step within ladder, final state reaches
+            // next_rank_index.
             let mut probe = base.clone();
             let mut seen: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
             for step in &result.plan {
