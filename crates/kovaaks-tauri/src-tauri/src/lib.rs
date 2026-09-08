@@ -110,6 +110,9 @@ pub struct GrindNextDto {
     /// True when the benchmark already sits at the top of its ladder.
     pub complete: bool,
     pub targets: Vec<GrindTargetDto>,
+    /// Step-by-step plan when no single scenario can flip the rank; together
+    /// the steps reach the next rank. Empty when `targets` is non-empty.
+    pub plan: Vec<GrindTargetDto>,
 }
 
 /// Where a chart series' points came from — wire form of
@@ -674,20 +677,18 @@ pub mod commands {
         let base = stored_to_progress(latest);
         let result = kovaaks_core::grind::next_targets(&base, bench, &difficulty);
         let complete = result.targets.is_empty() && result.next_rank == result.current_rank;
+        let to_dto = |g: kovaaks_core::grind::GrindTarget| GrindTargetDto {
+            scenario: g.scenario,
+            current_score: g.current_score,
+            target_score: g.target_score,
+            delta: g.delta,
+        };
         Ok(Some(GrindNextDto {
             current_rank: result.current_rank,
             next_rank: result.next_rank,
             complete,
-            targets: result
-                .targets
-                .into_iter()
-                .map(|t| GrindTargetDto {
-                    scenario: t.scenario,
-                    current_score: t.current_score,
-                    target_score: t.target_score,
-                    delta: t.delta,
-                })
-                .collect(),
+            targets: result.targets.into_iter().map(to_dto).collect(),
+            plan: result.plan.into_iter().map(to_dto).collect(),
         }))
     }
 

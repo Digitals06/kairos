@@ -162,6 +162,8 @@ export interface GrindNext {
   nextRank: string
   complete: boolean
   targets: GrindTarget[]
+  /** Step-by-step plan when no single scenario can flip the rank. */
+  plan: GrindTarget[]
 }
 
 export function grindNext(benchmarkId: number): Promise<GrindNext | null> {

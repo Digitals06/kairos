@@ -330,11 +330,33 @@
           <span class="grind-arrow">→</span>
           <span class="grind-next">{grind.nextRank}</span>
         </p>
-        {#if grind.targets.length === 0}
+        {#if grind.targets.length === 0 && grind.plan.length === 0}
           <p class="grind-note">
             No single-scenario path to the next rank — raise several scenarios
             together.
           </p>
+        {:else if grind.targets.length === 0}
+          <p class="grind-note">
+            No single scenario gets you there — work down this step-by-step
+            plan (all scores within each scenario's ladder):
+          </p>
+          <ul class="grind-list">
+            {#each grind.plan.slice(0, 8) as t, i (i)}
+              <li>
+                <span class="grind-scenario">
+                  {i + 1}. {t.scenario}
+                </span>
+                <span class="num grind-scores">
+                  {t.currentScore.toLocaleString()} →
+                  {t.targetScore.toLocaleString()}
+                  <span class="grind-delta">(+{t.delta.toLocaleString()})</span>
+                </span>
+              </li>
+            {/each}
+            {#if grind.plan.length > 8}
+              <li class="grind-more">+{grind.plan.length - 8} more…</li>
+            {/if}
+          </ul>
         {:else}
           <ul class="grind-list">
             {#each grind.targets.slice(0, 5) as t (t.scenario)}

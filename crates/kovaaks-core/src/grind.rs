@@ -31,13 +31,27 @@ pub struct GrindResult {
     /// Per-scenario candidates, sorted by delta ascending (cheapest first).
     /// Empty when no single-scenario path to the next rank exists.
     pub targets: Vec<GrindTarget>,
+    /// When no single scenario can flip the rank, a step-by-step plan that
+    /// does: each step raises one scenario (within its ladder) and the steps
+    /// together reach the next rank. Empty when `targets` is non-empty, the
+    /// benchmark is complete, or no reachable plan exists.
+    pub plan: Vec<GrindTarget>,
 }
 
+/// Set a scenario's probe score AND its derived tier: the engine's basic
+/// families read `scenario_rank` (KovaaK's own tier), so a faithful probe must
+/// move the tier along with the score. Tier = number of ladder rungs strictly
+/// below the score (0 = unplayed).
 fn set_scenario_score(progress: &mut BenchmarkProgress, scenario: &str, score: f64) {
     for (_, cat) in &mut progress.categories {
         for (name, entry) in &mut cat.scenarios {
             if name == scenario {
                 entry.score = score;
+                entry.scenario_rank = if score > 0.0 {
+                    entry.rank_maxes.iter().filter(|m| **m < score).count() as u32
+                } else {
+                    0
+                };
             }
         }
     }
@@ -105,7 +119,147 @@ fn minimal_score_for_rank(
     Some(lo)
 }
 
+/// Build a step-by-step plan for benchmarks where no single scenario can flip
+/// the rank (floor/harmonic families): each round finds, for every scenario
+/// with headroom, its minimal score that maximizes the engine's rank given the
+/// current probe state, applies the single most-advancing (then cheapest)
+/// step, and repeats until the next rank is reached or no step advances it.
+/// Every step stays within the scenario's ladder, so the plan is achievable.
+fn combined_plan(
+    base: &BenchmarkProgress,
+    benchmark: &BenchmarkDef,
+    difficulty: &Difficulty,
+    scenarios: &[(String, i64, i64)],
+    next_index: u32,
+) -> Vec<GrindTarget> {
+    let mut probe = base.clone();
+    let mut plan: Vec<GrindTarget> = Vec::new();
+    let mut prev_rank = compute_rank(&probe, benchmark, difficulty).rank;
+    // Mutable step state: `scenarios` holds the ORIGINAL scores; `live` tracks
+    // each scenario's current score as steps apply.
+    let mut live: Vec<(String, i64, i64)> = scenarios.to_vec();
+
+    for _round in 0..64 {
+        if prev_rank >= next_index {
+            break;
+        }
+        // Best step this round: maximize the resulting rank, then minimize delta.
+        let mut best: Option<(u32, i64, String, i64, i64)> = None; // (rank, delta, name, cur, tgt)
+        for (name, cur, cap) in &live {
+            if cur >= cap {
+                continue;
+            }
+            // What rank does this scenario's ladder top reach (given the
+            // current probe state)? If it advances, bisect the minimal score
+            // achieving that rank; otherwise raising it partially is still a
+            // useful step only when the rank advances — skip pure partials.
+            let (mut lo, mut hi) = (*cur, *cap);
+            set_scenario_score(&mut probe, name, *cap as f64);
+            let top_rank = compute_rank(&probe, benchmark, difficulty).rank;
+            set_scenario_score(&mut probe, name, *cur as f64);
+            let mut best_rank = prev_rank;
+            let mut best_score = *cur;
+            if top_rank > prev_rank {
+                best_rank = top_rank;
+                while lo < hi {
+                    let mid = lo + (hi - lo) / 2;
+                    set_scenario_score(&mut probe, name, mid as f64);
+                    let r = compute_rank(&probe, benchmark, difficulty).rank;
+                    set_scenario_score(&mut probe, name, *cur as f64);
+                    if r >= top_rank {
+                        hi = mid;
+                    } else {
+                        lo = mid + 1;
+                    }
+                }
+                best_score = lo;
+            }
+            if best_rank > prev_rank {
+                let delta = best_score - cur;
+                let cand = (best_rank, delta, name.clone(), *cur, best_score);
+                let replace = match &best {
+                    None => true,
+                    Some((br, bd, _, _, _)) => best_rank > *br || (best_rank == *br && delta < *bd),
+                };
+                if replace {
+                    best = Some(cand);
+                }
+            }
+        }
+        match best {
+            Some((new_rank, _, name, cur, tgt)) => {
+                set_scenario_score(&mut probe, &name, tgt as f64);
+                plan.push(GrindTarget {
+                    scenario: name.clone(),
+                    current_score: cur,
+                    target_score: tgt,
+                    delta: tgt - cur,
+                });
+                if let Some(e) = live.iter_mut().find(|(n, _, _)| *n == name) {
+                    e.1 = tgt;
+                }
+                if new_rank > prev_rank {
+                    prev_rank = new_rank;
+                }
+            }
+            None => {
+                // No single step advances the rank: floor/harmonic drag. Prep
+                // step — raise the binding scenario (lowest scenario_rank, then
+                // lowest score) to its next ladder rung. Each prep either lifts
+                // a scenario a full rung or maxes it out, so rounds terminate.
+                let mut binding: Option<(usize, i64, u32)> = None; // (idx, next_rung, srank)
+                for (idx, (name, cur, cap)) in live.iter().enumerate() {
+                    if cur >= cap {
+                        continue;
+                    }
+                    let entry = base
+                        .categories
+                        .iter()
+                        .find_map(|(_, c)| c.scenarios.iter().find(|(n, _)| n == name))
+                        .map(|(_, e)| e);
+                    let srank = entry.map(|e| e.scenario_rank).unwrap_or(0);
+                    let rungs = entry.map(|e| e.rank_maxes.clone()).unwrap_or_default();
+                    let next_rung = rungs
+                        .iter()
+                        .copied()
+                        .map(|m| m as i64)
+                        .find(|m| *m > *cur)
+                        .unwrap_or(*cap)
+                        .min(*cap);
+                    let better = match binding {
+                        None => true,
+                        Some((_, _, bs)) => srank < bs,
+                    };
+                    if better {
+                        binding = Some((idx, next_rung, srank));
+                    }
+                }
+                match binding {
+                    Some((idx, rung, _)) => {
+                        let (name, cur, _) = (live[idx].0.clone(), live[idx].1, live[idx].2);
+                        set_scenario_score(&mut probe, &name, rung as f64);
+                        plan.push(GrindTarget {
+                            scenario: name.clone(),
+                            current_score: cur,
+                            target_score: rung,
+                            delta: rung - cur,
+                        });
+                        live[idx].1 = rung;
+                    }
+                    None => break, // everything maxed, still stuck: no honest plan
+                }
+            }
+        }
+    }
+    if prev_rank >= next_index {
+        plan
+    } else {
+        Vec::new() // even maxing step-by-step didn't reach it: no honest plan
+    }
+}
+
 /// Compute grind targets for one benchmark difficulty from a stored progress
+/// payload. Scenarios missing from it are treated as 0./// Compute grind targets for one benchmark difficulty from a stored progress
 /// payload. Scenarios missing from it are treated as 0.
 pub fn next_targets(
     base: &BenchmarkProgress,
@@ -178,11 +332,19 @@ pub fn next_targets(
     }
     targets.sort_by_key(|t| t.delta);
 
+    // No single-scenario path: fall back to a step-by-step combined plan.
+    let plan = if targets.is_empty() && !current.complete {
+        combined_plan(base, benchmark, difficulty, &scenarios, next_index)
+    } else {
+        Vec::new()
+    };
+
     GrindResult {
         current_rank: current.name,
         next_rank: next_name,
         next_rank_index: next_index,
         targets,
+        plan,
     }
 }
 
@@ -439,6 +601,112 @@ mod tests {
                 top
             );
         }
+    }
+
+    /// Floor-family benchmark (VT S3, basic method): no single scenario can
+    /// lift the floor, so the plan kicks in — every step stays within its
+    /// scenario's ladder and the final probe reaches the next rank.
+    #[test]
+    fn combined_plan_reaches_next_rank_on_floor_family() {
+        let registry = crate::Registry;
+        let (bench, difficulty) = registry.by_id(266).expect("VT S3 Advanced");
+        let maxes: [&[f64]; 6] = [
+            &[68.0, 76.0, 85.0, 95.0, 105.0, 110.2],
+            &[78.0, 88.0, 98.0, 108.0, 115.0, 123.0],
+            &[220.0, 260.0, 320.0, 390.0, 440.0, 450.0],
+            &[130.0, 138.0, 148.0, 160.0, 170.0, 172.0],
+            &[115.0, 120.0, 130.0, 142.0, 152.0, 156.0],
+            &[152.0, 160.0, 175.0, 192.0, 210.0, 213.0],
+        ];
+        let names = [
+            "Pasu Voltaic",
+            "B180 Voltaic",
+            "Popcorn Voltaic",
+            "ww3t Voltaic",
+            "1w4ts Voltaic",
+            "6 Sphere Hipfire Voltaic",
+        ];
+        let entries: Vec<(&str, f64, &[f64])> = names
+            .iter()
+            .zip(maxes.iter())
+            .map(|(n, m)| (*n, m[1], *m))
+            .collect();
+        let base = progress_from(&entries);
+        let result = next_targets(&base, bench, &difficulty);
+        if result.targets.is_empty() {
+            assert!(
+                !result.plan.is_empty(),
+                "floor family with headroom must produce a combined plan"
+            );
+            // Replay the plan: every step within ladder, scores monotone per
+            // scenario, final state reaches next_rank_index.
+            let mut probe = base.clone();
+            let mut seen: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+            for step in &result.plan {
+                let top = entries
+                    .iter()
+                    .find(|(n, _, _)| *n == step.scenario)
+                    .map(|(_, _, m)| *m.last().unwrap())
+                    .expect("fixture scenario") as i64;
+                assert!(
+                    step.target_score <= top,
+                    "plan step {} exceeds ladder top {}",
+                    step.target_score,
+                    top
+                );
+                let prev = seen.insert(step.scenario.clone(), step.target_score);
+                if let Some(prev_score) = prev {
+                    assert!(
+                        step.target_score >= prev_score,
+                        "plan moves {} backwards",
+                        step.scenario
+                    );
+                }
+                set_scenario_score(&mut probe, &step.scenario, step.target_score as f64);
+            }
+            let final_rank = compute_rank(&probe, bench, &difficulty);
+            assert!(
+                final_rank.rank >= result.next_rank_index,
+                "plan replay reaches rank {} but next is {}",
+                final_rank.rank,
+                result.next_rank_index
+            );
+        } else {
+            // If single targets exist for this state, plan must be empty.
+            assert!(result.plan.is_empty());
+        }
+    }
+
+    /// Complete benchmarks expose no targets and no plan.
+    #[test]
+    fn complete_benchmark_has_no_plan() {
+        let registry = crate::Registry;
+        let (bench, difficulty) = registry.by_id(266).expect("VT S3 Advanced");
+        let maxes: [&[f64]; 6] = [
+            &[68.0, 76.0, 85.0, 95.0, 105.0, 110.2],
+            &[78.0, 88.0, 98.0, 108.0, 115.0, 123.0],
+            &[220.0, 260.0, 320.0, 390.0, 440.0, 450.0],
+            &[130.0, 138.0, 148.0, 160.0, 170.0, 172.0],
+            &[115.0, 120.0, 130.0, 142.0, 152.0, 156.0],
+            &[152.0, 160.0, 175.0, 192.0, 210.0, 213.0],
+        ];
+        let names = [
+            "Pasu Voltaic",
+            "B180 Voltaic",
+            "Popcorn Voltaic",
+            "ww3t Voltaic",
+            "1w4ts Voltaic",
+            "6 Sphere Hipfire Voltaic",
+        ];
+        let entries: Vec<(&str, f64, &[f64])> = names
+            .iter()
+            .zip(maxes.iter())
+            .map(|(n, m)| (*n, m.last().unwrap() + 50.0, *m))
+            .collect();
+        let base = progress_from(&entries);
+        let result = next_targets(&base, bench, &difficulty);
+        assert!(result.targets.is_empty());
+        assert!(result.plan.is_empty());
     }
 
     /// Complete benchmarks expose no targets.
