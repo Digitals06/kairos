@@ -12,6 +12,7 @@ import { listen } from '@tauri-apps/api/event'
     setSettings,
     getBenchmarkDetail,
     toggleFavorite,
+    exportBackup,
     type BenchmarkCard,
     type PlayerProfile,
     type AppSettings,
