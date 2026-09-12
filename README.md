@@ -21,6 +21,7 @@ If Kairos helps your grind, consider supporting development:
 - **Benchmark type filter** — 12 tabs mirroring evxl's own grouping (Mixed, Tracking, Static, Clicking, Ground, Precise, Smooth, Micro, Dynamic, Reactive, Evasive, Switching), multi-select, combined with the name search. Tag assignments match evxl's live filter, so the Static tab shows only genuinely static benchmarks, Ground catches ground-tracking specialists, and everything unspecialized sits under Mixed.
 - **What to grind next** — on each benchmark's page: the cheapest per-scenario scores that push you to the next rank tier, probed against the local rank engine so they're exact for every method family. Targets are capped at each scenario's ladder top, so they're always actually achievable; when no single scenario can carry you up, the panel produces a numbered step-by-step plan (each step within its scenario's ladder) that reaches the next tier together.
 - **Search + favorites** — filter the grid by name, pin benchmarks to the top. Pins survive restarts.
+- **Backup export** — one click in the settings menu writes your entire history as a single JSON file in Documents.
 - **Private by design** — no accounts, no telemetry; only public APIs, and live API tests skip unless you opt in.
 
 ![Kairos benchmark detail](docs/screenshots/detail-avasive-s2-jennclick-v014.png)

@@ -52,6 +52,12 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
   single scenario can flip the tier, the panel produces numbered rung-by-rung
   steps (each within its ladder) that reach the next rank together
 
+## v0.1.8 — released
+
+- [x] 100% client-side rank coverage: the last API-rank fallback is closed;
+      every benchmark computes its rank from local data
+- [x] One-click full backup export (JSON, Documents/kairos-export-<ts>.json)
+
 ## v0.2
 
 - Benchmark dashboard: all-benchmarks grid with rank chips and
