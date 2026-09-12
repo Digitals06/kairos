@@ -287,6 +287,30 @@ pub struct Difficulty {
     /// Scenario categories in this difficulty.
     #[serde(rename = "categories", default)]
     pub categories: Vec<serde_json::Value>,
+    /// Selectable-scenario rule (REVENGE family): the player picks N of the
+    /// pool; missing on ordinary benchmarks.
+    #[serde(rename = "scenarioSelection", default)]
+    pub scenario_selection: Option<ScenarioSelection>,
+}
+
+/// evxl `scenarioSelection` — constraints on which scenarios score the rank.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScenarioSelection {
+    pub enabled: bool,
+    /// How many scenarios the player may select.
+    pub select_count: u32,
+    /// How many of them score the rank in the normal (partial) case.
+    pub base_rank_score_count: u32,
+    /// Score count when the player selected every scenario (full pool).
+    #[serde(default)]
+    pub full_pool_rank_score_count: Option<u32>,
+    /// Minimum selected scenarios per category.
+    #[serde(default)]
+    pub min_per_category: u32,
+    /// Minimum selected scenarios per subcategory.
+    #[serde(default)]
+    pub min_per_subcategory: u32,
 }
 
 /// A benchmark definition from the evxl registry.

@@ -102,6 +102,7 @@ mod tests {
                 tier("Gold", "#CAB148"),
             ],
             categories: vec![],
+            scenario_selection: None,
         }
     }
 

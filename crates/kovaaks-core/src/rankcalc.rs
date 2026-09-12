@@ -648,6 +648,10 @@ pub fn compute_rank(
         "e1se" => (calc_e1se(progress), false),
         "aoi" => (calc_aoi(progress, difficulty), false),
         "MIYU" => (calc_miyu(progress), false),
+        "selectable-top-n" => {
+            let (r, _) = calc_selectable_top_n(progress, benchmark, difficulty);
+            (r, false)
+        }
         _ => {
             // Unported method: API rank is the current best estimate.
             return RankResult {
@@ -2241,7 +2245,249 @@ pub fn calc_tn(
     tn_engine(progress, benchmark, difficulty)
 }
 
-/// `ra-s5` (evxl `Xe`): complex reactive-tracker — scenario energies on the
+/// `selectable-top-n` (REVENGE family, reverse-engineered from evxl's engine):
+/// the benchmark rank is the per-scenario tier of the Nth-best selected
+/// scenario. Selection defaults to the best-scoring scenarios honoring the
+/// registry's minima (min per category/subcategory), capped at `select_count`;
+/// when every scenario carries a score the pool is "full" and `p` becomes
+/// `full_pool_rank_score_count`. Fewer than `p` scored scenarios — or a
+/// category/subcategory under its minimum — yields rank 0 (evxl semantics).
+#[derive(Debug, Clone)]
+struct TaggedScenario {
+    base: u32,
+    precise: f64,
+    category: String,
+    subcategory: String,
+    key: String,
+}
+
+fn take_scenario(
+    s: &TaggedScenario,
+    taken: &mut std::collections::HashSet<String>,
+    per_sub: &mut std::collections::HashMap<(String, String), u32>,
+    per_cat: &mut std::collections::HashMap<String, u32>,
+) {
+    if taken.insert(s.key.clone()) {
+        *per_sub
+            .entry((s.category.clone(), s.subcategory.clone()))
+            .or_insert(0) += 1;
+        *per_cat.entry(s.category.clone()).or_insert(0) += 1;
+    }
+}
+
+pub fn calc_selectable_top_n(
+    progress: &BenchmarkProgress,
+    benchmark: &BenchmarkDef,
+    difficulty: &Difficulty,
+) -> (u32, f64) {
+    selectable_top_n_engine(progress, benchmark, difficulty)
+}
+
+fn selectable_top_n_engine(
+    progress: &BenchmarkProgress,
+    _benchmark: &BenchmarkDef,
+    difficulty: &Difficulty,
+) -> (u32, f64) {
+    let Some(sel) = difficulty.scenario_selection.as_ref() else {
+        return (progress.overall_rank, 0.0);
+    };
+    if !sel.enabled || sel.select_count == 0 {
+        return (progress.overall_rank, 0.0);
+    }
+
+    // evxl's Pe(): difficulty categories/subcats in document order carry
+    // scenarioCount slots each; the progress payload lists scenarios in the
+    // same (category, order) sequence — match them positionally.
+    let mut tagged: Vec<TaggedScenario> = Vec::new();
+    let mut pool_slots = 0usize;
+    let mut played_slots = 0usize;
+    let cat_iter = difficulty.categories.iter().filter_map(|c| {
+        c.as_object().map(|o| {
+            (
+                o.get("categoryName").and_then(|v| v.as_str()).unwrap_or(""),
+                o.get("subcategories")
+                    .and_then(|s| s.as_array())
+                    .map(|a| a.as_slice())
+                    .unwrap_or(&[]),
+            )
+        })
+    });
+    for (cat_name, subs) in cat_iter {
+        let Some(progress_cat) = progress
+            .categories
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(cat_name))
+            .map(|(_, c)| c)
+        else {
+            continue;
+        };
+        let mut cursor = 0usize;
+        for sub in subs {
+            let count = sub
+                .get("scenarioCount")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            let sub_name = sub
+                .get("subcategoryName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            for e in progress_cat.scenarios.iter().skip(cursor).take(count) {
+                pool_slots += 1;
+                if e.1.score > 0.0 {
+                    let (base, precise) = tier_from_rungs(e.1.score, &e.1.rank_maxes);
+                    if base > 0 {
+                        tagged.push(TaggedScenario {
+                            base,
+                            precise,
+                            category: cat_name.to_string(),
+                            subcategory: sub_name.to_string(),
+                            key: e.0.clone(),
+                        });
+                        played_slots += 1;
+                    }
+                }
+            }
+            cursor += count;
+        }
+    }
+
+    // Full pool = every registry slot scored (evxl's isFullPoolSelection).
+    let full_pool = played_slots >= pool_slots;
+    let required = match (full_pool, sel.full_pool_rank_score_count) {
+        (true, Some(n)) if n > 0 => n as usize,
+        _ => sel.base_rank_score_count as usize,
+    };
+
+    // Sort best-first by precise rank (evxl sorts the pool by preciseRank desc).
+    tagged.sort_by(|a, b| b.precise.partial_cmp(&a.precise).unwrap());
+
+    // Auto-selection (evxl's $n greedy): subcategory minimums first, then
+    // category padding, then best-first round-robin fill up to selectCount.
+    let mut taken: std::collections::HashSet<String> = Default::default();
+    let mut counts_per_sub: std::collections::HashMap<(String, String), u32> = Default::default();
+    let mut counts_per_cat: std::collections::HashMap<String, u32> = Default::default();
+
+    let mut guard = 0usize;
+    // pass 1: subcategory minimums
+    for (ckey, skey) in tagged
+        .iter()
+        .map(|s| (s.category.clone(), s.subcategory.clone()))
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        let mut got = *counts_per_sub
+            .get(&(ckey.clone(), skey.clone()))
+            .unwrap_or(&0);
+        for s in &tagged {
+            if got >= sel.min_per_subcategory
+                || taken.len() >= sel.select_count as usize
+                || guard > 10_000
+            {
+                break;
+            }
+            if s.category == ckey && s.subcategory == skey && !taken.contains(&s.key) {
+                take_scenario(s, &mut taken, &mut counts_per_sub, &mut counts_per_cat);
+                got += 1;
+                guard += 1;
+            }
+        }
+    }
+    // pass 2: category minimums
+    for ckey in tagged
+        .iter()
+        .map(|s| s.category.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        let mut got = *counts_per_cat.get(&ckey).unwrap_or(&0);
+        for s in &tagged {
+            if got >= sel.min_per_category || taken.len() >= sel.select_count as usize {
+                break;
+            }
+            if s.category == ckey && !taken.contains(&s.key) {
+                take_scenario(s, &mut taken, &mut counts_per_sub, &mut counts_per_cat);
+                got += 1;
+            }
+        }
+    }
+    // pass 3: round-robin best-first fill to selectCount
+    while taken.len() < sel.select_count as usize {
+        let mut progress = false;
+        for s in &tagged {
+            if taken.len() >= sel.select_count as usize {
+                break;
+            }
+            if !taken.contains(&s.key) {
+                take_scenario(s, &mut taken, &mut counts_per_sub, &mut counts_per_cat);
+                progress = true;
+                break;
+            }
+        }
+        if !progress {
+            break;
+        }
+    }
+
+    let selected: Vec<&TaggedScenario> = tagged.iter().filter(|s| taken.contains(&s.key)).collect();
+
+    // Mins + required count enforcement (evxl zeroes the rank otherwise).
+    if selected.len() < required {
+        return (0, 0.0);
+    }
+    for cat in difficulty
+        .categories
+        .iter()
+        .filter_map(|c| c.as_object())
+        .filter_map(|o| o.get("categoryName").and_then(|v| v.as_str()))
+    {
+        let got = counts_per_cat.get(cat).copied().unwrap_or(0);
+        if got < sel.min_per_category {
+            return (0, 0.0);
+        }
+    }
+    for count in counts_per_sub.values() {
+        if *count < sel.min_per_subcategory {
+            return (0, 0.0);
+        }
+    }
+
+    // Rank = integer tier of the required-th best selected scenario.
+    let nth = &selected[required - 1];
+    (nth.base, 0.0)
+}
+
+/// evxl's U(): (integer 1-based tier, precise fractional tier) for a score
+/// against an ascending ladder. Above the top rung: tier = rungs.len() and
+/// precise adds the overshoot fraction of the last interval.
+fn tier_from_rungs(score: f64, rungs: &[f64]) -> (u32, f64) {
+    if score <= 0.0 || rungs.is_empty() {
+        return (0, 0.0);
+    }
+    let mut base = 0u32;
+    for (i, m) in rungs.iter().enumerate().rev() {
+        if score >= *m {
+            base = i as u32 + 1;
+            break;
+        }
+    }
+    if base == 0 {
+        return (0, 0.0);
+    }
+    if base as usize == rungs.len() {
+        let a = rungs[rungs.len() - 1];
+        let c = if rungs.len() > 1 {
+            rungs[rungs.len() - 2]
+        } else {
+            0.0
+        };
+        let span = (a - c).abs().max(1.0);
+        let overshoot = ((score - a) / span).max(0.0);
+        return (base, base as f64 + (overshoot - overshoot.floor()));
+    }
+    let t = rungs[base as usize - 1];
+    let next = rungs[base as usize];
+    let span = (next - t).max(f64::MIN_POSITIVE);
+    let frac = ((score - t) / span).clamp(0.0, 1.0);
+    (base, base as f64 + frac)
+}
 /// shared ladder slice; reactive subcats average PAIRS of (first two / last
 /// two) scenarios; non-reactive subcats avg top-2 (1 elem halved); category
 /// averages, then harmonic mean over categories. This engine has many sheet-
@@ -2460,6 +2706,199 @@ pub fn calc_tsk(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, 
 
 #[cfg(test)]
 mod tests {
+    use crate::types::{BenchmarkDef, Difficulty, ScenarioEntry, ScenarioSelection};
+
+    #[test]
+    fn tier_from_rungs_matches_evxl_u() {
+        let rungs = [100.0, 200.0, 300.0];
+        assert_eq!(tier_from_rungs(50.0, &rungs), (0, 0.0));
+        assert_eq!(tier_from_rungs(100.0, &rungs), (1, 1.0));
+        assert_eq!(tier_from_rungs(150.0, &rungs), (1, 1.5));
+        assert_eq!(tier_from_rungs(300.0, &rungs), (3, 3.0));
+        // Above top: overshoot fraction of last interval (300-200 span 100).
+        let (b, p) = tier_from_rungs(350.0, &rungs);
+        assert_eq!(b, 3);
+        assert!((p - 3.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn selectable_top_n_full_pool_scores_nth_best() {
+        // REVENGE-like shape: 3 categories x 2 subcats x 4 scenarios = 24 slots;
+        // selection 24/24 (full pool), p = fullPool 2 (synthetic small pool).
+        let difficulty = Difficulty {
+            name: "Main".into(),
+            kovaaks_benchmark_id: 1,
+            sharecode: String::new(),
+            rank_colors: (0..8)
+                .map(|i| RankTier {
+                    name: format!("T{i}"),
+                    color: "#fff".into(),
+                })
+                .collect(),
+            categories: vec![
+                serde_json::json!({
+                    "categoryName": "Clicking",
+                    "subcategories": [
+                        {"subcategoryName": "Static", "scenarioCount": 2},
+                        {"subcategoryName": "Dynamic", "scenarioCount": 2}
+                    ]
+                }),
+                serde_json::json!({
+                    "categoryName": "Tracking",
+                    "subcategories": [
+                        {"subcategoryName": "Precise", "scenarioCount": 2},
+                        {"subcategoryName": "Reactive", "scenarioCount": 2}
+                    ]
+                }),
+            ],
+            scenario_selection: Some(ScenarioSelection {
+                enabled: true,
+                select_count: 8,
+                base_rank_score_count: 2,
+                full_pool_rank_score_count: Some(4),
+                min_per_category: 1,
+                min_per_subcategory: 1,
+            }),
+        };
+        let benchmark = BenchmarkDef {
+            name: "REVENGE Test".into(),
+            abbreviation: "RVG".into(),
+            color: "#000".into(),
+            rank_calculation: "selectable-top-n".into(),
+            hidden: false,
+            spreadsheet_url: String::new(),
+            difficulties: vec![],
+        };
+        // Scenarios ordered per Pe: Clicking/Static 2, Clicking/Dynamic 2,
+        // Tracking/Precise 2, Tracking/Reactive 2. Tiers: mix so the 4th best
+        // (precise desc) has tier 3.
+        let mk = |score: f64, rungs: &[f64]| ScenarioEntry {
+            score,
+            leaderboard_rank: 1,
+            scenario_rank: 0,
+            rank_maxes: rungs.to_vec(),
+            leaderboard_id: 0,
+        };
+        #[allow(clippy::useless_vec)]
+        let scenarios = vec![
+            ("s1".to_string(), mk(300.0, &[100.0, 200.0, 300.0])), // tier 3, precise 3.0
+            ("s2".to_string(), mk(250.0, &[100.0, 200.0, 300.0])), // tier 2, precise 2.5
+            ("s3".to_string(), mk(200.0, &[100.0, 200.0, 300.0])), // tier 2, precise 2.0
+            ("s4".to_string(), mk(100.0, &[100.0, 200.0, 300.0])), // tier 1, precise 1.0
+            ("s5".to_string(), mk(350.0, &[100.0, 200.0, 300.0])), // tier 3, precise 3.5
+            ("s6".to_string(), mk(150.0, &[100.0, 200.0, 300.0])), // tier 1, precise 1.5
+            ("s7".to_string(), mk(320.0, &[100.0, 200.0, 300.0])), // tier 3, precise 3.2
+            ("s8".to_string(), mk(120.0, &[100.0, 200.0, 300.0])), // tier 1, precise 1.2
+        ];
+        let progress = BenchmarkProgress {
+            benchmark_progress: 0.0,
+            overall_rank: 0,
+            categories: vec![
+                (
+                    "Clicking".to_string(),
+                    CategoryProgress {
+                        benchmark_progress: 0.0,
+                        category_rank: 0,
+                        rank_maxes: vec![],
+                        scenarios: vec![
+                            scenarios[0].clone(),
+                            scenarios[1].clone(),
+                            scenarios[2].clone(),
+                            scenarios[3].clone(),
+                        ],
+                    },
+                ),
+                (
+                    "Tracking".to_string(),
+                    CategoryProgress {
+                        benchmark_progress: 0.0,
+                        category_rank: 0,
+                        rank_maxes: vec![],
+                        scenarios: vec![
+                            scenarios[4].clone(),
+                            scenarios[5].clone(),
+                            scenarios[6].clone(),
+                            scenarios[7].clone(),
+                        ],
+                    },
+                ),
+            ],
+        };
+        let (rank, _) = calc_selectable_top_n(&progress, &benchmark, &difficulty);
+        // Full pool (8/8 scored), required = 4; precise desc: s5 3.5, s7 3.2,
+        // s1 3.0, s2 2.5 -> 4th best tier = 2.
+        assert_eq!(rank, 2, "rank must be the 4th-best selected scenario tier");
+    }
+
+    #[test]
+    fn selectable_top_n_zeroes_when_min_unmet() {
+        // Only one category has scores: category minimum 1 for the OTHER
+        // category can't be met -> rank 0.
+        let difficulty = ScenarioSelection {
+            enabled: true,
+            select_count: 4,
+            base_rank_score_count: 2,
+            full_pool_rank_score_count: Some(2),
+            min_per_category: 1,
+            min_per_subcategory: 1,
+        };
+        let difficulty = crate::types::Difficulty {
+            name: "Main".into(),
+            kovaaks_benchmark_id: 1,
+            sharecode: String::new(),
+            rank_colors: vec![],
+            categories: vec![
+                serde_json::json!({
+                    "categoryName": "Clicking",
+                    "subcategories": [
+                        {"subcategoryName": "Static", "scenarioCount": 2},
+                        {"subcategoryName": "Dynamic", "scenarioCount": 2}
+                    ]
+                }),
+                serde_json::json!({
+                    "categoryName": "Tracking",
+                    "subcategories": [{"subcategoryName": "Precise", "scenarioCount": 100}]
+                }),
+            ],
+            scenario_selection: Some(difficulty),
+        };
+        let benchmark = BenchmarkDef {
+            name: "REVENGE Test".into(),
+            abbreviation: "RVG".into(),
+            color: "#000".into(),
+            rank_calculation: "selectable-top-n".into(),
+            hidden: false,
+            spreadsheet_url: String::new(),
+            difficulties: vec![],
+        };
+        let mk = |score: f64| ScenarioEntry {
+            score,
+            leaderboard_rank: 1,
+            scenario_rank: 0,
+            rank_maxes: vec![100.0, 200.0, 300.0],
+            leaderboard_id: 0,
+        };
+        let progress = BenchmarkProgress {
+            benchmark_progress: 0.0,
+            overall_rank: 7,
+            categories: vec![(
+                "Clicking".to_string(),
+                CategoryProgress {
+                    benchmark_progress: 0.0,
+                    category_rank: 0,
+                    rank_maxes: vec![],
+                    scenarios: vec![
+                        ("s1".to_string(), mk(300.0)),
+                        ("s2".to_string(), mk(250.0)),
+                        ("s3".to_string(), mk(200.0)),
+                        ("s4".to_string(), mk(100.0)),
+                    ],
+                },
+            )],
+        };
+        let (rank, _) = calc_selectable_top_n(&progress, &benchmark, &difficulty);
+        assert_eq!(rank, 0, "unmet category minimum must zero the rank");
+    }
 
     #[test]
     fn ye_thresholds_shift_down_on_shared_boundary_tier() {
@@ -2483,6 +2922,7 @@ mod tests {
                 })
                 .collect(),
             categories: Vec::new(),
+            scenario_selection: None,
         };
         let bench = BenchmarkDef {
             name: "T".into(),
@@ -2511,7 +2951,7 @@ mod tests {
     }
 
     use super::*;
-    use crate::types::{CategoryProgress, RankTier, ScenarioEntry};
+    use crate::types::{CategoryProgress, RankTier};
 
     fn tier(name: &str, color: &str) -> RankTier {
         RankTier {
@@ -2538,6 +2978,7 @@ mod tests {
                     {"subcategoryName": "Static", "scenarioCount": 2}
                 ]
             })],
+            scenario_selection: None,
         }
     }
 
@@ -2622,6 +3063,7 @@ mod tests {
                     {"subcategoryName": "Stability", "scenarioCount": 1}
                 ]}),
             ],
+            scenario_selection: None,
         }
     }
 

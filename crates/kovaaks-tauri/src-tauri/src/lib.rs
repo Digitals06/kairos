@@ -1226,6 +1226,7 @@ mod tests {
                 },
             ],
             categories: Vec::new(),
+            scenario_selection: None,
         };
         let ladder = [500, 1000, 2000];
         let (name, delta) = next_rank_from_ladder(400, &ladder, &difficulty);
