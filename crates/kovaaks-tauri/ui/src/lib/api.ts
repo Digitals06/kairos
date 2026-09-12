@@ -170,6 +170,10 @@ export function grindNext(benchmarkId: number): Promise<GrindNext | null> {
   return invoke('grind_next', { benchmarkId })
 }
 
+export function exportBackup(): Promise<string> {
+  return invoke('export_backup')
+}
+
 export function getOverview(): Promise<BenchmarkCard[]> {
   return invoke('get_overview')
 }

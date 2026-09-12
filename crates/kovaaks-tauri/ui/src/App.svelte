@@ -139,6 +139,20 @@ import { listen } from '@tauri-apps/api/event'
     }
   }
 
+  let exporting = $state(false)
+  async function doExportBackup() {
+    if (exporting) return
+    exporting = true
+    try {
+      const path = await exportBackup()
+      showToast(`Backup written: ${path}`)
+    } catch (err) {
+      showToast(humanError(err))
+    } finally {
+      exporting = false
+    }
+  }
+
   // --- settings dropdown -----------------------------------------------------
   let settingsOpen = $state(false)
   let deepScan = $state(false)
@@ -350,6 +364,9 @@ import { listen } from '@tauri-apps/api/event'
                   onchange={(e) => applyDeepScan(e.currentTarget.checked)}
                 />
               </label>
+              <button class="btn" onclick={() => doExportBackup()} disabled={exporting}>
+                {exporting ? 'Exporting…' : 'Export data…'}
+              </button>
             </div>
           {/if}
         </div>

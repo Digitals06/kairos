@@ -923,6 +923,22 @@ pub mod commands {
         Ok(ingest_status_from(&state.store))
     }
 
+    /// Full-backup export: dump every store table to
+    /// Documents/kairos-export-<timestamp>.json. Returns the written path.
+    #[tauri::command]
+    pub async fn export_backup(state: State<'_, AppState>) -> Result<String, String> {
+        let data = state.store.export_all().map_err(|e| e.to_string())?;
+        let home =
+            std::env::var("USERPROFILE").map_err(|_| "no user profile directory".to_string())?;
+        let path_buf = std::path::PathBuf::from(home);
+        let docs = path_buf.join("Documents");
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let path = docs.join(format!("kairos-export-{stamp}.json"));
+        let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
+        std::fs::write(&path, json).map_err(|e| e.to_string())?;
+        Ok(path.display().to_string())
+    }
+
     /// Re-scan the local KovaaK's stats CSVs (no network). Forward-only like
     /// the sync-time scan; returns the refreshed ingest counters.
     #[tauri::command]
@@ -1044,6 +1060,7 @@ pub fn run() {
             commands::get_benchmark_detail,
             commands::ingest_status,
             commands::refresh_local,
+            commands::export_backup,
             commands::get_settings,
             commands::set_settings,
             commands::toggle_favorite,

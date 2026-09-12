@@ -1,11 +1,11 @@
-
-use kovaaks_core::types::{Difficulty, BenchmarkDef};
-
 #[test]
 fn embedded_registry_has_revenge_selection() {
     let reg = kovaaks_core::registry::Registry;
-    let (bench, diff) = reg.by_id(2725).expect("REVENGE Main");
-    let sel = diff.scenario_selection.as_ref().expect("scenarioSelection parsed");
+    let (_, diff) = reg.by_id(2725).expect("REVENGE Main");
+    let sel = diff
+        .scenario_selection
+        .as_ref()
+        .expect("scenarioSelection parsed");
     assert!(sel.enabled);
     assert_eq!(sel.select_count, 24);
     assert_eq!(sel.base_rank_score_count, 9);

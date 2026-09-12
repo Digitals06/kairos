@@ -434,6 +434,48 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Full-backup export: every table as generic JSON rows (column names
+    /// round-trip verbatim, so the dump documents the schema too).
+    pub fn export_all(&self) -> Result<serde_json::Value> {
+        let conn = self.lock();
+        let tables = [
+            "players",
+            "snapshots",
+            "scenario_scores",
+            "plays",
+            "favorites",
+            "benchmarks_playing",
+            "meta",
+        ];
+        let mut out = serde_json::Map::new();
+        for table in tables {
+            let mut stmt = conn.prepare(&format!("SELECT * FROM {table}"))?;
+            let cols: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+            let mut rows_iter = stmt.query([])?;
+            let mut rows: Vec<serde_json::Value> = Vec::new();
+            while let Some(row) = rows_iter.next()? {
+                let mut obj = serde_json::Map::new();
+                for (i, col) in cols.iter().enumerate() {
+                    let v = match row.get_ref(i)? {
+                        rusqlite::types::ValueRef::Null => serde_json::Value::Null,
+                        rusqlite::types::ValueRef::Integer(x) => serde_json::json!(x),
+                        rusqlite::types::ValueRef::Real(x) => serde_json::json!(x),
+                        rusqlite::types::ValueRef::Text(tx) => {
+                            serde_json::json!(String::from_utf8_lossy(tx).to_string())
+                        }
+                        rusqlite::types::ValueRef::Blob(b) => {
+                            serde_json::json!(String::from_utf8_lossy(b).to_string())
+                        }
+                    };
+                    obj.insert(col.clone(), v);
+                }
+                rows.push(serde_json::Value::Object(obj));
+            }
+            out.insert(table.to_string(), serde_json::Value::Array(rows));
+        }
+        Ok(serde_json::Value::Object(out))
+    }
+
     /// The player's favorited benchmark ids, pinned order (oldest first).
     pub fn favorites(&self, steam_id: &str) -> Result<Vec<i64>> {
         let conn = self.lock();
