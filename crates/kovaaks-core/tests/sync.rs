@@ -422,11 +422,16 @@ async fn sync_stale_repulls_only_rows_older_than_max_age() {
                 benchmark_progress: 0.0,
                 category_rank: 0,
                 rank_maxes: Vec::new(),
-                scenarios: vec![
-                    ("s".to_string(),
-                     ScenarioEntry { score: 900.0, leaderboard_rank: 0,
-                                     scenario_rank: 1, rank_maxes: vec![], leaderboard_id: 0 }),
-                ],
+                scenarios: vec![(
+                    "s".to_string(),
+                    ScenarioEntry {
+                        score: 900.0,
+                        leaderboard_rank: 0,
+                        scenario_rank: 1,
+                        rank_maxes: vec![],
+                        leaderboard_id: 0,
+                    },
+                )],
             },
         )],
     };
