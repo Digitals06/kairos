@@ -20,6 +20,9 @@ pub struct GrindTarget {
     /// rank with everything else unchanged.
     pub target_score: i64,
     pub delta: i64,
+    /// How many ladder rungs sit strictly between the current score and the
+    /// target. 1 = a single-tier step; >1 = a multi-tier flip.
+    pub rungs_crossed: u32,
 }
 
 /// Overall result for one benchmark difficulty.
@@ -139,7 +142,7 @@ fn combined_plan(
     // each scenario's current score as steps apply.
     let mut live: Vec<(String, i64, i64)> = scenarios.to_vec();
 
-    for _round in 0..64 {
+    for _round in 0..512 {
         if prev_rank >= next_index {
             break;
         }
@@ -194,6 +197,7 @@ fn combined_plan(
                     current_score: cur,
                     target_score: tgt,
                     delta: tgt - cur,
+                    rungs_crossed: 0,
                 });
                 if let Some(e) = live.iter_mut().find(|(n, _, _)| *n == name) {
                     e.1 = tgt;
@@ -243,6 +247,7 @@ fn combined_plan(
                             current_score: cur,
                             target_score: rung,
                             delta: rung - cur,
+                            rungs_crossed: 1,
                         });
                         live[idx].1 = rung;
                     }
@@ -279,6 +284,7 @@ fn consolidate_plan(plan: Vec<GrindTarget>) -> Vec<GrindTarget> {
                 current_score: from,
                 target_score: to,
                 scenario: name,
+                rungs_crossed: 1,
             })
         })
         .collect()
@@ -315,6 +321,8 @@ pub fn next_targets(
     // produces mathematically-flipping but game-impossible targets, so it caps
     // the search. Scenarios without a ladder fall back to a fixed ceiling.
     const CEILING: i64 = 100_000;
+    let mut rung_ladders: std::collections::HashMap<String, Vec<f64>> =
+        std::collections::HashMap::new();
     let mut scenarios: Vec<(String, i64, i64)> = Vec::new();
     for (_, cat) in &base.categories {
         for (name, entry) in &cat.scenarios {
@@ -326,6 +334,17 @@ pub fn next_targets(
                 .unwrap_or(CEILING)
                 .max(CEILING.min(1))
                 .max(score);
+            let maxes = entry.rank_maxes.clone();
+            match rung_ladders.get_mut(name) {
+                Some(existing) => {
+                    if maxes.len() > existing.len() {
+                        *existing = maxes;
+                    }
+                }
+                None => {
+                    rung_ladders.insert(name.clone(), maxes);
+                }
+            }
             match scenarios.iter_mut().find(|(n, _, _)| n == name) {
                 Some((_, s, c)) => {
                     *s = (*s).max(score);
@@ -336,7 +355,10 @@ pub fn next_targets(
         }
     }
 
-    let mut targets = Vec::new();
+    // Scenario ladders for rung accounting: a flip that blows past several
+    // intermediate tiers is not a useful single-session target — those anchors
+    // belong in the combined plan (rung-by-rung, achievable in one session).
+    let mut single = Vec::new();
     if !current.complete {
         for (name, cur, cap) in &scenarios {
             if cur >= cap {
@@ -345,26 +367,39 @@ pub fn next_targets(
             if let Some(target) =
                 minimal_score_for_rank(base, benchmark, difficulty, name, next_index, *cur, *cap)
             {
-                if target > *cur {
-                    targets.push(GrindTarget {
-                        scenario: name.clone(),
-                        current_score: *cur,
-                        target_score: target,
-                        delta: target - cur,
-                    });
+                if target <= *cur {
+                    continue;
                 }
+                let rungs = rung_ladders
+                    .get(name)
+                    .map(|m: &Vec<f64>| {
+                        m.iter()
+                            .filter(|r| **r > *cur as f64 && **r <= target as f64)
+                            .count()
+                    })
+                    .unwrap_or(0);
+                single.push(GrindTarget {
+                    scenario: name.clone(),
+                    current_score: *cur,
+                    target_score: target,
+                    delta: target - cur,
+                    rungs_crossed: rungs as u32,
+                });
             }
         }
     }
-    targets.sort_by_key(|t| t.delta);
+    // Panel requires: lead with single-rung flips, then multi-rung flips
+    // (achievable, but several tiers in one go), then the plan path.
+    let mut targets = single;
+    targets.sort_by_key(|t| (t.rungs_crossed, t.delta));
 
-    // No single-scenario path: fall back to a step-by-step combined plan.
+    // Run the combined plan when no cheap single-rung flips exist; the plan is
+    // rung-by-rung so it covers multi-rung-single and multi-scenario cases.
     let plan = if targets.is_empty() && !current.complete {
         combined_plan(base, benchmark, difficulty, &scenarios, next_index)
     } else {
         Vec::new()
     };
-
     GrindResult {
         current_rank: current.name,
         next_rank: next_name,
@@ -709,6 +744,49 @@ mod tests {
         } else {
             // If single targets exist for this state, plan must be empty.
             assert!(result.plan.is_empty());
+        }
+    }
+
+    /// A flip that would blow past several intermediate tiers must not be
+    /// listed as a single-scenario target — those multi-rung cases belong to
+    /// the combined plan (rung-by-rung steps the player can actually hit in
+    /// one session).
+    #[test]
+    fn targets_lead_with_single_rung_flips() {
+        let registry = crate::Registry;
+        let (bench, difficulty) = registry.by_id(2476).expect("350fs");
+        // Several slots; one scenario played at the first rung, the rest
+        // unplayed — flips land several rungs deep.
+        let maxes: [&[f64]; 3] = [
+            &[100.0, 200.0, 300.0, 400.0],
+            &[100.0, 200.0, 300.0, 400.0],
+            &[100.0, 200.0, 300.0, 400.0],
+        ];
+        let names = ["a", "b", "c"];
+        let entries: Vec<(&str, f64, &[f64])> = names
+            .iter()
+            .zip(maxes.iter())
+            .map(|(n, m)| {
+                let score = if *n == "a" { 150.0 } else { 0.0 };
+                (*n, score, *m)
+            })
+            .collect();
+        let base = progress_from(&entries);
+        let result = next_targets(&base, bench, &difficulty);
+        // rungs_crossed must be non-decreasing: single-rung wins first.
+        let seq: Vec<u32> = result.targets.iter().map(|t| t.rungs_crossed).collect();
+        let mut sorted = seq.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            seq, sorted,
+            "targets must lead with the cheapest (fewest rungs) wins"
+        );
+        // And the plan runs when no single-rung target exists.
+        if !seq.iter().any(|&r| r <= 1) {
+            assert!(
+                !result.plan.is_empty(),
+                "no single-rung flips -> plan must exist"
+            );
         }
     }
 

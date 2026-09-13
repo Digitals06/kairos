@@ -349,7 +349,12 @@
                 <span class="num grind-scores">
                   {t.currentScore.toLocaleString()} →
                   {t.targetScore.toLocaleString()}
-                  <span class="grind-delta">(+{t.delta.toLocaleString()})</span>
+                  <span class="grind-delta">
+                    (+{t.delta.toLocaleString()})
+                    {#if t.rungsCrossed > 1}
+                      · {t.rungsCrossed} tiers
+                    {/if}
+                  </span>
                 </span>
               </li>
             {/each}
@@ -365,7 +370,12 @@
                 <span class="num grind-scores">
                   {t.currentScore.toLocaleString()} →
                   {t.targetScore.toLocaleString()}
-                  <span class="grind-delta">(+{t.delta.toLocaleString()})</span>
+                  <span class="grind-delta">
+                    (+{t.delta.toLocaleString()})
+                    {#if t.rungsCrossed > 1}
+                      · {t.rungsCrossed} tiers
+                    {/if}
+                  </span>
                 </span>
               </li>
             {/each}

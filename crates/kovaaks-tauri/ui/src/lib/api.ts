@@ -155,6 +155,7 @@ export interface GrindTarget {
   currentScore: number
   targetScore: number
   delta: number
+  rungsCrossed: number
 }
 
 export interface GrindNext {

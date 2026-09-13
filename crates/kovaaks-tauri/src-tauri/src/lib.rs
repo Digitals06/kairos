@@ -100,6 +100,8 @@ pub struct GrindTargetDto {
     pub current_score: i64,
     pub target_score: i64,
     pub delta: i64,
+    /// Ladder rungs between current and target (1 = a single-tier step).
+    pub rungs_crossed: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -682,6 +684,7 @@ pub mod commands {
             current_score: g.current_score,
             target_score: g.target_score,
             delta: g.delta,
+            rungs_crossed: g.rungs_crossed,
         };
         Ok(Some(GrindNextDto {
             current_rank: result.current_rank,
