@@ -375,6 +375,12 @@
                     {#if t.rungsCrossed > 1}
                       · {t.rungsCrossed} tiers
                     {/if}
+                    {#if t.cv !== null}
+                      · CV {(t.cv * 100).toFixed(0)}%
+                    {/if}
+                    {#if t.plateaued}
+                      · plateaued
+                    {/if}
                   </span>
                 </span>
               </li>

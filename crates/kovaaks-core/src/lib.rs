@@ -5,6 +5,7 @@
 //! evxl benchmark registry is embedded at compile time.
 
 pub mod bench_type;
+pub mod consistency;
 pub mod csv_ingest;
 pub mod error;
 pub mod grind;

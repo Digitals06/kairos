@@ -124,6 +124,18 @@ pub fn metrics_for_scenario_combined(
     benchmark_id: i64,
     scenario: &str,
 ) -> Result<Metrics> {
+    let series = scenario_series_combined(store, steam_id, benchmark_id, scenario)?;
+    Ok(compute(&series))
+}
+
+/// The merged (plays + new-high snapshots) chronological series — the single
+/// owner of the dedup semantics, reused by consistency analytics.
+pub fn scenario_series_combined(
+    store: &Store,
+    steam_id: &str,
+    benchmark_id: i64,
+    scenario: &str,
+) -> Result<Vec<(DateTime<Utc>, f64)>> {
     let plays: Vec<(String, DateTime<Utc>, f64)> = store
         .plays_history(steam_id, scenario)?
         .into_iter()
@@ -141,11 +153,12 @@ pub fn metrics_for_scenario_combined(
         .collect();
     // New-high snapshots only; snapshot points duplicating a local play (the
     // same run echoed by the sync) are dropped — see merge_plays_snapshots_dedup.
-    let series = merge_plays_snapshots_dedup(&plays, &improving_only(&snapshots))
-        .into_iter()
-        .map(|(at, score, _)| (at, score))
-        .collect::<Vec<_>>();
-    Ok(compute(&series))
+    Ok(
+        merge_plays_snapshots_dedup(&plays, &improving_only(&snapshots))
+            .into_iter()
+            .map(|(at, score, _)| (at, score))
+            .collect(),
+    )
 }
 
 /// Keep only the snapshots that set a new high for a scenario, in order.

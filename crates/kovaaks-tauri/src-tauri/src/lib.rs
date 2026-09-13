@@ -102,6 +102,12 @@ pub struct GrindTargetDto {
     pub delta: i64,
     /// Ladder rungs between current and target (1 = a single-tier step).
     pub rungs_crossed: u32,
+    /// Consistency (CV σ/μ over the recent merged series; None without data).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cv: Option<f64>,
+    /// No new personal best for ≥ PLATEAU_DAYS with enough samples.
+    #[serde(default)]
+    pub plateaued: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -679,12 +685,34 @@ pub mod commands {
         let base = stored_to_progress(latest);
         let result = kovaaks_core::grind::next_targets(&base, bench, &difficulty);
         let complete = result.targets.is_empty() && result.next_rank == result.current_rank;
-        let to_dto = |g: kovaaks_core::grind::GrindTarget| GrindTargetDto {
-            scenario: g.scenario,
-            current_score: g.current_score,
-            target_score: g.target_score,
-            delta: g.delta,
-            rungs_crossed: g.rungs_crossed,
+        // Consistency (CV/plateau) per scenario from its merged play/snapshot
+        // series (kovaaks-core::consistency).
+        let enrich = |scenario: &str| -> (Option<f64>, bool) {
+            let series = kovaaks_core::metrics::scenario_series_combined(
+                &state.store,
+                &steam_id,
+                benchmark_id,
+                scenario,
+            )
+            .unwrap_or_default();
+            let c = kovaaks_core::consistency::scenario_consistency(&series);
+            (if c.samples >= 4 { Some(c.cv) } else { None }, c.plateaued)
+        };
+        let to_dto = |g: kovaaks_core::grind::GrindTarget| {
+            let g = kovaaks_core::grind::GrindTarget {
+                scenario: g.scenario.clone(),
+                ..g
+            };
+            let (cv, plateaued) = enrich(&g.scenario);
+            GrindTargetDto {
+                scenario: g.scenario,
+                current_score: g.current_score,
+                target_score: g.target_score,
+                delta: g.delta,
+                rungs_crossed: g.rungs_crossed,
+                cv,
+                plateaued,
+            }
         };
         Ok(Some(GrindNextDto {
             current_rank: result.current_rank,
