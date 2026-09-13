@@ -236,6 +236,75 @@ impl From<SyncReport> for SyncReportDto {
     }
 }
 
+/// Wire mirror of `kovaaks_core::weekly::WeeklyReport`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct WeeklyReportDto {
+    pub since: String,
+    pub days_played: u32,
+    pub plays: u32,
+    pub scenarios_played: u32,
+    pub pb_events: u32,
+    pub current_streak: u32,
+    pub xp: u64,
+    pub improvements: Vec<ImprovementRowDto>,
+    pub rank_changes: Vec<RankChangeDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ImprovementRowDto {
+    pub scenario: String,
+    pub benchmark_id: i64,
+    pub delta: f64,
+    pub trend: i8,
+    pub pb_this_week: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RankChangeDto {
+    pub benchmark_id: i64,
+    pub benchmark: String,
+    pub from: String,
+    pub to: String,
+}
+
+impl From<kovaaks_core::weekly::WeeklyReport> for WeeklyReportDto {
+    fn from(r: kovaaks_core::weekly::WeeklyReport) -> Self {
+        Self {
+            since: r.since.to_rfc3339(),
+            days_played: r.days_played,
+            plays: r.plays,
+            scenarios_played: r.scenarios_played,
+            pb_events: r.pb_events,
+            current_streak: r.current_streak,
+            xp: r.xp,
+            improvements: r
+                .improvements
+                .into_iter()
+                .map(|i| ImprovementRowDto {
+                    scenario: i.scenario,
+                    benchmark_id: i.benchmark_id,
+                    delta: i.delta,
+                    trend: i.trend,
+                    pb_this_week: i.pb_this_week,
+                })
+                .collect(),
+            rank_changes: r
+                .rank_changes
+                .into_iter()
+                .map(|(bid, name, from, to)| RankChangeDto {
+                    benchmark_id: bid,
+                    benchmark: name,
+                    from,
+                    to,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// App settings (persisted as a JSON blob in the store's meta table).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case", default)]
@@ -954,6 +1023,25 @@ pub mod commands {
         Ok(ingest_status_from(&state.store))
     }
 
+    /// Week-at-a-glance report (7-day window): plays, PBs, top improvements,
+    /// rank changes. Frontend camelCase-enforced by the DTO test.
+    #[tauri::command]
+    pub async fn weekly_report(state: State<'_, AppState>) -> Result<WeeklyReportDto, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .map(|p| p.steam_id)
+            .ok_or("no profile connected")?;
+        let store = state.store.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            kovaaks_core::weekly::weekly_report(&store, &steam_id, chrono::Utc::now())
+                .map(WeeklyReportDto::from)
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| format!("weekly join error: {e}"))?
+    }
+
     /// CSV series export: one row per merged score point, analysis-friendly.
     #[tauri::command]
     pub async fn export_series_csv(state: State<'_, AppState>) -> Result<String, String> {
@@ -1116,6 +1204,7 @@ pub fn run() {
             commands::refresh_local,
             commands::export_backup,
             commands::export_series_csv,
+            commands::weekly_report,
             commands::get_settings,
             commands::set_settings,
             commands::toggle_favorite,

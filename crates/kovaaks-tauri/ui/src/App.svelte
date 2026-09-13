@@ -21,6 +21,7 @@ import { listen } from '@tauri-apps/api/event'
   import Setup from './lib/Setup.svelte'
   import BenchmarkCardView from './lib/BenchmarkCardView.svelte'
   import Detail from './lib/Detail.svelte'
+  import Weekly from './lib/Weekly.svelte'
   import { humanError } from './lib/errors'
 
   // --- app flow state --------------------------------------------------------
@@ -393,6 +394,7 @@ import { listen } from '@tauri-apps/api/event'
     </header>
 
     <main>
+      <Weekly />
       {#if selectedBenchmarkId !== null}
         <Detail benchmarkId={selectedBenchmarkId} onback={closeDetail} />
       {:else if loadingOverview && cards.length === 0}

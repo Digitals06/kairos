@@ -367,6 +367,47 @@ impl Store {
     /// gate treats "no snapshot" as always-stale — freshly discovered
     /// benchmarks must be fully pulled the next sync, not sit as bare cards
     /// until the freshness window (2h) expires.
+    /// Distinct scenarios this player has any local play for.
+    pub fn plays_scenarios(&self, steam_id: &str) -> Result<Vec<String>> {
+        let conn = self.lock();
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT scenario FROM plays WHERE steam_id = ?1 ORDER BY scenario")?;
+        let rows = stmt
+            .query_map(params![steam_id], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<String>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Distinct benchmark ids with a snapshot since `since` (weekly report
+    /// robustness: rows are counted even without a playing flag).
+    pub fn snapshot_benchmark_ids(
+        &self,
+        steam_id: &str,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<i64>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT benchmark_id, captured_at FROM snapshots WHERE steam_id = ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![steam_id], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<(i64, String)>, _>>()?;
+        let mut ids: Vec<i64> = rows
+            .iter()
+            .filter_map(|(bid, ts)| {
+                chrono::DateTime::parse_from_rfc3339(ts)
+                    .ok()
+                    .filter(|dt| dt.with_timezone(&chrono::Utc) >= since)
+                    .map(|_| *bid)
+            })
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        Ok(ids)
+    }
+
     pub fn has_snapshot(&self, steam_id: &str, benchmark_id: i64) -> Result<bool> {
         let conn = self.lock();
         let n: i64 = conn.query_row(

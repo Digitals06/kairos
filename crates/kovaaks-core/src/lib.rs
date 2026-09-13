@@ -22,6 +22,7 @@ pub mod store;
 pub mod streaks;
 pub mod sync;
 pub mod types;
+pub mod weekly;
 
 pub use error::{Error, Result};
 pub use http::USER_AGENT;

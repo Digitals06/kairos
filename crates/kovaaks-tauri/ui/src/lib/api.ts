@@ -177,6 +177,38 @@ export function exportSeriesCsv(): Promise<string> {
   return invoke('export_series_csv')
 }
 
+export interface ImprovementRow {
+  scenario: string
+  benchmark_id: number
+  delta: number
+  trend: number
+  pb_this_week: boolean
+}
+
+export interface RankChange {
+  benchmark_id: number
+  benchmark: string
+  from: string
+  to: string
+}
+
+export interface WeeklyReport {
+  since: string
+  days_played: number
+  plays: number
+  scenarios_played: number
+  pb_events: number
+  current_streak: number
+  xp: number
+  improvements: ImprovementRow[]
+  rank_changes: RankChange[]
+}
+
+export function weeklyReport(): Promise<WeeklyReport> {
+  return invoke('weekly_report')
+}
+
+
 export function exportBackup(): Promise<string> {
   return invoke('export_backup')
 }
