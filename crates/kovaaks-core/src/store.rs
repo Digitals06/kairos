@@ -338,6 +338,20 @@ impl Store {
     }
 
     /// Newest snapshot for (steam_id, benchmark_id) if any.
+    /// Whether ANY snapshot exists for this (player, benchmark). The sync
+    /// gate treats "no snapshot" as always-stale — freshly discovered
+    /// benchmarks must be fully pulled the next sync, not sit as bare cards
+    /// until the freshness window (2h) expires.
+    pub fn has_snapshot(&self, steam_id: &str, benchmark_id: i64) -> Result<bool> {
+        let conn = self.lock();
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM snapshots WHERE steam_id = ?1 AND benchmark_id = ?2",
+            params![steam_id, benchmark_id],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
     pub fn latest(&self, steam_id: &str, benchmark_id: i64) -> Result<Option<StoredSnapshot>> {
         let conn = self.lock();
         Ok(history_inner(&conn, steam_id, benchmark_id)?.pop())

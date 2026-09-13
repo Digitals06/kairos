@@ -410,6 +410,28 @@ async fn sync_stale_repulls_only_rows_older_than_max_age() {
         (459, FakeReply::Progress(prog(123456.0, 0.0))),
         (458, FakeReply::Progress(prog(999.0, 0.0))),
     ])));
+    // 458 must have an EXISTING snapshot for "fresh" to mean a recent full
+    // pull; without one, the fix pulls it (freshly discovered state).
+    use kovaaks_core::types::{BenchmarkProgress, CategoryProgress, ScenarioEntry};
+    let p458 = BenchmarkProgress {
+        benchmark_progress: 900.0,
+        overall_rank: 0,
+        categories: vec![(
+            "Clicking".to_string(),
+            CategoryProgress {
+                benchmark_progress: 0.0,
+                category_rank: 0,
+                rank_maxes: Vec::new(),
+                scenarios: vec![
+                    ("s".to_string(),
+                     ScenarioEntry { score: 900.0, leaderboard_rank: 0,
+                                     scenario_rank: 1, rank_maxes: vec![], leaderboard_id: 0 }),
+                ],
+            },
+        )],
+    };
+    store.record_snapshot(SID, 458, &p458, now).unwrap();
+
     let engine = SyncEngine::new(store.clone(), src.clone(), &Registry);
     let report = engine.sync_stale(SID, 12, false).await.expect("sync_stale");
 
@@ -429,6 +451,45 @@ async fn sync_stale_repulls_only_rows_older_than_max_age() {
     // ...and untouched for the fresh row.
     let row_458 = rows.iter().find(|(bid, _, _)| *bid == 458).unwrap();
     assert_eq!(row_458.2, now);
+    cleanup_db(&path);
+}
+
+#[tokio::test]
+async fn sync_stale_pulls_freshly_discovered_rows_without_snapshot() {
+    let path = temp_db("fresh-discovery");
+    let store = Store::open(&path).unwrap();
+    let now = Utc::now();
+    // 459: play'd at max age, has a snapshot from before (not skipped).
+    store
+        .upsert_played(SID, 459, true, now - chrono::Duration::hours(24))
+        .unwrap();
+    // 458: discovered JUST NOW (upsert_played during discovery) — fresh
+    // timestamp, but NO snapshot exists yet. The old gate skipped it; the
+    // bare card then sits empty until the window expires.
+    store.upsert_played(SID, 458, true, now).unwrap();
+
+    let src = FakeSource::new(replies_for_majors(HashMap::from([
+        (459, FakeReply::Progress(prog(123456.0, 0.0))),
+        (458, FakeReply::Progress(prog(4242.0, 0.0))),
+    ])));
+    let engine = SyncEngine::new(store.clone(), src.clone(), &Registry);
+    let report = engine.sync_stale(SID, 12, false).await.expect("sync_stale");
+
+    assert_eq!(
+        report.ok, 2,
+        "fresh no-snapshot row must be pulled: {:?}",
+        report.errors
+    );
+    assert_eq!(report.failed, 0);
+    assert_eq!(src.attempts_for(459), 1);
+    // THE FIX: 458 is fresh but has no snapshot → must be pulled once.
+    assert_eq!(
+        src.attempts_for(458),
+        1,
+        "row without snapshot must be pulled"
+    );
+    let snap_458 = store.latest(SID, 458).unwrap().expect("snapshot for 458");
+    assert_eq!(snap_458.benchmark_progress, 4242);
     cleanup_db(&path);
 }
 

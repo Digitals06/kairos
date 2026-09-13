@@ -246,7 +246,17 @@ impl<S: ProgressSource> SyncEngine<S> {
             .store
             .benchmarks_playing_rows(steam_id)?
             .into_iter()
-            .filter(|(_, _, last_checked)| force || *last_checked < cutoff)
+            .filter(|(benchmark_id, _, last_checked)| {
+                // Freshly discovered rows (no snapshot yet) are never skipped:
+                // without this, a new benchmark sits as a bare card until the
+                // freshness window expires.
+                force
+                    || *last_checked < cutoff
+                    || !self
+                        .store
+                        .has_snapshot(steam_id, *benchmark_id)
+                        .unwrap_or(false)
+            })
             .map(|(benchmark_id, played, _)| (benchmark_id, played))
             .collect();
         Ok(self.probe_all(steam_id, rows, PersistMode::Snapshot).await)
