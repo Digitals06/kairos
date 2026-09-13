@@ -58,6 +58,13 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
       every benchmark computes its rank from local data
 - [x] One-click full backup export (JSON, Documents/kairos-export-<ts>.json)
 
+## v0.1.9 — released
+
+- [x] Consistency & plateau detection: grind targets carry CV (spread over the
+  recent merged series) and a plateaued tag (no new PB in 3+ days)
+- [x] Grind targets lead with the cheapest single-tier wins and label how many
+  ladder tiers a step spans
+
 ## v0.2
 
 - Benchmark dashboard: all-benchmarks grid with rank chips and
