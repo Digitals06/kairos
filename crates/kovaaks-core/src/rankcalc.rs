@@ -648,6 +648,10 @@ pub fn compute_rank(
         "e1se" => (calc_e1se(progress), false),
         "aoi" => (calc_aoi(progress, difficulty), false),
         "MIYU" => (calc_miyu(progress), false),
+        "Good-Energy" => {
+            let (r, _) = calc_generic_energy(progress, benchmark, difficulty);
+            (r, false)
+        }
         "selectable-top-n" => {
             let (r, _) = calc_selectable_top_n(progress, benchmark, difficulty);
             (r, false)
