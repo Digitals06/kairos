@@ -346,6 +346,23 @@ impl Store {
     }
 
     /// Newest snapshot for (steam_id, benchmark_id) if any.
+    /// All play timestamps for a player, ascending (for streak analytics).
+    pub fn all_play_dates(&self, steam_id: &str) -> Result<Vec<chrono::DateTime<chrono::Utc>>> {
+        let conn = self.lock();
+        let mut stmt =
+            conn.prepare("SELECT played_at FROM plays WHERE steam_id = ?1 ORDER BY played_at")?;
+        let rows = stmt
+            .query_map(params![steam_id], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<String>, _>>()?;
+        rows.iter()
+            .map(|s| {
+                chrono::DateTime::parse_from_rfc3339(s)
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+                    .map_err(|e| crate::error::Error::Decode(format!("bad played_at {s}: {e}")))
+            })
+            .collect()
+    }
+
     /// Whether ANY snapshot exists for this (player, benchmark). The sync
     /// gate treats "no snapshot" as always-stale — freshly discovered
     /// benchmarks must be fully pulled the next sync, not sit as bare cards

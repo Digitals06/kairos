@@ -19,6 +19,7 @@ pub mod registry;
 pub mod registry_update;
 pub mod steam;
 pub mod store;
+pub mod streaks;
 pub mod sync;
 pub mod types;
 
