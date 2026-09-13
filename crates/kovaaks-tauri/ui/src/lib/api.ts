@@ -173,6 +173,10 @@ export function grindNext(benchmarkId: number): Promise<GrindNext | null> {
   return invoke('grind_next', { benchmarkId })
 }
 
+export function exportSeriesCsv(): Promise<string> {
+  return invoke('export_series_csv')
+}
+
 export function exportBackup(): Promise<string> {
   return invoke('export_backup')
 }

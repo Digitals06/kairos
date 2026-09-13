@@ -954,6 +954,29 @@ pub mod commands {
         Ok(ingest_status_from(&state.store))
     }
 
+    /// CSV series export: one row per merged score point, analysis-friendly.
+    #[tauri::command]
+    pub async fn export_series_csv(state: State<'_, AppState>) -> Result<String, String> {
+        let csv = state
+            .store
+            .export_series_csv(
+                &state
+                    .profile()
+                    .map_err(|e| e.to_string())?
+                    .map(|p| p.steam_id)
+                    .ok_or("no profile connected")?,
+            )
+            .map_err(|e| e.to_string())?;
+        let home =
+            std::env::var("USERPROFILE").map_err(|_| "no user profile directory".to_string())?;
+        let path_buf = std::path::PathBuf::from(home);
+        let docs = path_buf.join("Documents");
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let path = docs.join(format!("kairos-series-{stamp}.csv"));
+        std::fs::write(&path, csv).map_err(|e| e.to_string())?;
+        Ok(path.display().to_string())
+    }
+
     /// Full-backup export: dump every store table to
     /// Documents/kairos-export-<timestamp>.json. Returns the written path.
     #[tauri::command]
@@ -1092,6 +1115,7 @@ pub fn run() {
             commands::ingest_status,
             commands::refresh_local,
             commands::export_backup,
+            commands::export_series_csv,
             commands::get_settings,
             commands::set_settings,
             commands::toggle_favorite,

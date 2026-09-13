@@ -13,6 +13,7 @@ import { listen } from '@tauri-apps/api/event'
     getBenchmarkDetail,
     toggleFavorite,
     exportBackup,
+    exportSeriesCsv,
     type BenchmarkCard,
     type PlayerProfile,
     type AppSettings,
@@ -140,7 +141,21 @@ import { listen } from '@tauri-apps/api/event'
     }
   }
 
+  let exportingCsv = $state(false)
   let exporting = $state(false)
+  async function doExportSeriesCsv() {
+    if (exportingCsv) return
+    exportingCsv = true
+    try {
+      const path = await exportSeriesCsv()
+      showToast(`Series CSV written: ${path}`)
+    } catch (err) {
+      showToast(humanError(err))
+    } finally {
+      exportingCsv = false
+    }
+  }
+
   async function doExportBackup() {
     if (exporting) return
     exporting = true
@@ -367,6 +382,9 @@ import { listen } from '@tauri-apps/api/event'
               </label>
               <button class="btn" onclick={() => doExportBackup()} disabled={exporting}>
                 {exporting ? 'Exporting…' : 'Export data…'}
+              </button>
+              <button class="btn" onclick={() => doExportSeriesCsv()} disabled={exportingCsv}>
+                {exportingCsv ? 'Exporting…' : 'Export CSV…'}
               </button>
             </div>
           {/if}

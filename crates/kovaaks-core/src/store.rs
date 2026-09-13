@@ -65,6 +65,14 @@ pub struct StoredSnapshot {
 
 /// The SQLite store. Cheap to clone; every method takes `&self` (the rusqlite
 /// connection sits behind a mutex, so a store handle can be shared freely).
+fn csv_escape(field: &str) -> String {
+    if field.contains(',') || field.contains('"') || field.contains('\n') {
+        format!("\"{}\"", field.replace('"', "\"\""))
+    } else {
+        field.to_string()
+    }
+}
+
 #[derive(Clone)]
 pub struct Store {
     conn: Arc<Mutex<Connection>>,
@@ -488,6 +496,43 @@ impl Store {
             out.insert(table.to_string(), serde_json::Value::Array(rows));
         }
         Ok(serde_json::Value::Object(out))
+    }
+
+    /// CSV export of the merged score series: one row per point with
+    /// benchmark_id, scenario, category, captured_at, score, source.
+    pub fn export_series_csv(&self, steam_id: &str) -> Result<String> {
+        let mut lines: Vec<String> =
+            vec!["benchmark_id,scenario,category,captured_at,score,source".to_string()];
+        let bids: Vec<i64> = self
+            .benchmarks_playing_rows(steam_id)?
+            .into_iter()
+            .map(|(bid, _, _)| bid)
+            .collect();
+        for bid in bids {
+            let history = self.history(steam_id, bid)?;
+            let Some(latest) = history.last() else {
+                continue;
+            };
+            let mut seen: std::collections::HashSet<(String, String)> = Default::default();
+            for row in &latest.scenarios {
+                if !seen.insert((row.category.clone(), row.scenario.clone())) {
+                    continue;
+                }
+                let series =
+                    crate::metrics::scenario_series_combined(self, steam_id, bid, &row.scenario)?;
+                for (at, score) in series {
+                    lines.push(format!(
+                        "{},{},{},{},{:.4},play",
+                        bid,
+                        csv_escape(&row.scenario),
+                        csv_escape(&row.category),
+                        at.to_rfc3339(),
+                        score
+                    ));
+                }
+            }
+        }
+        Ok(lines.join("\n"))
     }
 
     /// The player's favorited benchmark ids, pinned order (oldest first).
