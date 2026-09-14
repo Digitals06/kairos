@@ -8,7 +8,11 @@ If Kairos helps your grind, consider supporting development:
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q2S1237A82)
 
-![Kairos card list](docs/screenshots/overview-v014.png)
+![Kairos family benchmark grid](docs/screenshots/app-grid-v020.png)
+
+![Kairos family card expanded showing difficulty rung bars](docs/screenshots/app-family-v020.png)
+
+![Kairos weekly report strip with plays, streak, XP level and rank changes](docs/screenshots/app-weekly-v020.png)
 
 ## Features
 
@@ -25,7 +29,11 @@ If Kairos helps your grind, consider supporting development:
 - **Consistency & plateau tags** — grind targets show CV (spread of your recent plays) and flag scenarios stalled without a new personal best, so you can swap a stalled grind for something still climbing.
 - **Private by design** — no accounts, no telemetry; only public APIs, and live API tests skip unless you opt in.
 
-![Kairos benchmark detail](docs/screenshots/detail-avasive-s2-jennclick-v014.png)
+![Kairos Avasive S2 Easier detail header and stats](docs/screenshots/app-detail-top-v020.png)
+
+![Kairos score history chart with PB progression and consistency chips](docs/screenshots/app-detail-chart-v020.png)
+
+![Kairos what-to-grind-next panel with per-scenario targets and CV](docs/screenshots/app-grind-v020.png)
 
 ## How it works
 
