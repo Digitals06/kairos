@@ -880,22 +880,111 @@ pub mod commands {
             for c in &cards {
                 *counts.entry(c.benchmark_name.clone()).or_insert(0) += 1;
             }
-            let tier_depth = |card: &BenchmarkCard| -> usize {
+            // "Best rank" across the family: compare ABSOLUTE tier ordering —
+            // a maxxed easy tier (Platinum of a short ladder) must not beat a
+            // low tier of a harder difficulty (they are higher on the global
+            // evxl ladder). Global name order dominates; ladder-fraction breaks
+            // ties within the same tier name.
+            const GLOBAL_TIERS: &[&str] = &[
+                // food tiers (weakest known names first) then metals then
+                // crypto/misc families — ordered by observed evxl escalation.
+                "Berry",
+                "Pear",
+                "Cherry",
+                "Plum",
+                "Mango",
+                "Peach",
+                "Date",
+                "Olive",
+                "Grape",
+                "Fig",
+                "Litchi",
+                "Lychee",
+                "Recruit",
+                "Rookie",
+                "Novice",
+                "Apprentice",
+                "Advanced",
+                "Intermediate",
+                "Elite",
+                "Iron",
+                "Brass",
+                "Bronze",
+                "Silver",
+                "Gold",
+                "Platinum",
+                "Nova",
+                "Diamond",
+                "Astra",
+                "Master",
+                "Prophet",
+                "Grandmaster",
+                "Exponential",
+                "Tight",
+                "Mia",
+                "Archon",
+                "Ace",
+                "Viper",
+                "Greninja",
+                "Mythic",
+                "Seraphic",
+                "Jade",
+                "Tressym",
+                "Villain",
+                "Celestial",
+                "Sage",
+                "Greninja",
+                "Dragon",
+                "Legend",
+                "Immortal",
+                "DOGE",
+                "VIPER",
+                "ETH",
+                "BTC",
+                "Sage",
+                "Celestial",
+                "Grandmaster",
+                "Olympian",
+                "Paragon",
+            ];
+            let global_tier_rank = |name: &str| -> usize {
+                GLOBAL_TIERS
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case(name))
+                    .unwrap_or(0)
+            };
+            // Higher tuple wins: (global tier order, fraction-of-ladder).
+            let tier_strength = |card: &BenchmarkCard| -> (usize, f64) {
                 state
                     .registry
                     .by_id(card.benchmark_id as u64)
                     .and_then(|(_, diff)| {
-                        card.rank.as_ref().and_then(|tier| {
-                            diff.rank_colors.iter().position(|c| c.name == tier.name)
+                        card.rank.as_ref().map(|tier| {
+                            let idx = diff
+                                .rank_colors
+                                .iter()
+                                .position(|c| c.name == tier.name)
+                                .unwrap_or(0);
+                            let frac = if diff.rank_colors.is_empty() {
+                                0.0
+                            } else {
+                                (idx as f64) / (diff.rank_colors.len() as f64).max(1.0)
+                            };
+                            (global_tier_rank(&tier.name), frac)
                         })
                     })
-                    .unwrap_or(0)
+                    .unwrap_or((0, 0.0))
             };
             let mut folded: Vec<BenchmarkCard> = Vec::new();
             cards.sort_by(|a, b| a.benchmark_name.cmp(&b.benchmark_name));
             for chunk in cards.chunk_by(|a, b| a.benchmark_name == b.benchmark_name) {
                 let mut members: Vec<&BenchmarkCard> = chunk.iter().collect();
-                members.sort_by_key(|c| std::cmp::Reverse(tier_depth(c)));
+                members.sort_by(|a, b| {
+                    let (ga, fa) = tier_strength(a);
+                    let (gb, fb) = tier_strength(b);
+                    gb.cmp(&ga)
+                        .then(fb.partial_cmp(&fa).unwrap_or(std::cmp::Ordering::Equal))
+                });
                 let mut best = members[0].clone();
                 best.difficulty_count = counts
                     .get(&best.benchmark_name.clone())
