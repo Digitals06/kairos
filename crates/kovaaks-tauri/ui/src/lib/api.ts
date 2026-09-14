@@ -33,6 +33,7 @@ export interface BenchmarkCard {
   /** Single style (Static, Dynamic, …) when purely that style; null otherwise.
    *  Style tabs only match pure benchmarks (evxl semantics). */
   pure_type: string | null
+  difficulty_count?: number
 }
 
 export interface SyncReport {

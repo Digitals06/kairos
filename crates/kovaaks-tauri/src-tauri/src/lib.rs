@@ -76,6 +76,9 @@ pub struct BenchmarkCard {
     /// None for multi-style benchmarks (they only match family tabs).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pure_type: Option<String>,
+    /// Overview family fold: how many played difficulties this card aggregates
+    /// (1 = single difficulty; >1 = the rank shown is the family's best).
+    pub difficulty_count: u32,
 }
 
 /// One scenario row in the benchmark detail view.
@@ -736,6 +739,7 @@ pub mod commands {
                 .map(String::from)
                 .collect(),
             pure_type: kovaaks_core::bench_type::pure_style(bench).map(String::from),
+            difficulty_count: 1,
             is_favorite: favorite_ids.contains(&benchmark_id),
             snapshot_history: history
                 .iter()
@@ -855,13 +859,42 @@ pub mod commands {
                     cards.push(card);
                 }
             }
+            // Family fold (v0.2): one card per benchmark family, same layout.
+            // The shown rank/metrics are those of the played difficulty with
+            // the deepest tier in its own ladder; the card keeps the winner's
+            // kovaaks id so click-through opens that detail page.
+            let mut counts: std::collections::HashMap<String, u32> = Default::default();
+            for c in &cards {
+                *counts.entry(c.benchmark_name.clone()).or_insert(0) += 1;
+            }
+            let tier_depth = |card: &BenchmarkCard| -> usize {
+                state
+                    .registry
+                    .by_id(card.benchmark_id as u64)
+                    .and_then(|(_, diff)| {
+                        card.rank.as_ref().and_then(|tier| {
+                            diff.rank_colors.iter().position(|c| c.name == tier.name)
+                        })
+                    })
+                    .unwrap_or(0)
+            };
+            let mut folded: Vec<BenchmarkCard> = Vec::new();
+            cards.sort_by(|a, b| a.benchmark_name.cmp(&b.benchmark_name));
+            for chunk in cards.chunk_by(|a, b| a.benchmark_name == b.benchmark_name) {
+                let mut best = chunk.iter().max_by_key(|c| tier_depth(c)).cloned().unwrap();
+                best.difficulty_count = counts
+                    .get(&best.benchmark_name.clone())
+                    .copied()
+                    .unwrap_or(1);
+                folded.push(best);
+            }
             // Favorites pinned on top (pin order), then alphabetical.
-            cards.sort_by(|a, b| {
+            folded.sort_by(|a, b| {
                 b.is_favorite
                     .cmp(&a.is_favorite)
                     .then_with(|| a.benchmark_name.cmp(&b.benchmark_name))
             });
-            Ok(cards)
+            Ok(folded)
         })
         .await
         .map_err(|e| format!("overview join error: {e}"))?
@@ -1333,6 +1366,7 @@ mod tests {
             snapshot_history: vec![],
             benchmark_types: vec!["Clicking".into(), "Tracking".into()],
             pure_type: None,
+            difficulty_count: 2,
         };
         let json = serde_json::to_string(&card).unwrap();
         for key in [

@@ -40,6 +40,9 @@
     <div class="names">
       <h3 title={card.benchmark_name}>{card.benchmark_name}</h3>
       <span class="diff">{card.difficulty_name}</span>
+      {#if (card.difficulty_count ?? 1) > 1}
+        <span class="diff-count">×{card.difficulty_count}</span>
+      {/if}
     </div>
     <RankBadge tier={card.rank} />
   </header>
@@ -128,5 +131,13 @@
     color: var(--muted);
     letter-spacing: 0.08em;
     text-transform: uppercase;
+  }
+
+  .diff-count {
+    font-size: 10px;
+    color: var(--accent-2, #00e5ff);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
   }
 </style>
