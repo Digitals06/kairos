@@ -76,9 +76,28 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 - [x] Rank coverage gap audit — last drifted method (`Good-Energy`) ported; no
   API-fallback families remain
 - [x] Scenario deep pages with PB progression and plateau detection
-- [ ] Windows installer (NSIS via Tauri bundler)
+
+## v0.2.1 — next (small polish)
+
+- [ ] Grind chips on overview family cards (X runs to next tier / plateaued
+  badges inline; reuses the grind payloads family cards already carry)
+- [ ] Time-trained estimate in the weekly strip (scored-play minutes; labeled
+  score-time, never guessed)
+
+## v0.3.0 — next (bigger builds)
+
+- [ ] Tray mode: background watcher keeps the app fresh while KovaaK's runs;
+  auto-launch optional
+- [ ] Reconcile view: API snapshot vs local CSV discrepancy report, per-card
+  mismatch chip (hidden when in sync)
+- [ ] Grind session coach: while KovaaK's runs, the app surfaces the next 3
+  scenarios to grind for the selected family (no game overlay, app polling
+  only)
+- [ ] Discord share card: composed PNG export (benchmark table, weekly strip +
+  level bar)
+- [ ] Opt-in global leaderboards: per-scenario global ranks/percentiles, cached
+  hard, off by default — local-only rank engine untouched
 
 ## Later (unpromised)
 
-- Tray mode; auto-launch when KovaaK's starts
-- Reconcile view: API vs local CSV discrepancy report
+- Windows installer (NSIS via Tauri bundler) — dropped from v0.2.1, revisit later
