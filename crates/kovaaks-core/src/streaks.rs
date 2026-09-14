@@ -95,11 +95,18 @@ pub fn streak_summary(store: &Store, steam_id: &str) -> crate::Result<StreakSumm
                 continue;
             }
             let series = metrics::scenario_series_combined(store, steam_id, bid, &row.scenario)?;
-            let mut high = 0.0_f64;
+            // The FIRST score on a scenario is a baseline, not an achievement —
+            // otherwise playing thousands of never-touched scenarios prints XP.
+            // A PB only counts when it beats an existing high.
+            let mut high: Option<f64> = None;
             for (_, score) in &series {
-                if *score > high {
-                    xp += 10;
-                    high = *score;
+                match high {
+                    None => high = Some(*score),
+                    Some(h) if *score > h => {
+                        xp += 10;
+                        high = Some(*score);
+                    }
+                    _ => {}
                 }
             }
         }
@@ -127,18 +134,21 @@ pub struct Level {
 }
 
 const LEVEL_STEPS: &[(&str, u64)] = &[
-    ("Recruit", 0),
-    ("Bronze", 250),
-    ("Silver", 750),
-    ("Gold", 1500),
-    ("Platinum", 3_000),
-    ("Diamond", 6_000),
-    ("Master", 12_000),
-    ("Grandmaster", 25_000),
-    ("Nova", 50_000),
-    ("Astra", 100_000),
-    ("Immortal", 200_000),
-    ("Radiant", 400_000),
+    // Greek progression themed on Kairos (καιρός — the opportune moment):
+    // Void → Spark of the moment → pursuit → mastery of time → godhood of
+    // timing. Peak requires years of steady grinding.
+    ("Kenodoxos", 0),        // Kenodoxos — empty vessel, the beginning
+    ("Arche", 500),          // ἀρχή — the origin, first principle
+    ("Praxis", 2_000),       // practice, action
+    ("Askēsis", 6_000),      // disciplined training
+    ("Meletē", 15_000),      // study, devoted care
+    ("Prokopē", 40_000),     // making progress, advancement
+    ("Katartisis", 100_000), // perfecting, thorough preparation
+    ("Metron", 250_000),     // measure — command of the fundamentals
+    ("Kairos", 600_000),     // THE app's namesake: the supreme opportune moment
+    ("Kronos", 1_400_000),   // time itself — mastery over the grind
+    ("Aion", 3_000_000),     // eternity — the grind that never ends
+    ("Noumenon", 7_000_000), // the thing-in-itself — truth beyond perception
 ];
 
 /// Resolve the level for a lifetime XP total.
@@ -175,15 +185,16 @@ mod tests {
     #[test]
     fn level_from_xp_climbs() {
         let l0 = level_from_xp(0);
-        assert_eq!((l0.level, l0.name), (1, "Recruit"));
+        assert_eq!((l0.level, l0.name), (1, "Kenodoxos"));
         assert_eq!(l0.progress_pct, 0);
-        let l1 = level_from_xp(700);
-        assert_eq!(l1.name, "Bronze", "700 xp lands inside Bronze (250..750)");
-        let l2 = level_from_xp(900);
-        assert_eq!(l2.name, "Silver", "900 xp lands inside Silver (750..1500)");
+        let l1 = level_from_xp(2_500);
+        assert_eq!(
+            l1.name, "Praxis",
+            "2_500 lands inside Praxis (2_000..6_000)"
+        );
         assert!(l1.progress_pct > 0 && l1.progress_pct < 100);
         let top = level_from_xp(u64::MAX);
-        assert_eq!(top.name, "Radiant");
+        assert_eq!(top.name, "Noumenon");
         assert_eq!(top.progress_pct, 100);
     }
 
