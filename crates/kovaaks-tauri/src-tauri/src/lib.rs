@@ -161,6 +161,21 @@ pub struct ScenarioHistorySeries {
     /// "snapshot" (synced scores) or "local" (CSV plays — no synced score).
     pub source: ScenarioHistorySource,
     pub points: Vec<ScenarioHistoryPoint>,
+    /// Running-high progression: one point per PB (chronological).
+    pub pb_points: Vec<ScenarioHistoryPoint>,
+    /// Plateau/CV summary for the whole series (see kovaaks consistency).
+    pub plateau: PlateauInfo,
+}
+
+/// Plateau state for a scenario series.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PlateauInfo {
+    pub days_since_pb: f64,
+    pub plateaued: bool,
+    /// Coefficient of variation over the recent window (0..~1).
+    pub cv: f64,
+    pub best: f64,
 }
 
 /// One (time, score) point of a scenario's history.
@@ -1123,26 +1138,61 @@ pub mod commands {
             let scenario_history: Vec<ScenarioHistorySeries> =
                 kovaaks_core::metrics::build_scenario_history(&history, &plays)
                     .into_iter()
-                    .map(|s| ScenarioHistorySeries {
-                        scenario: s.scenario,
-                        category: s.category,
-                        source: match s.source {
-                            kovaaks_core::metrics::ScenarioSeriesSource::Snapshot => {
-                                ScenarioHistorySource::Snapshot
+                    .map(|s| {
+                        // PB progression + plateau analytics straight from the
+                        // point stream (delayed PB view shared with the
+                        // consistency module's semantics).
+                        let mut running = 0.0_f64;
+                        let mut pb_points: Vec<ScenarioHistoryPoint> = Vec::new();
+                        for p in &s.points {
+                            if (p.score as f64) > running {
+                                running = p.score as f64;
+                                pb_points.push(ScenarioHistoryPoint {
+                                    captured_at: p.at.to_rfc3339(),
+                                    score: p.score,
+                                    from_play: p.from_play,
+                                });
                             }
-                            kovaaks_core::metrics::ScenarioSeriesSource::Local => {
-                                ScenarioHistorySource::Local
-                            }
-                        },
-                        points: s
-                            .points
-                            .into_iter()
-                            .map(|p| ScenarioHistoryPoint {
-                                captured_at: p.at.to_rfc3339(),
-                                score: p.score,
-                                from_play: p.from_play,
-                            })
-                            .collect(),
+                        }
+                        let raw: Vec<(chrono::DateTime<chrono::Utc>, f64)> =
+                            s.points.iter().map(|p| (p.at, p.score as f64)).collect();
+                        let cs = kovaaks_core::consistency::scenario_consistency(&raw);
+                        let first = s.points.first().map(|p| p.score as f64);
+                        // A single point is never a PB "progression" nor a
+                        // plateau: surface both as neutral.
+                        let pb_points = if s.points.len() <= 1 {
+                            Vec::new()
+                        } else {
+                            pb_points
+                        };
+                        ScenarioHistorySeries {
+                            scenario: s.scenario,
+                            category: s.category,
+                            source: match s.source {
+                                kovaaks_core::metrics::ScenarioSeriesSource::Snapshot => {
+                                    ScenarioHistorySource::Snapshot
+                                }
+                                kovaaks_core::metrics::ScenarioSeriesSource::Local => {
+                                    ScenarioHistorySource::Local
+                                }
+                            },
+                            points: s
+                                .points
+                                .into_iter()
+                                .map(|p| ScenarioHistoryPoint {
+                                    captured_at: p.at.to_rfc3339(),
+                                    score: p.score,
+                                    from_play: p.from_play,
+                                })
+                                .collect(),
+                            pb_points,
+                            plateau: PlateauInfo {
+                                days_since_pb: cs.plateau_days,
+                                plateaued: cs.plateaued,
+                                cv: cs.cv,
+                                best: cs.best.max(first.unwrap_or(0.0)),
+                            },
+                        }
                     })
                     .collect();
 
@@ -1518,6 +1568,13 @@ mod tests {
                     score: 1282,
                     from_play: false,
                 }],
+                pb_points: Vec::new(),
+                plateau: PlateauInfo {
+                    days_since_pb: 0.0,
+                    plateaued: false,
+                    cv: 0.0,
+                    best: 1282.0,
+                },
             }],
             rank_tiers: vec![
                 RankTier {

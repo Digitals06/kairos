@@ -110,6 +110,14 @@ export interface ScenarioHistorySeries {
   /** "snapshot" (synced scores) or "local" (CSV plays — no synced score). */
   source: string
   points: ScenarioHistoryPoint[]
+  /** Running-high PB progression (chronological). */
+  pb_points: ScenarioHistoryPoint[]
+  plateau: {
+    days_since_pb: number
+    plateaued: boolean
+    cv: number
+    best: number
+  }
 }
 
 export interface BenchmarkDetail {

@@ -75,6 +75,21 @@
     return detail.scenario_metrics?.[chartScope] ?? null
   })
 
+  // Plateau/PB-progression summary of the selected scenario (both snapshot
+  // + local series merged, backend-computed).
+  const activeProgression = $derived.by(() => {
+    if (!detail || !chartScope) return null
+    const s = detail.scenario_history.find((h) => h.scenario === chartScope)
+    if (!s || s.points.length < 2) return null
+    return s.plateau
+  })
+
+  const pbCount = $derived.by(() => {
+    if (!detail || !chartScope) return 0
+    const s = detail.scenario_history.find((h) => h.scenario === chartScope)
+    return s?.pb_points?.length ?? 0
+  })
+
   // --- evxl-style rank threshold matrix ---------------------------------------
   // Each scenario row shows the score thresholds for every tier (from the
   // scenario's rank_maxes), colored by tier, with the achieved tiers shaded;
@@ -348,7 +363,23 @@
           </p>
         {/if}
       </section>
-    {/if}        <div class="stat-row">
+    {/if}
+
+    {#if activeProgression}
+      <div class="prog-chips">
+        <span class="chip" class:hot={activeProgression.plateaued}>
+          {activeProgression.plateaued ? '⚠ PLATEAUED' : '▲ progressing'}
+        </span>
+        <span class="chip">{pbCount} PB{pbCount === 1 ? '' : 's'}</span>
+        <span class="chip">
+          {activeProgression.days_since_pb >= 999 ? 'single sample' : `${Math.floor(activeProgression.days_since_pb)}d since PB`}
+        </span>
+        <span class="chip" class:warn={activeProgression.cv < 0.08}>
+          CV {(activeProgression.cv * 100).toFixed(0)}%
+        </span>
+      </div>
+    {/if}
+    <div class="stat-row">
       {#if activeMetrics}
         <div class="stat-card">
           <span class="stat-label">Avg Score</span>
