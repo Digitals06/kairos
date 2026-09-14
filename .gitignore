@@ -12,3 +12,6 @@ dist/
 # Local-only debug tooling (CDP probes etc.) — never push these
 /scripts/
 make_icon.py
+
+# Local agent/tool state (never ship tool folders)
+.hermes/
