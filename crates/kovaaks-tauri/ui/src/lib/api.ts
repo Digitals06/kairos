@@ -40,6 +40,8 @@ export interface BenchmarkCard {
     benchmark_id: number
     difficulty_name: string
     rank: { name: string; color: string } | null
+    tier_names: string[]
+    current_rank: number
   }[]
 }
 

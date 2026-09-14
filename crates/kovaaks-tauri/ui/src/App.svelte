@@ -22,8 +22,7 @@ import { listen } from '@tauri-apps/api/event'
   import BenchmarkCardView from './lib/BenchmarkCardView.svelte'
   import Detail from './lib/Detail.svelte'
   import Weekly from './lib/Weekly.svelte'
-  import Dashboard from './lib/Dashboard.svelte'
-  import { humanError } from './lib/errors'
+    import { humanError } from './lib/errors'
 
   // --- app flow state --------------------------------------------------------
   type Screen = 'loading' | 'setup' | 'overview'
@@ -264,7 +263,6 @@ import { listen } from '@tauri-apps/api/event'
 
   // --- detail drill-down (client-side state, no router lib) -------------------
   let selectedBenchmarkId = $state<number | null>(null)
-  let showDashboard = $state(false)
 
   // --- search filter + favorites ----------------------------------------------
   // Benchmark-type filter (evxl-style tabs): empty selection = show all.
@@ -346,8 +344,6 @@ import { listen } from '@tauri-apps/api/event'
         <span class="persona">{profile.persona}</span>
       </div>
 
-      <button class="btn" onclick={() => (showDashboard = true)}>Dashboard</button>
-
       <div class="sync-cluster">
         <span class="last-synced num" class:stale={isStale}>
           {fmtLastSynced()}{#if isStale}<span class="stale-badge">STALE</span>{/if}
@@ -398,9 +394,7 @@ import { listen } from '@tauri-apps/api/event'
     </header>
 
     <main>
-      {#if showDashboard}
-        <Dashboard onback={() => (showDashboard = false)} onselect={(id) => { showDashboard = false; selectedBenchmarkId = id; }} />
-      {:else if selectedBenchmarkId !== null}
+      {#if selectedBenchmarkId !== null}
         <Detail benchmarkId={selectedBenchmarkId} onback={closeDetail} />
       {:else}
         <Weekly />

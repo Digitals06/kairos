@@ -91,6 +91,10 @@ pub struct BenchmarkVariant {
     pub benchmark_id: i64,
     pub difficulty_name: String,
     pub rank: Option<RankTier>,
+    /// difficulty's tier ladder for rung bars in the overview unroll.
+    pub tier_names: Vec<String>,
+    /// achieved tier index (0-based, -1 unranked).
+    pub current_rank: i64,
 }
 
 /// One scenario row in the benchmark detail view.
@@ -944,10 +948,32 @@ pub mod commands {
                     .unwrap_or(1);
                 best.variants = members
                     .iter()
-                    .map(|c| BenchmarkVariant {
-                        benchmark_id: c.benchmark_id,
-                        difficulty_name: c.difficulty_name.clone(),
-                        rank: c.rank.clone(),
+                    .map(|c| {
+                        let (tier_names, current_rank) = state
+                            .registry
+                            .by_id(c.benchmark_id as u64)
+                            .map(|(_, diff)| {
+                                let names: Vec<String> = diff
+                                    .rank_colors
+                                    .iter()
+                                    .map(|r| r.name.to_string())
+                                    .collect();
+                                let idx = c
+                                    .rank
+                                    .as_ref()
+                                    .and_then(|t| names.iter().position(|n| n == &t.name))
+                                    .map(|i| i as i64)
+                                    .unwrap_or(-1);
+                                (names, idx)
+                            })
+                            .unwrap_or_default();
+                        BenchmarkVariant {
+                            benchmark_id: c.benchmark_id,
+                            difficulty_name: c.difficulty_name.clone(),
+                            rank: c.rank.clone(),
+                            tier_names,
+                            current_rank,
+                        }
                     })
                     .collect();
                 folded.push(best);

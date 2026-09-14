@@ -2,6 +2,13 @@
   import type { BenchmarkCard } from '../api'
   import RankBadge from './RankBadge.svelte'
 
+  const TIER_COLORS: Record<string, string> = {
+    Recruit: '#8d99a6', Iron: '#999999', Bronze: '#ff9900', Silver: '#cbd9e6',
+    Gold: '#cab148', Platinum: '#4fd1c5', Diamond: '#48bbf7', Master: '#b560f0',
+    Grandmaster: '#ff2e88', Nova: '#7ce4a8', Astra: '#7ce4a8', Berry: '#9070d8',
+    Pear: '#8ad05f', Cherry: '#e14b65',
+  }
+
   let {
     card,
     onclick,
@@ -74,6 +81,18 @@
       {#each card.variants ?? [] as v (v.benchmark_id)}
         <button class="variant-row" onclick={(e) => variantClick(e, v.benchmark_id)}>
           <span class="variant-diff">{v.difficulty_name}</span>
+          {#if v.tier_names?.length}
+            <span class="rung-bar">
+              {#each v.tier_names as t, i}
+                <span
+                  class="rung"
+                  class:lit={i <= v.current_rank}
+                  style={`--c:${TIER_COLORS[t] ?? '#566b85'}`}
+                  title={t}
+                ></span>
+              {/each}
+            </span>
+          {/if}
           <RankBadge tier={v.rank} />
         </button>
       {/each}
@@ -125,6 +144,24 @@
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.08em;
+    flex: none;
+  }
+
+  .rung-bar {
+    flex: 1;
+    display: flex;
+    gap: 3px;
+  }
+
+  .rung {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--c) 18%, transparent);
+  }
+
+  .rung.lit {
+    background: var(--c);
   }
 
   .card.favorited {
