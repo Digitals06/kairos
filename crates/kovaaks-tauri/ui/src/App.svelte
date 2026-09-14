@@ -444,6 +444,7 @@ import { listen } from '@tauri-apps/api/event'
               <BenchmarkCardView
                 {card}
                 onclick={() => openDetail(card.benchmark_id)}
+                onselectvariant={(id) => openDetail(id)}
                 ontogglefavorite={() => toggleFavoriteLocal(card.benchmark_id)}
               />
             {/each}

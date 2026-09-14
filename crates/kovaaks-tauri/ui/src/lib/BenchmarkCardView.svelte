@@ -5,28 +5,37 @@
   let {
     card,
     onclick,
+    onselectvariant,
     ontogglefavorite,
-  }: { card: BenchmarkCard; onclick?: () => void; ontogglefavorite?: () => void } = $props()
+  }: {
+    card: BenchmarkCard
+    onclick?: () => void
+    onselectvariant?: (id: number) => void
+    ontogglefavorite?: () => void
+  } = $props()
+
+  let expanded = $state(false)
 
   function onFavClick(e: MouseEvent) {
     e.stopPropagation()
     ontogglefavorite?.()
   }
-</script>
 
-<article
-  class="panel card"
-  class:favorited={card.is_favorite}
-  role="button"
-  tabindex="0"
-  onclick={onclick}
-  onkeydown={(e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
+  function toggleHeader(e: MouseEvent) {
+    if ((card.variants?.length ?? 0) > 0) {
+      expanded = !expanded
+    } else {
       onclick?.()
     }
-  }}
->
+  }
+
+  function variantClick(e: MouseEvent, id: number) {
+    e.stopPropagation()
+    onselectvariant?.(id)
+  }
+</script>
+
+<article class="panel card" class:favorited={card.is_favorite} class:expanded>
   <button
     class="fav-btn"
     class:active={card.is_favorite}
@@ -36,16 +45,36 @@
   >
     ★
   </button>
-  <header>
+  <header
+    role="button"
+    tabindex="0"
+    onclick={toggleHeader}
+    onkeydown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        toggleHeader(e)
+      }
+    }}
+  >
     <div class="names">
       <h3 title={card.benchmark_name}>{card.benchmark_name}</h3>
       <span class="diff">{card.difficulty_name}</span>
       {#if (card.difficulty_count ?? 1) > 1}
-        <span class="diff-count">×{card.difficulty_count}</span>
+        <span class="diff-count">{expanded ? '▾' : '▸'} {card.difficulty_count}</span>
       {/if}
     </div>
     <RankBadge tier={card.rank} />
   </header>
+  {#if expanded}
+    <div class="variants">
+      {#each card.variants ?? [] as v (v.benchmark_id)}
+        <button class="variant-row" onclick={(e) => variantClick(e, v.benchmark_id)}>
+          <span class="variant-diff">{v.difficulty_name}</span>
+          <RankBadge tier={v.rank} />
+        </button>
+      {/each}
+    </div>
+  {/if}
 </article>
 
 <style>
@@ -53,9 +82,45 @@
     position: relative;
     display: flex;
     align-items: center;
+    flex-direction: column;
     padding: 14px 16px;
     cursor: pointer;
     transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  }
+
+  .variants {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+
+  .variant-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .variant-row:hover {
+    border-color: var(--accent-2);
+  }
+
+  .variant-diff {
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
   .card.favorited {

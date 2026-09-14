@@ -79,6 +79,18 @@ pub struct BenchmarkCard {
     /// Overview family fold: how many played difficulties this card aggregates
     /// (1 = single difficulty; >1 = the rank shown is the family's best).
     pub difficulty_count: u32,
+    /// All played difficulties of the family, best-first; the UI unrolls
+    /// these inside the card. Populated when difficulty_count > 1.
+    pub variants: Vec<BenchmarkVariant>,
+}
+
+/// One difficulty of a folded family card.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BenchmarkVariant {
+    pub benchmark_id: i64,
+    pub difficulty_name: String,
+    pub rank: Option<RankTier>,
 }
 
 /// One scenario row in the benchmark detail view.
@@ -740,6 +752,7 @@ pub mod commands {
                 .collect(),
             pure_type: kovaaks_core::bench_type::pure_style(bench).map(String::from),
             difficulty_count: 1,
+            variants: Vec::new(),
             is_favorite: favorite_ids.contains(&benchmark_id),
             snapshot_history: history
                 .iter()
@@ -881,11 +894,21 @@ pub mod commands {
             let mut folded: Vec<BenchmarkCard> = Vec::new();
             cards.sort_by(|a, b| a.benchmark_name.cmp(&b.benchmark_name));
             for chunk in cards.chunk_by(|a, b| a.benchmark_name == b.benchmark_name) {
-                let mut best = chunk.iter().max_by_key(|c| tier_depth(c)).cloned().unwrap();
+                let mut members: Vec<&BenchmarkCard> = chunk.iter().collect();
+                members.sort_by_key(|c| std::cmp::Reverse(tier_depth(c)));
+                let mut best = members.remove(0).clone();
                 best.difficulty_count = counts
                     .get(&best.benchmark_name.clone())
                     .copied()
                     .unwrap_or(1);
+                best.variants = members
+                    .iter()
+                    .map(|c| BenchmarkVariant {
+                        benchmark_id: c.benchmark_id,
+                        difficulty_name: c.difficulty_name.clone(),
+                        rank: c.rank.clone(),
+                    })
+                    .collect();
                 folded.push(best);
             }
             // Favorites pinned on top (pin order), then alphabetical.
@@ -1367,6 +1390,7 @@ mod tests {
             benchmark_types: vec!["Clicking".into(), "Tracking".into()],
             pure_type: None,
             difficulty_count: 2,
+            variants: vec![],
         };
         let json = serde_json::to_string(&card).unwrap();
         for key in [

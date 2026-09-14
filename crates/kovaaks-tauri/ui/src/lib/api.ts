@@ -34,6 +34,13 @@ export interface BenchmarkCard {
    *  Style tabs only match pure benchmarks (evxl semantics). */
   pure_type: string | null
   difficulty_count?: number
+  /** All played difficulties of the family, best-first (populated when
+   *  difficulty_count > 1); the card unrolls these inline. */
+  variants?: {
+    benchmark_id: number
+    difficulty_name: string
+    rank: { name: string; color: string } | null
+  }[]
 }
 
 export interface SyncReport {
