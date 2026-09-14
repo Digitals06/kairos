@@ -305,6 +305,59 @@ impl From<kovaaks_core::weekly::WeeklyReport> for WeeklyReportDto {
     }
 }
 
+/// Wire mirror of `kovaaks_core::dashboard::DashboardRollup`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DashboardRollupDto {
+    pub sections: Vec<DashboardSectionDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DashboardSectionDto {
+    pub category: String,
+    pub benchmarks: Vec<DashboardRowDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DashboardRowDto {
+    pub benchmark_id: i64,
+    pub benchmark_name: String,
+    pub current_rank: i64,
+    pub current_tier: String,
+    pub tier_names: Vec<String>,
+    pub series: Vec<(String, String)>,
+    pub benchmark_progress: i64,
+}
+
+impl From<kovaaks_core::dashboard::DashboardRollup> for DashboardRollupDto {
+    fn from(r: kovaaks_core::dashboard::DashboardRollup) -> Self {
+        Self {
+            sections: r
+                .sections
+                .into_iter()
+                .map(|s| DashboardSectionDto {
+                    category: s.category,
+                    benchmarks: s
+                        .benchmarks
+                        .into_iter()
+                        .map(|b| DashboardRowDto {
+                            benchmark_id: b.benchmark_id,
+                            benchmark_name: b.benchmark_name,
+                            current_rank: b.current_rank,
+                            current_tier: b.current_tier,
+                            tier_names: b.tier_names,
+                            series: b.series,
+                            benchmark_progress: b.benchmark_progress,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
 /// App settings (persisted as a JSON blob in the store's meta table).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case", default)]
@@ -1023,6 +1076,27 @@ pub mod commands {
         Ok(ingest_status_from(&state.store))
     }
 
+    /// Dashboard money shot: banking sections (one per category) with each
+    /// benchmark's tier history over time.
+    #[tauri::command]
+    pub async fn dashboard_rollup(
+        state: State<'_, AppState>,
+    ) -> Result<DashboardRollupDto, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .map(|p| p.steam_id)
+            .ok_or("no profile connected")?;
+        let store = state.store.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            kovaaks_core::dashboard::dashboard_rollup(&store, &steam_id)
+                .map(DashboardRollupDto::from)
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| format!("dashboard join error: {e}"))?
+    }
+
     /// Week-at-a-glance report (7-day window): plays, PBs, top improvements,
     /// rank changes. Frontend camelCase-enforced by the DTO test.
     #[tauri::command]
@@ -1205,6 +1279,7 @@ pub fn run() {
             commands::export_backup,
             commands::export_series_csv,
             commands::weekly_report,
+            commands::dashboard_rollup,
             commands::get_settings,
             commands::set_settings,
             commands::toggle_favorite,

@@ -241,3 +241,26 @@ export function setSettings(settings: AppSettings): Promise<void> {
 export function toggleFavorite(benchmarkId: number): Promise<boolean> {
   return invoke('toggle_favorite', { benchmarkId })
 }
+
+export interface DashboardRow {
+  benchmark_id: number
+  benchmark_name: string
+  current_rank: number
+  current_tier: string
+  tier_names: string[]
+  series: [string, string][]
+  benchmark_progress: number
+}
+
+export interface DashboardSection {
+  category: string
+  benchmarks: DashboardRow[]
+}
+
+export interface DashboardRollup {
+  sections: DashboardSection[]
+}
+
+export function dashboardRollup(): Promise<DashboardRollup> {
+  return invoke('dashboard_rollup')
+}
