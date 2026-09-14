@@ -400,22 +400,10 @@ import { listen } from '@tauri-apps/api/event'
     <main>
       {#if showDashboard}
         <Dashboard onback={() => (showDashboard = false)} onselect={(id) => { showDashboard = false; selectedBenchmarkId = id; }} />
-      {:else}
-      <Weekly />
-      {#if selectedBenchmarkId !== null}
+      {:else if selectedBenchmarkId !== null}
         <Detail benchmarkId={selectedBenchmarkId} onback={closeDetail} />
-      {:else if loadingOverview && cards.length === 0}
-        <div class="grid">
-          {#each Array(6) as _, i (i)}
-            <div class="skeleton"></div>
-          {/each}
-        </div>
-      {:else if cards.length === 0}
-        <div class="empty panel">
-          <p>No benchmarks yet.</p>
-          <p class="muted">Hit <strong>Sync Now</strong> to pull your KovaaK's benchmark data.</p>
-        </div>
       {:else}
+        <Weekly />
         <div class="search-row">
           <input
             class="search-input"
@@ -461,7 +449,6 @@ import { listen } from '@tauri-apps/api/event'
             {/each}
           </div>
         {/if}
-      {/if}
       {/if}
     </main>
   </div>

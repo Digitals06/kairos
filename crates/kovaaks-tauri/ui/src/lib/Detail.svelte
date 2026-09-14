@@ -276,52 +276,6 @@
       <RankBadge tier={detail.card.rank} />
     </header>
 
-    <div class="stat-row">
-      {#if activeMetrics}
-        <div class="stat-card">
-          <span class="stat-label">Avg Score</span>
-          <span class="stat-value num">{fmtScore(activeMetrics.avg_score)}</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">High Score</span>
-          <span class="stat-value num">{fmtScore(activeMetrics.high_score)}</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Avg Improvement % (30d)</span>
-          <span class="stat-value num" class:up={(activeMetrics.avg_improvement_pct ?? 0) > 0}>
-            {fmtPct(activeMetrics.avg_improvement_pct)}
-          </span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">High Improvement % (30d)</span>
-          <span class="stat-value num" class:up={(activeMetrics.high_improvement_pct ?? 0) > 0}>
-            {fmtPct(activeMetrics.high_improvement_pct)}
-          </span>
-        </div>
-      {:else}
-        <div class="stat-card">
-          <span class="stat-label">Avg Score</span>
-          <span class="stat-value num">{fmtScore(detail.card.avg_score)}</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">High Score</span>
-          <span class="stat-value num">{fmtScore(detail.card.high_score)}</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Avg Improvement % (30d)</span>
-          <span class="stat-value num" class:up={(detail.card.avg_improvement_pct ?? 0) > 0}>
-            {fmtPct(detail.card.avg_improvement_pct)}
-          </span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">High Improvement % (30d)</span>
-          <span class="stat-value num" class:up={(detail.card.high_improvement_pct ?? 0) > 0}>
-            {fmtPct(detail.card.high_improvement_pct)}
-          </span>
-        </div>
-      {/if}
-    </div>
-
     {#if grind && !grind.complete}
       <section class="panel grind-panel">
         <h3>What to grind next</h3>
@@ -394,7 +348,52 @@
           </p>
         {/if}
       </section>
-    {/if}
+    {/if}        <div class="stat-row">
+      {#if activeMetrics}
+        <div class="stat-card">
+          <span class="stat-label">Avg Score</span>
+          <span class="stat-value num">{fmtScore(activeMetrics.avg_score)}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">High Score</span>
+          <span class="stat-value num">{fmtScore(activeMetrics.high_score)}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Avg Improvement % (30d)</span>
+          <span class="stat-value num" class:up={(activeMetrics.avg_improvement_pct ?? 0) > 0}>
+            {fmtPct(activeMetrics.avg_improvement_pct)}
+          </span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">High Improvement % (30d)</span>
+          <span class="stat-value num" class:up={(activeMetrics.high_improvement_pct ?? 0) > 0}>
+            {fmtPct(activeMetrics.high_improvement_pct)}
+          </span>
+        </div>
+      {:else}
+        <div class="stat-card">
+          <span class="stat-label">Avg Score</span>
+          <span class="stat-value num">{fmtScore(detail.card.avg_score)}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">High Score</span>
+          <span class="stat-value num">{fmtScore(detail.card.high_score)}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Avg Improvement % (30d)</span>
+          <span class="stat-value num" class:up={(detail.card.avg_improvement_pct ?? 0) > 0}>
+            {fmtPct(detail.card.avg_improvement_pct)}
+          </span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">High Improvement % (30d)</span>
+          <span class="stat-value num" class:up={(detail.card.high_improvement_pct ?? 0) > 0}>
+            {fmtPct(detail.card.high_improvement_pct)}
+          </span>
+        </div>
+      {/if}
+    </div>
+
 
     {#if detail.snapshot_history.length === 0}
       <div class="empty-state panel">
