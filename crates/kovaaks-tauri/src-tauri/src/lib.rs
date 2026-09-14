@@ -896,7 +896,7 @@ pub mod commands {
             for chunk in cards.chunk_by(|a, b| a.benchmark_name == b.benchmark_name) {
                 let mut members: Vec<&BenchmarkCard> = chunk.iter().collect();
                 members.sort_by_key(|c| std::cmp::Reverse(tier_depth(c)));
-                let mut best = members.remove(0).clone();
+                let mut best = members[0].clone();
                 best.difficulty_count = counts
                     .get(&best.benchmark_name.clone())
                     .copied()

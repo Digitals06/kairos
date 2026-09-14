@@ -58,7 +58,11 @@
   >
     <div class="names">
       <h3 title={card.benchmark_name}>{card.benchmark_name}</h3>
-      <span class="diff">{card.difficulty_name}</span>
+      {#if (card.difficulty_count ?? 1) === 1}
+        <span class="diff">{card.difficulty_name}</span>
+      {:else}
+        <span class="diff muted-label">best of {card.difficulty_count}</span>
+      {/if}
       {#if (card.difficulty_count ?? 1) > 1}
         <span class="diff-count">{expanded ? '▾' : '▸'} {card.difficulty_count}</span>
       {/if}
@@ -196,6 +200,10 @@
     color: var(--muted);
     letter-spacing: 0.08em;
     text-transform: uppercase;
+  }
+
+  .muted-label {
+    opacity: 0.75;
   }
 
   .diff-count {
