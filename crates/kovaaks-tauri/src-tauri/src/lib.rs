@@ -880,98 +880,38 @@ pub mod commands {
             for c in &cards {
                 *counts.entry(c.benchmark_name.clone()).or_insert(0) += 1;
             }
-            // "Best rank" across the family: compare ABSOLUTE tier ordering —
-            // a maxxed easy tier (Platinum of a short ladder) must not beat a
-            // low tier of a harder difficulty (they are higher on the global
-            // evxl ladder). Global name order dominates; ladder-fraction breaks
-            // ties within the same tier name.
-            const GLOBAL_TIERS: &[&str] = &[
-                // evxl tier escalation observed across benchmark families;
-                // within the Voltaic metals this is the canonical ladder:
-                // Novice < Gold < Platinum < Diamond < Master < Grandmaster
-                // < Nova < Astra. Food/crypto families rank lower here and
-                // are approximations where evxl does not expose one ladder.
-                "Recruit",
-                "Rookie",
-                "Novice",
-                "Apprentice",
-                "Gold",
-                "Brass",
-                "Bronze",
-                "Silver",
-                "Platinum",
-                "Diamond",
-                "Elite",
-                "Intermediate",
-                "Advanced",
-                "Master",
-                "Grandmaster",
-                "Nova",
-                "Astra",
-                "Berry",
-                "Pear",
-                "Cherry",
-                "Plum",
-                "Mango",
-                "Peach",
-                "Date",
-                "Olive",
-                "Grape",
-                "Fig",
-                "Litchi",
-                "Lychee",
-                "ETH",
-                "DOGE",
-                "VIPER",
-                "BTC",
-                "Exponential",
-                "Prophet",
-                "Tight",
-                "Mia",
-                "Archon",
-                "Ace",
-                "Greninja",
-                "Mythic",
-                "Tressym",
-                "Jade",
-                "Villain",
-                "Celestial",
-                "Sage",
-                "Seraphic",
-                "Angelic",
-                "Dragon",
-                "Legend",
-                "Immortal",
-                "Olympian",
-                "Paragon",
-            ];
-            let global_tier_rank = |name: &str| -> usize {
-                GLOBAL_TIERS
-                    .iter()
-                    .position(|n| n.eq_ignore_ascii_case(name))
-                    .unwrap_or(0)
-            };
-            // Higher tuple wins: (global tier order, fraction-of-ladder).
+            // Family "best rank": the HARDEST difficulty (registry difficulty
+            // order) the player has a rank in; ladder depth fraction breaks
+            // ties. Difficulty order is evxl's canonical difficulty ranking —
+            // its ladders are not one global scale, so a maxxed easy tier must
+            // not hide a harder difficulty's lower tier.
             let tier_strength = |card: &BenchmarkCard| -> (usize, f64) {
-                state
-                    .registry
-                    .by_id(card.benchmark_id as u64)
-                    .and_then(|(_, diff)| {
-                        card.rank.as_ref().map(|tier| {
-                            let idx = diff
-                                .rank_colors
-                                .iter()
-                                .position(|c| c.name == tier.name)
-                                .unwrap_or(0);
-                            let frac = if diff.rank_colors.is_empty() {
-                                0.0
-                            } else {
-                                (idx as f64) / (diff.rank_colors.len() as f64).max(1.0)
-                            };
-                            (global_tier_rank(&tier.name), frac)
-                        })
+                let Some((def, diff)) = state.registry.by_id(card.benchmark_id as u64) else {
+                    return (0, 0.0);
+                };
+                let order = def
+                    .difficulties
+                    .iter()
+                    .position(|d| d.kovaaks_benchmark_id == card.benchmark_id as u64)
+                    .unwrap_or(0);
+                let depth = diff
+                    .rank_colors
+                    .iter()
+                    .position(|c| {
+                        card.rank
+                            .as_ref()
+                            .map(|t| t.name.eq_ignore_ascii_case(&c.name))
+                            .unwrap_or(false)
                     })
-                    .unwrap_or((0, 0.0))
+                    .map(|idx| {
+                        if diff.rank_colors.is_empty() {
+                            0.0
+                        } else {
+                            idx as f64 / diff.rank_colors.len() as f64
+                        }
+                    })
+                    .unwrap_or(0.0);
+                (order, depth)
             };
             let mut folded: Vec<BenchmarkCard> = Vec::new();
             cards.sort_by(|a, b| a.benchmark_name.cmp(&b.benchmark_name));
