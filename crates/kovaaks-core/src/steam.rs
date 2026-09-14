@@ -33,13 +33,52 @@ impl EvxlClient {
         self
     }
 
+    /// Normalize a user-entered identifier down to the bare form evxl's
+    /// `/api/steam` accepts:
+    /// - a `steamcommunity.com/id/<vanity>` URL → `<vanity>`
+    /// - a `steamcommunity.com/profiles/<steamid64>` URL → `<steamid64>`
+    /// - anything else (bare 17-digit ID or vanity name) → unchanged
+    ///
+    /// Users paste full profile URLs when told to "enter your profile link";
+    /// evxl itself rejects those (404) even though the bare name resolves.
+    pub fn normalize_identifier(raw: &str) -> String {
+        let s = raw.trim();
+        let s = s
+            .strip_prefix("http://")
+            .or_else(|| s.strip_prefix("https://"))
+            .unwrap_or(s);
+        let s = s
+            .strip_prefix("www.steamcommunity.com/")
+            .or_else(|| s.strip_prefix("steamcommunity.com/"))
+            .unwrap_or(s);
+        if let Some(rest) = s.strip_prefix("id/") {
+            return rest
+                .trim_matches('/')
+                .split('/')
+                .next()
+                .unwrap_or_default()
+                .to_string();
+        }
+        if let Some(rest) = s.strip_prefix("profiles/") {
+            return rest
+                .trim_matches('/')
+                .split('/')
+                .next()
+                .unwrap_or_default()
+                .to_string();
+        }
+        s.trim_matches('/').to_string()
+    }
+
     /// Resolve a SteamID64 / vanity name / profile URL to a player profile.
     pub async fn resolve(&self, identifier: &str) -> Result<PlayerProfile> {
         let url = format!("{}/api/steam", self.base_url);
         let response = self
             .http
             .post(&url)
-            .json(&serde_json::json!({ "identifier": identifier }))
+            .json(
+                &serde_json::json!({ "identifier": EvxlClient::normalize_identifier(identifier) }),
+            )
             .send()
             .await?;
         // Non-2xx: known shapes map to their dedicated error, anything else
@@ -64,6 +103,42 @@ impl EvxlClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_identifier_strips_profile_urls() {
+        assert_eq!(
+            EvxlClient::normalize_identifier("https://steamcommunity.com/id/axi_myoff/"),
+            "axi_myoff"
+        );
+        assert_eq!(
+            EvxlClient::normalize_identifier("https://steamcommunity.com/id/axi_myoff"),
+            "axi_myoff"
+        );
+        assert_eq!(
+            EvxlClient::normalize_identifier("www.steamcommunity.com/id/ZenWotd"),
+            "ZenWotd"
+        );
+        assert_eq!(
+            EvxlClient::normalize_identifier("steamcommunity.com/id/axi_myoff/"),
+            "axi_myoff"
+        );
+        assert_eq!(
+            EvxlClient::normalize_identifier(
+                "https://steamcommunity.com/profiles/76561198173335263/"
+            ),
+            "76561198173335263"
+        );
+        // Bare inputs pass through untouched.
+        assert_eq!(EvxlClient::normalize_identifier("axi_myoff"), "axi_myoff");
+        assert_eq!(
+            EvxlClient::normalize_identifier("76561198173335263"),
+            "76561198173335263"
+        );
+        assert_eq!(
+            EvxlClient::normalize_identifier("  76561198173335263  "),
+            "76561198173335263"
+        );
+    }
 
     #[test]
     fn default_base_url_is_evxl() {
