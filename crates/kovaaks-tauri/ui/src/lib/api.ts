@@ -210,6 +210,9 @@ export interface WeeklyReport {
   pb_events: number
   current_streak: number
   xp: number
+  level_name: string
+  level: number
+  level_progress_pct: number
   improvements: ImprovementRow[]
   rank_changes: RankChange[]
 }

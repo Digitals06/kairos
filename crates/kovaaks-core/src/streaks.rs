@@ -75,6 +75,7 @@ pub fn streak_summary(store: &Store, steam_id: &str) -> crate::Result<StreakSumm
         timestamps.iter().map(|ts| ts.date_naive()).collect();
     let today = chrono::Utc::now().date_naive();
     let (current, best) = streaks_from_days(&days, today);
+    let day_xp = (days.len().min(10_000)) as u64 * 25;
 
     // XP-lite: +10 XP for every running-high in each tracked scenario series.
     let mut xp: u64 = 0;
@@ -108,12 +109,84 @@ pub fn streak_summary(store: &Store, steam_id: &str) -> crate::Result<StreakSumm
         current,
         best,
         total_plays,
-        xp,
+        xp: xp + day_xp,
     })
+}
+
+/// XP thresholds per level (aim-trainer flavored): cumulative XP needed to
+/// REACH each level. XP model: +10 per PB (running high per scenario), +25 per
+/// distinct day trained — see [`streak_summary`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Level {
+    /// 1-based level index.
+    pub level: u32,
+    /// Human title for the level.
+    pub name: &'static str,
+    /// 0-100 progress into the current level.
+    pub progress_pct: u32,
+}
+
+const LEVEL_STEPS: &[(&str, u64)] = &[
+    ("Recruit", 0),
+    ("Bronze", 250),
+    ("Silver", 750),
+    ("Gold", 1500),
+    ("Platinum", 3_000),
+    ("Diamond", 6_000),
+    ("Master", 12_000),
+    ("Grandmaster", 25_000),
+    ("Nova", 50_000),
+    ("Astra", 100_000),
+    ("Immortal", 200_000),
+    ("Radiant", 400_000),
+];
+
+/// Resolve the level for a lifetime XP total.
+pub fn level_from_xp(xp: u64) -> Level {
+    let mut idx = 0usize;
+    for (i, (_, threshold)) in LEVEL_STEPS.iter().enumerate() {
+        if xp >= *threshold {
+            idx = i;
+        }
+    }
+    let (name, start) = LEVEL_STEPS[idx];
+    let next_start = LEVEL_STEPS.get(idx + 1).map(|(_, v)| *v);
+    let progress_pct = match next_start {
+        Some(next) => {
+            let span = next - start;
+            if span == 0 {
+                100
+            } else {
+                (((xp - start) as f64 / span as f64) * 100.0).floor() as u32
+            }
+        }
+        None => 100, // top level
+    };
+    Level {
+        level: idx as u32 + 1,
+        name,
+        progress_pct: progress_pct.min(100),
+    }
 }
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn level_from_xp_climbs() {
+        let l0 = level_from_xp(0);
+        assert_eq!((l0.level, l0.name), (1, "Recruit"));
+        assert_eq!(l0.progress_pct, 0);
+        let l1 = level_from_xp(700);
+        assert_eq!(l1.name, "Bronze", "700 xp lands inside Bronze (250..750)");
+        let l2 = level_from_xp(900);
+        assert_eq!(l2.name, "Silver", "900 xp lands inside Silver (750..1500)");
+        assert!(l1.progress_pct > 0 && l1.progress_pct < 100);
+        let top = level_from_xp(u64::MAX);
+        assert_eq!(top.name, "Radiant");
+        assert_eq!(top.progress_pct, 100);
+    }
+
     use super::*;
 
     fn set(dates: &[chrono::NaiveDate]) -> std::collections::HashSet<chrono::NaiveDate> {

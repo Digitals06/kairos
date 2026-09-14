@@ -33,6 +33,10 @@ pub struct WeeklyReport {
     /// Max play-streak from streaks module (current streak at report time).
     pub current_streak: u32,
     pub xp: u64,
+    /// Lifetime level derived from xp (1-based index + progress 0-100).
+    pub level_name: String,
+    pub level: u32,
+    pub level_progress_pct: u32,
     /// Top 5 improvements by delta (improving then regressing rows).
     pub improvements: Vec<ImprovementRow>,
     /// Benchmark rank changes inside the week: (benchmark_id, benchmark,
@@ -195,6 +199,25 @@ pub fn weekly_report(
         xp: crate::streaks::streak_summary(store, steam_id)
             .map(|s| s.xp)
             .unwrap_or(0),
+        level_name: crate::streaks::level_from_xp(
+            crate::streaks::streak_summary(store, steam_id)
+                .map(|s| s.xp)
+                .unwrap_or(0),
+        )
+        .name
+        .to_string(),
+        level: crate::streaks::level_from_xp(
+            crate::streaks::streak_summary(store, steam_id)
+                .map(|s| s.xp)
+                .unwrap_or(0),
+        )
+        .level,
+        level_progress_pct: crate::streaks::level_from_xp(
+            crate::streaks::streak_summary(store, steam_id)
+                .map(|s| s.xp)
+                .unwrap_or(0),
+        )
+        .progress_pct,
         improvements: rows.clone(),
         rank_changes,
     })

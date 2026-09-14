@@ -266,6 +266,9 @@ pub struct WeeklyReportDto {
     pub pb_events: u32,
     pub current_streak: u32,
     pub xp: u64,
+    pub level_name: String,
+    pub level: u32,
+    pub level_progress_pct: u32,
     pub improvements: Vec<ImprovementRowDto>,
     pub rank_changes: Vec<RankChangeDto>,
 }
@@ -299,6 +302,9 @@ impl From<kovaaks_core::weekly::WeeklyReport> for WeeklyReportDto {
             pb_events: r.pb_events,
             current_streak: r.current_streak,
             xp: r.xp,
+            level_name: r.level_name,
+            level: r.level,
+            level_progress_pct: r.level_progress_pct,
             improvements: r
                 .improvements
                 .into_iter()

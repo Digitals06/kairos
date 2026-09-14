@@ -53,8 +53,13 @@
     <div class="empty">Loading this week…</div>
   {:else}
     <div class="row">
-      <span class="stat"><b>{report.plays}</b> plays · <b>{report.days_played}/7</b> days ·
-        <b>{report.current_streak}</b> streak · <b>{report.xp.toLocaleString()}</b> XP
+      <span class="stat">
+        <b>{report.plays}</b> plays · <b>{report.days_played}/7</b> days ·
+        <b>{report.current_streak}</b> streak ·
+        <span class="lv">LEVEL {report.level} — {report.level_name}</span>
+      </span>
+      <span class="lv-bar" title={`XP {report.xp.toLocaleString()} — level {report.level} ({report.level_progress_pct}%)`}>
+        <span class="lv-fill" style={`width: ${report.level_progress_pct}%`}></span>
       </span>
       <span class="ranks">
         {#each report.rank_changes as rc (rc.benchmark_id + rc.from)}
@@ -112,6 +117,28 @@
   .rank-chip b {
     color: var(--accent, #00e5ff);
   }
+  .lv {
+    color: #ffd246;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+  }
+
+  .lv-bar {
+    display: inline-block;
+    width: 120px;
+    height: 5px;
+    border-radius: 3px;
+    background: color-mix(in srgb, #ffd246 12%, transparent);
+    overflow: hidden;
+  }
+
+  .lv-fill {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: #ffd246;
+  }
+
   .mini {
     border: 1px solid var(--border, #1d2733);
     background: transparent;
