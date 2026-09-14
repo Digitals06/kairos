@@ -722,13 +722,21 @@ pub mod commands {
         let overall_rank = latest.map(|s| s.overall_rank).unwrap_or(0).max(0) as u32;
         // v0.2 rank engine: recompute the rank the way evxl does. Stored
         // snapshots and the engine both work in display units — no rescaling.
-        let rank_tier = latest
-            .and_then(|snap| {
-                let api_progress = stored_to_progress(snap);
-                kovaaks_core::rankcalc::compute_rank(&api_progress, bench, &difficulty)
-                    .tier(&difficulty)
-            })
-            .or_else(|| kovaaks_core::rank_from_index(overall_rank, &difficulty));
+        // A snapshot with zero scored scenarios must NOT produce a tier.
+        let scored_any = latest
+            .map(|s| s.scenarios.iter().any(|row| row.score > 0))
+            .unwrap_or(false);
+        let rank_tier = if scored_any {
+            latest
+                .and_then(|snap| {
+                    let api_progress = stored_to_progress(snap);
+                    kovaaks_core::rankcalc::compute_rank(&api_progress, bench, &difficulty)
+                        .tier(&difficulty)
+                })
+                .or_else(|| kovaaks_core::rank_from_index(overall_rank, &difficulty))
+        } else {
+            None
+        };
         let ladder = overall_ladder(latest);
         let (next_name, next_delta) = next_rank_from_ladder(progress, &ladder, &difficulty);
         Ok(Some(BenchmarkCard {
@@ -885,15 +893,21 @@ pub mod commands {
             // ties. Difficulty order is evxl's canonical difficulty ranking —
             // its ladders are not one global scale, so a maxxed easy tier must
             // not hide a harder difficulty's lower tier.
-            let tier_strength = |card: &BenchmarkCard| -> (usize, f64) {
+            let tier_strength = |card: &BenchmarkCard| -> (isize, f64) {
                 let Some((def, diff)) = state.registry.by_id(card.benchmark_id as u64) else {
-                    return (0, 0.0);
+                    return (-1, 0.0);
                 };
+                // Unranked difficulty (no scores yet) never beats a ranked
+                // easier difficulty — the card then shows the highest rank
+                // achieved in a previous difficulty.
+                if card.rank.is_none() {
+                    return (-1, 0.0);
+                }
                 let order = def
                     .difficulties
                     .iter()
                     .position(|d| d.kovaaks_benchmark_id == card.benchmark_id as u64)
-                    .unwrap_or(0);
+                    .unwrap_or(0) as isize;
                 let depth = diff
                     .rank_colors
                     .iter()
