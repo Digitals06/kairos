@@ -305,57 +305,32 @@ impl From<kovaaks_core::weekly::WeeklyReport> for WeeklyReportDto {
     }
 }
 
-/// Wire mirror of `kovaaks_core::dashboard::DashboardRollup`.
+/// Wire mirror of `kovaaks_core::dashboard::FamilyRow` rollup.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct DashboardRollupDto {
-    pub sections: Vec<DashboardSectionDto>,
+pub struct DashboardFamiliesDto {
+    pub families: Vec<FamilyRowDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct DashboardSectionDto {
-    pub category: String,
-    pub benchmarks: Vec<DashboardRowDto>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct DashboardRowDto {
-    pub benchmark_id: i64,
+pub struct FamilyRowDto {
     pub benchmark_name: String,
+    pub color: String,
+    pub categories: Vec<String>,
+    pub difficulties: Vec<FamilyDiffDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct FamilyDiffDto {
+    pub difficulty_name: String,
+    pub kovaaks_id: i64,
     pub current_rank: i64,
     pub current_tier: String,
     pub tier_names: Vec<String>,
     pub series: Vec<(String, String)>,
     pub benchmark_progress: i64,
-}
-
-impl From<kovaaks_core::dashboard::DashboardRollup> for DashboardRollupDto {
-    fn from(r: kovaaks_core::dashboard::DashboardRollup) -> Self {
-        Self {
-            sections: r
-                .sections
-                .into_iter()
-                .map(|s| DashboardSectionDto {
-                    category: s.category,
-                    benchmarks: s
-                        .benchmarks
-                        .into_iter()
-                        .map(|b| DashboardRowDto {
-                            benchmark_id: b.benchmark_id,
-                            benchmark_name: b.benchmark_name,
-                            current_rank: b.current_rank,
-                            current_tier: b.current_tier,
-                            tier_names: b.tier_names,
-                            series: b.series,
-                            benchmark_progress: b.benchmark_progress,
-                        })
-                        .collect(),
-                })
-                .collect(),
-        }
-    }
 }
 
 /// App settings (persisted as a JSON blob in the store's meta table).
@@ -455,6 +430,11 @@ pub struct AppState {
     pub store: Store,
     pub registry: &'static Registry,
     pub evxl: EvxlClient,
+    /// Weekly-report cache: (generated-at instant, payload). The command
+    /// rebuilds after 10 minutes; navigating in/out of benchmarks reuses it.
+    pub weekly_cache: std::sync::Arc<
+        std::sync::Mutex<Option<(std::time::Instant, kovaaks_core::weekly::WeeklyReport)>>,
+    >,
 }
 
 impl AppState {
@@ -1081,7 +1061,7 @@ pub mod commands {
     #[tauri::command]
     pub async fn dashboard_rollup(
         state: State<'_, AppState>,
-    ) -> Result<DashboardRollupDto, String> {
+    ) -> Result<DashboardFamiliesDto, String> {
         let steam_id = state
             .profile()
             .map_err(|e| e.to_string())?
@@ -1089,8 +1069,30 @@ pub mod commands {
             .ok_or("no profile connected")?;
         let store = state.store.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            kovaaks_core::dashboard::dashboard_rollup(&store, &steam_id)
-                .map(DashboardRollupDto::from)
+            kovaaks_core::dashboard::dashboard_families(&store, &steam_id)
+                .map(|families| DashboardFamiliesDto {
+                    families: families
+                        .into_iter()
+                        .map(|f| FamilyRowDto {
+                            benchmark_name: f.benchmark_name,
+                            color: f.color,
+                            categories: f.categories,
+                            difficulties: f
+                                .difficulties
+                                .into_iter()
+                                .map(|d| FamilyDiffDto {
+                                    difficulty_name: d.difficulty_name,
+                                    kovaaks_id: d.kovaaks_id,
+                                    current_rank: d.current_rank,
+                                    current_tier: d.current_tier,
+                                    tier_names: d.tier_names,
+                                    series: d.series,
+                                    benchmark_progress: d.benchmark_progress,
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                })
                 .map_err(|e| e.to_string())
         })
         .await
@@ -1101,19 +1103,28 @@ pub mod commands {
     /// rank changes. Frontend camelCase-enforced by the DTO test.
     #[tauri::command]
     pub async fn weekly_report(state: State<'_, AppState>) -> Result<WeeklyReportDto, String> {
+        // Cache hit within 10 minutes: no store lock, instant remounts.
+        if let Some((at, r)) = state.weekly_cache.lock().ok().and_then(|g| g.clone()) {
+            if at.elapsed() < std::time::Duration::from_secs(600) {
+                return Ok(WeeklyReportDto::from(r));
+            }
+        }
         let steam_id = state
             .profile()
             .map_err(|e| e.to_string())?
             .map(|p| p.steam_id)
             .ok_or("no profile connected")?;
         let store = state.store.clone();
-        tauri::async_runtime::spawn_blocking(move || {
+        let report = tauri::async_runtime::spawn_blocking(move || {
             kovaaks_core::weekly::weekly_report(&store, &steam_id, chrono::Utc::now())
-                .map(WeeklyReportDto::from)
-                .map_err(|e| e.to_string())
         })
         .await
         .map_err(|e| format!("weekly join error: {e}"))?
+        .map_err(|e| e.to_string())?;
+        if let Ok(mut g) = state.weekly_cache.lock() {
+            *g = Some((std::time::Instant::now(), report.clone()));
+        }
+        Ok(WeeklyReportDto::from(report))
     }
 
     /// CSV series export: one row per merged score point, analysis-friendly.
@@ -1265,6 +1276,7 @@ pub fn run() {
             store,
             registry,
             evxl: EvxlClient::new().expect("evxl http client"),
+            weekly_cache: std::sync::Arc::new(std::sync::Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             commands::resolve_profile,

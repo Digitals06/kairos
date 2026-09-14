@@ -1,10 +1,16 @@
 <script lang="ts">
-  import { dashboardRollup, type DashboardRollup, type DashboardRow } from './api'
+  import {
+    dashboardRollup,
+    type DashboardFamilies,
+    type FamilyRow,
+    type FamilyDiff,
+  } from './api'
 
   let { onback, onselect }: { onback: () => void; onselect: (id: number) => void } = $props()
 
-  let data = $state<DashboardRollup | null>(null)
+  let data = $state<DashboardFamilies | null>(null)
   let error = $state<string | null>(null)
+  let expanded = $state<Set<string>>(new Set())
 
   $effect(() => {
     dashboardRollup()
@@ -12,16 +18,35 @@
       .catch((e) => (error = String(e)))
   })
 
-  // Deterministic tier colors from the benchmark's ladder order (fallback hues
-  // when the ladder names miss the seeded palette).
   const TIER_COLORS: Record<string, string> = {
     Recruit: '#8d99a6', Iron: '#999999', Bronze: '#ff9900', Silver: '#cbd9e6',
     Gold: '#cab148', Platinum: '#4fd1c5', Diamond: '#48bbf7', Master: '#b560f0',
     Grandmaster: '#ff2e88', Nova: '#7ce4a8', Astra: '#7ce4a8',
     Berry: '#9070d8', Pear: '#8ad05f', Cherry: '#e14b65', ETH: '#6c8bd8', BTC: '#f2a63e',
   }
-  const tierColor = (row: DashboardRow, tier: string): string =>
-    TIER_COLORS[tier] ?? '#566b85'
+  const tierColor = (tier: string): string => TIER_COLORS[tier] ?? '#566b85'
+
+  function peak(row: FamilyRow): { rank: number; tier: string } {
+    let best: { idx: number; rank: number; tier: string } | null = null
+    for (const d of row.difficulties) {
+      const idx = d.tier_names.indexOf(d.current_tier)
+      if (idx >= 0 && (!best || idx > best.idx)) {
+        best = { idx, rank: d.current_rank, tier: d.current_tier }
+      }
+    }
+    return best ? { rank: best.rank, tier: best.tier } : { rank: -1, tier: '—' }
+  }
+
+  function toggle(name: string) {
+    const next = new Set(expanded)
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
+    expanded = next
+  }
+
+  function openFirst(diffs: FamilyDiff[]): number | null {
+    return diffs[0]?.kovaaks_id ?? null
+  }
 </script>
 
 <section class="dashboard-page">
@@ -35,36 +60,50 @@
   {:else if !data}
     <div class="empty">Loading dashboard…</div>
   {:else}
-    {#each data.sections as section}
-      <div class="cat-section">
-        <div class="cat-head">
-          <h3>{section.category}</h3>
-          <span class="count">{section.benchmarks.length} benchmarks</span>
+    <div class="banking">
+      {#each data.families as fam (fam.benchmark_name)}
+        {@const peakTier = peak(fam)}
+        <div class="fam">
+          <button
+            class="fam-row"
+            onclick={() => toggle(fam.benchmark_name)}
+            aria-expanded={expanded.has(fam.benchmark_name)}
+          >
+            <span class="chev">{expanded.has(fam.benchmark_name) ? '▾' : '▸'}</span>
+            <span class="dot" style={`background:${fam.color}`}></span>
+            <span class="name">{fam.benchmark_name}</span>
+            <span class="tier" style={`color:${tierColor(peakTier.tier)}`}>
+              {peakTier.tier}
+            </span>
+            <span class="diff-count">{fam.difficulties.length}</span>
+          </button>
+          {#if expanded.has(fam.benchmark_name)}
+            <div class="diffs">
+              {#each fam.difficulties as d (d.kovaaks_id)}
+                <button class="diff-row" onclick={() => onselect(d.kovaaks_id)}>
+                  <span class="diff-name">{d.difficulty_name}</span>
+                  {#if d.tier_names.length > 0}
+                    <span class="rung-bar">
+                      {#each d.tier_names as t, i}
+                        <span
+                          class="rung"
+                          class:lit={i <= d.current_rank}
+                          style={`--c:${tierColor(t)}`}
+                          title={t}
+                        ></span>
+                      {/each}
+                    </span>
+                  {/if}
+                  <span class="tier" style={`color:${tierColor(d.current_tier)}`}>
+                    {d.current_tier}
+                  </span>
+                </button>
+              {/each}
+            </div>
+          {/if}
         </div>
-        <div class="banking">
-          {#each section.benchmarks as row (row.benchmark_id)}
-            <button class="bank-card" onclick={() => onselect(row.benchmark_id)}>
-              <span class="name">{row.benchmark_name}</span>
-              <span class="tier" style={`color:${tierColor(row, row.current_tier)}`}>
-                {row.current_tier}
-              </span>
-              {#if row.tier_names.length > 0}
-                <div class="rung-bar">
-                  {#each row.tier_names as t, i}
-                    <span
-                      class="rung"
-                      class:lit={i <= row.current_rank}
-                      style={`--c:${tierColor(row, t)}`}
-                      title={t}
-                    ></span>
-                  {/each}
-                </div>
-              {/if}
-            </button>
-          {/each}
-        </div>
-      </div>
-    {/each}
+      {/each}
+    </div>
   {/if}
 </section>
 
@@ -88,61 +127,59 @@
     color: var(--muted-foreground);
     padding: 24px 0;
   }
-  .cat-section {
-    margin-bottom: 22px;
-  }
-  .cat-head {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    margin-bottom: 8px;
-  }
-  .cat-head h3 {
-    margin: 0;
-    font-size: 14px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--accent);
-  }
-  .count {
-    color: var(--muted-foreground);
-    font-size: 12px;
-  }
   .banking {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 720px;
   }
-  .bank-card {
-    display: grid;
-    grid-template-columns: 1fr auto;
+  .fam-row,
+  .diff-row {
+    display: flex;
     align-items: center;
-    gap: 4px 10px;
+    gap: 10px;
+    width: 100%;
     text-align: left;
     border: 1px solid var(--border);
     background: var(--card);
-    border-radius: 7px;
-    padding: 8px 12px;
+    border-radius: 6px;
+    padding: 7px 12px;
     cursor: pointer;
-    min-width: 210px;
     color: var(--foreground);
   }
-  .bank-card:hover {
+  .fam-row:hover {
     border-color: var(--accent);
   }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    flex: none;
+  }
   .name {
+    flex: 1;
     font-size: 13px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .tier {
-    grid-row: 1;
-    font-weight: 700;
-    font-size: 12px;
+  .diff-count {
+    font-size: 11px;
+    color: var(--muted-foreground);
+  }
+  .diffs {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 3px 0 6px 26px;
+  }
+  .diff-name {
+    min-width: 170px;
+    font-size: 12.5px;
+    color: var(--muted-foreground);
   }
   .rung-bar {
-    grid-column: 1 / -1;
+    flex: 1;
     display: flex;
     gap: 3px;
   }
@@ -154,5 +191,11 @@
   }
   .rung.lit {
     background: var(--c);
+  }
+  .tier {
+    font-weight: 700;
+    font-size: 12px;
+    min-width: 92px;
+    text-align: right;
   }
 </style>

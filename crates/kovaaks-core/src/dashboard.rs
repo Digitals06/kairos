@@ -205,3 +205,182 @@ mod tests {
         p
     }
 }
+
+/// Per-difficulty (kovaaks id) row inside a family.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FamilyDiff {
+    pub difficulty_name: String,
+    pub kovaaks_id: i64,
+    pub current_rank: i64,
+    pub current_tier: String,
+    pub tier_names: Vec<String>,
+    /// (captured_at RFC3339, tier name), collapsed to changes.
+    pub series: Vec<(String, String)>,
+    pub benchmark_progress: i64,
+}
+
+/// One benchmark family (registry BenchmarkDef) with its played difficulties.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FamilyRow {
+    pub benchmark_name: String,
+    pub color: String,
+    /// evxl tab tags (same taxonomy as the card filters).
+    pub categories: Vec<String>,
+    pub difficulties: Vec<FamilyDiff>,
+}
+
+/// Highest-rank label across the family's played difficulties (for the
+/// collapsed state).
+impl FamilyRow {
+    pub fn peak_tier(&self) -> (i64, String) {
+        let mut best: Option<(usize, i64, String)> = None;
+        for d in &self.difficulties {
+            if let Some(idx) = d.tier_names.iter().position(|n| n == &d.current_tier) {
+                if best.as_ref().map(|b| idx > b.0).unwrap_or(true) {
+                    best = Some((idx, d.current_rank, d.current_tier.clone()));
+                }
+            }
+        }
+        best.map(|(_, rank, name)| (rank, name))
+            .unwrap_or((-1, "—".to_string()))
+    }
+}
+
+/// Family-grouped dashboard: every played kovaaks id folds into its benchmark
+/// family under the registry difficulty it belongs to.
+pub fn dashboard_families(store: &Store, steam_id: &str) -> crate::Result<Vec<FamilyRow>> {
+    let registry = crate::registry::registry();
+    let bids = store.played_benchmarks(steam_id)?;
+    let mut rows: Vec<FamilyRow> = Vec::new();
+    for bid in bids {
+        let Some(latest) = store.latest(steam_id, bid)? else {
+            continue;
+        };
+        let Some((def, diff)) = registry.by_id(bid as u64) else {
+            continue;
+        };
+        let tier_names: Vec<String> = diff
+            .rank_colors
+            .iter()
+            .map(|r| r.name.to_string())
+            .collect();
+        let tier_at = |idx: i64| -> String {
+            usize::try_from(idx)
+                .ok()
+                .and_then(|i| tier_names.get(i).cloned())
+                .unwrap_or_else(|| "—".to_string())
+        };
+        let history = store.history(steam_id, bid)?;
+        let mut series: Vec<(String, String)> = history
+            .iter()
+            .map(|s| (s.captured_at.to_rfc3339(), tier_at(s.overall_rank)))
+            .collect();
+        series.dedup_by(|a, b| a.1 == b.1);
+        let fdiff = FamilyDiff {
+            difficulty_name: diff.name.clone(),
+            kovaaks_id: bid,
+            current_rank: latest.overall_rank,
+            current_tier: tier_at(latest.overall_rank),
+            tier_names,
+            series,
+            benchmark_progress: latest.benchmark_progress,
+        };
+        if let Some(row) = rows.iter_mut().find(|r| r.benchmark_name == def.name) {
+            row.difficulties.push(fdiff);
+        } else {
+            rows.push(FamilyRow {
+                benchmark_name: def.name.clone(),
+                color: def.color.clone(),
+                categories: crate::bench_type::benchmark_types_for_def(def)
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                difficulties: vec![fdiff],
+            });
+        }
+    }
+    rows.sort_by(|a, b| a.benchmark_name.cmp(&b.benchmark_name));
+    Ok(rows)
+}
+
+#[cfg(test)]
+mod family_tests {
+    use super::*;
+    use crate::types::{BenchmarkProgress, CategoryProgress, ScenarioEntry};
+
+    fn mk_prog(rank: u32) -> BenchmarkProgress {
+        BenchmarkProgress {
+            benchmark_progress: 1234.0,
+            overall_rank: rank,
+            categories: vec![(
+                "Tracking".to_string(),
+                CategoryProgress {
+                    benchmark_progress: 0.0,
+                    category_rank: 0,
+                    rank_maxes: Vec::new(),
+                    scenarios: vec![(
+                        "s".to_string(),
+                        ScenarioEntry {
+                            score: 0.0,
+                            leaderboard_rank: 0,
+                            scenario_rank: 0,
+                            rank_maxes: Vec::new(),
+                            leaderboard_id: 0,
+                        },
+                    )],
+                },
+            )],
+        }
+    }
+
+    #[test]
+    fn families_group_difficulties_under_one_name() {
+        let dir = std::env::temp_dir().join(format!("dashfam-{}", std::process::id()));
+        let _ = std::fs::remove_file(&dir);
+        let store = crate::store::Store::open(&dir).unwrap();
+        let id = "FAM1";
+        let now = chrono::Utc::now();
+
+        let registry = crate::registry::registry();
+        let (def, _) = registry.by_id(644).unwrap();
+        let family_name = def.name.clone();
+        let ids: Vec<u64> = registry
+            .all()
+            .iter()
+            .find(|b| b.name == def.name)
+            .map(|b| {
+                b.difficulties
+                    .iter()
+                    .map(|d| d.kovaaks_benchmark_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(ids.len() >= 2, "family has multiple difficulties");
+
+        for (i, kid) in ids.iter().take(2).enumerate() {
+            store.upsert_played(id, *kid as i64, true, now).unwrap();
+            store
+                .record_snapshot(id, *kid as i64, &mk_prog(2 + i as u32), now)
+                .unwrap();
+        }
+        let fams = dashboard_families(&store, id).unwrap();
+        assert_eq!(
+            fams.len(),
+            1,
+            "one family — got {:?}",
+            fams.iter()
+                .map(|f| f.benchmark_name.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            fams.iter()
+                .find(|f| f.benchmark_name == family_name)
+                .unwrap()
+                .difficulties
+                .len(),
+            2
+        );
+        let (rank, tier) = fams[0].peak_tier();
+        assert!(rank >= 0 && tier != "—");
+    }
+}

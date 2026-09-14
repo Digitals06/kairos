@@ -242,9 +242,9 @@ export function toggleFavorite(benchmarkId: number): Promise<boolean> {
   return invoke('toggle_favorite', { benchmarkId })
 }
 
-export interface DashboardRow {
-  benchmark_id: number
-  benchmark_name: string
+export interface FamilyDiff {
+  difficulty_name: string
+  kovaaks_id: number
   current_rank: number
   current_tier: string
   tier_names: string[]
@@ -252,15 +252,17 @@ export interface DashboardRow {
   benchmark_progress: number
 }
 
-export interface DashboardSection {
-  category: string
-  benchmarks: DashboardRow[]
+export interface FamilyRow {
+  benchmark_name: string
+  color: string
+  categories: string[]
+  difficulties: FamilyDiff[]
 }
 
-export interface DashboardRollup {
-  sections: DashboardSection[]
+export interface DashboardFamilies {
+  families: FamilyRow[]
 }
 
-export function dashboardRollup(): Promise<DashboardRollup> {
+export function dashboardRollup(): Promise<DashboardFamilies> {
   return invoke('dashboard_rollup')
 }

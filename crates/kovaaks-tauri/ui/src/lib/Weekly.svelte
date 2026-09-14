@@ -1,17 +1,49 @@
 <script lang="ts">
   import { weeklyReport, type WeeklyReport } from './api'
 
-  let report = $state<WeeklyReport | null>(null)
+  // Session cache: the report is expensive (~many merged series). Fetch once
+  // per app run and reuse it whenever the overview remounts; the user can
+  // force a refresh explicitly. (Req: no reload churn when navigating
+  // in/out of benchmarks.)
+  let cached: WeeklyReport | null = null
+  let inflight: Promise<WeeklyReport> | null = null
+
+  let report = $state<WeeklyReport | null>(cached)
   let error = $state<string | null>(null)
+  let refreshing = $state(false)
+
+  async function load(force = false) {
+    if (cached && !force) {
+      report = cached
+      return
+    }
+    if (!inflight) {
+      inflight = weeklyReport()
+    }
+    const p = inflight
+    try {
+      const r = await p
+      // Only apply if this is still the newest request.
+      if (inflight === p) cached = r
+      report = r
+      error = null
+    } catch (e) {
+      if (cached) report = cached
+      else error = String(e)
+    } finally {
+      if (inflight === p) inflight = null
+    }
+  }
 
   $effect(() => {
-    weeklyReport()
-      .then((r) => (report = r))
-      .catch((e) => (error = String(e)))
+    load()
   })
 
-  const arrow = (trend: number) => (trend > 0 ? '▲' : trend < 0 ? '▼' : '–')
-  const deltaStr = (d: number) => (d > 0 ? `+${d.toFixed(1)}` : d.toFixed(1))
+  async function refresh() {
+    refreshing = true
+    await load(true)
+    refreshing = false
+  }
 </script>
 
 <section class="weekly">
@@ -20,54 +52,21 @@
   {:else if !report}
     <div class="empty">Loading this week…</div>
   {:else}
-    <div class="stats">
-      <div class="cell">
-        <span class="num">{report.plays}</span>
-        <span class="label">plays</span>
-      </div>
-      <div class="cell">
-        <span class="num">{report.days_played}/7</span>
-        <span class="label">days trained</span>
-      </div>
-      <div class="cell">
-        <span class="num">{report.pb_events}</span>
-        <span class="label">personal bests</span>
-      </div>
-      <div class="cell">
-        <span class="num">{report.current_streak}</span>
-        <span class="label">day streak</span>
-      </div>
-      <div class="cell">
-        <span class="num">{report.xp.toLocaleString()}</span>
-        <span class="label">XP</span>
-      </div>
+    <div class="row">
+      <span class="stat"><b>{report.plays}</b> plays · <b>{report.days_played}/7</b> days ·
+        <b>{report.current_streak}</b> streak · <b>{report.xp.toLocaleString()}</b> XP
+      </span>
+      <span class="ranks">
+        {#each report.rank_changes as rc (rc.benchmark_id + rc.from)}
+          <span class="rank-chip" title="{rc.benchmark}: {rc.from} → {rc.to}">
+            {rc.benchmark} <s>{rc.from}</s> → <b>{rc.to}</b>
+          </span>
+        {/each}
+      </span>
+      <button class="mini" onclick={refresh} disabled={refreshing}>
+        {refreshing ? '…' : '↻'}
+      </button>
     </div>
-
-    {#if report.rank_changes.length}
-      <div class="ranks">
-        {#each report.rank_changes as rc}
-          <div class="rank-row">
-            <span class="benchmark">{rc.benchmark}</span>
-            <span class="from">{rc.from}</span>
-            <span class="to">{rc.to}</span>
-          </div>
-        {/each}
-      </div>
-    {/if}
-
-    {#if report.improvements.length}
-      <div class="improvements">
-        {#each report.improvements as imp}
-          <div class="improve-row">
-            <span class="scenario">{imp.scenario}</span>
-            {#if imp.pb_this_week}<span class="pb-tag">PB</span>{/if}
-            <span class="delta" class:down={imp.trend < 0} class:flat={imp.trend === 0}>
-              {arrow(imp.trend)} {deltaStr(imp.delta)}
-            </span>
-          </div>
-        {/each}
-      </div>
-    {/if}
   {/if}
 </section>
 
@@ -75,85 +74,55 @@
   .weekly {
     border: 1px solid var(--border, #1d2733);
     border-radius: 8px;
-    padding: 12px 14px;
+    padding: 8px 12px;
     background: var(--card, #0d1420);
+    margin-bottom: 10px;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .stat {
+    color: var(--muted-foreground, #6b7b8d);
+    font-size: 13px;
+  }
+  .stat b {
+    color: var(--accent, #00e5ff);
+    font-weight: 600;
+  }
+  .ranks {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    flex: 1;
+  }
+  .rank-chip {
+    font-size: 12px;
+    color: var(--foreground, #dbe4ee);
+    border: 1px solid var(--border, #1d2733);
+    border-radius: 5px;
+    padding: 2px 8px;
+    white-space: nowrap;
+  }
+  .rank-chip s {
+    color: var(--muted-foreground, #6b7b8d);
+  }
+  .rank-chip b {
+    color: var(--accent, #00e5ff);
+  }
+  .mini {
+    border: 1px solid var(--border, #1d2733);
+    background: transparent;
+    color: var(--muted-foreground, #6b7b8d);
+    border-radius: 5px;
+    cursor: pointer;
+    padding: 2px 8px;
+    font-size: 12px;
   }
   .empty {
     color: var(--muted-foreground, #6b7b8d);
     font-size: 13px;
-  }
-  .stats {
-    display: flex;
-    gap: 22px;
-    flex-wrap: wrap;
-  }
-  .cell {
-    display: flex;
-    flex-direction: column;
-    min-width: 64px;
-  }
-  .num {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--accent, #00e5ff);
-  }
-  .label {
-    font-size: 11px;
-    color: var(--muted-foreground, #6b7b8d);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .ranks,
-  .improvements {
-    margin-top: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .rank-row,
-  .improve-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-  }
-  .benchmark {
-    color: var(--foreground, #dbe4ee);
-    min-width: 140px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .from {
-    color: var(--muted-foreground, #6b7b8d);
-  }
-  .to {
-    color: var(--accent, #00e5ff);
-    font-weight: 600;
-  }
-  .scenario {
-    color: var(--foreground, #dbe4ee);
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .pb-tag {
-    font-size: 10px;
-    font-weight: 700;
-    color: #0a0e14;
-    background: var(--accent, #00e5ff);
-    border-radius: 3px;
-    padding: 1px 5px;
-  }
-  .delta {
-    color: #38d67c;
-    font-variant-numeric: tabular-nums;
-  }
-  .delta.down {
-    color: #ff5470;
-  }
-  .delta.flat {
-    color: var(--muted-foreground, #6b7b8d);
   }
 </style>
