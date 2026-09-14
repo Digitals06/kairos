@@ -65,17 +65,18 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 - [x] Grind targets lead with the cheapest single-tier wins and label how many
   ladder tiers a step spans
 
-## v0.2
+## v0.2 (in progress — release pending green light)
 
-- Benchmark dashboard: all-benchmarks grid with rank chips and
-  progress-to-next-rank bars; scenario deep pages with PB progression and
-  plateau detection
-- Weekly report: time trained, improvements, rank changes, trend arrows
-- Windows installer (NSIS via Tauri bundler)
-- Close the last benchmark families that still fall back to the API rank
-  (100% client-side rank coverage)
-- History export (JSON/CSV backup)
-- Streaks / XP meta-progression from consistency and milestones
+- [x] Benchmark dashboard: banking page with one section per evxl tab
+  (12 categories), rank chips tier-ladder bars, click-through to detail
+- [x] Weekly report: plays, days trained, PBs, streak + XP, improvements with
+  trend arrows and PB tags, benchmark rank changes
+- [x] History export (CSV series alongside the JSON backup)
+- [x] Streaks / XP meta-progression from consistency and milestones
+- [x] Rank coverage gap audit — last drifted method (`Good-Energy`) ported; no
+  API-fallback families remain
+- [ ] Scenario deep pages with PB progression and plateau detection
+- [ ] Windows installer (NSIS via Tauri bundler)
 
 ## Later (unpromised)
 
