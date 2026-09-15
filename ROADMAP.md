@@ -95,22 +95,32 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 - [ ] Grind session coach: while KovaaK's runs, the app surfaces the next 3
   scenarios to grind for the selected family (no game overlay, app polling
   only)
-- [ ] Discord share card: composed PNG export (benchmark table, weekly strip +
-  level bar)
-- [ ] Opt-in global leaderboards: per-scenario global ranks/percentiles, cached
-  hard, off by default — local-only rank engine untouched
-- [ ] Full UI revamp: design pass consolidating the family grid, deep pages,
-  weekly strip and grind panel into one coherent visual language
-- [ ] Scenario analytics tab on deep pages: every chart/stat for every scenario
-  of the benchmark (PB progression, CV, plateau, improvement %) with
-  scenario-picker — not one selected-at-a-time
-- [ ] Local bench support: user-defined benchmarks from .json or built in-app
-  (scenario picker backed by the KovaaK's public API), custom rank names +
-  thresholds; ranks computed with the same engine
 - [ ] Playlists & launch: launch a scenario in KovaaK's from the app (same
   deep-link style evxl uses), plus benchmark playlist sharecodes / playlist
   launching like scenarios
 
+## v0.4.0 — identity & analytics
+
+- [ ] Full UI revamp: a true unique identity for Kairos (not a generic dark
+  theme) — signature typography, Kairos-branded rank/tier color system, motion
+  language, and a legacy-free component sheet used across every screen
+- [ ] Scenario analytics view: ALL scenarios of the current benchmark on one
+  screen at once (grid of per-scenario mini-charts with PB progression, CV,
+  plateau, improvement %) — built for screenshot-ability
+- [ ] Capture button: composes that all-scenarios report into one image and
+  copies it to the clipboard (same render path as the Discord share card)
+
+## v0.5.0 — custom benches & community
+
+- [ ] Local bench support: user-defined benchmarks from .json or built in-app
+  (typable scenario picker backed by the KovaaK's public API), custom rank
+  names + thresholds; ranks computed with the same engine
+- [ ] Discord share card: composed PNG export (benchmark table, weekly strip +
+  level bar)
+- [ ] Opt-in global leaderboards: per-scenario global ranks/percentiles, cached
+  hard, off by default — local-only rank engine untouched
+
+## Later (unpromised)
 ## Later (unpromised)
 
 - Windows installer (NSIS via Tauri bundler) — dropped from v0.2.1, revisit later
