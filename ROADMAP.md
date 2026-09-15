@@ -77,7 +77,7 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
   API-fallback families remain
 - [x] Scenario deep pages with PB progression and plateau detection
 
-## v0.2.1 — next (small polish)
+## v0.2.1 — polish
 
 - [ ] Grind chips on overview family cards (X runs to next tier / plateaued
   badges inline; reuses the grind payloads family cards already carry)
@@ -86,7 +86,7 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 - [ ] Scenario sort control on benchmark deep pages: weakest → strongest
   ordering (by rank tier, then score gap to next tier)
 
-## v0.3.0 — next (bigger builds)
+## v0.3.0 — workflows while playing
 
 - [ ] Tray mode: background watcher keeps the app fresh while KovaaK's runs;
   auto-launch optional
