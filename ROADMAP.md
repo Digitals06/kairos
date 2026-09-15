@@ -83,6 +83,8 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
   badges inline; reuses the grind payloads family cards already carry)
 - [ ] Time-trained estimate in the weekly strip (scored-play minutes; labeled
   score-time, never guessed)
+- [ ] Scenario sort control on benchmark deep pages: weakest → strongest
+  ordering (by rank tier, then score gap to next tier)
 
 ## v0.3.0 — next (bigger builds)
 
@@ -97,6 +99,17 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
   level bar)
 - [ ] Opt-in global leaderboards: per-scenario global ranks/percentiles, cached
   hard, off by default — local-only rank engine untouched
+- [ ] Full UI revamp: design pass consolidating the family grid, deep pages,
+  weekly strip and grind panel into one coherent visual language
+- [ ] Scenario analytics tab on deep pages: every chart/stat for every scenario
+  of the benchmark (PB progression, CV, plateau, improvement %) with
+  scenario-picker — not one selected-at-a-time
+- [ ] Local bench support: user-defined benchmarks from .json or built in-app
+  (scenario picker backed by the KovaaK's public API), custom rank names +
+  thresholds; ranks computed with the same engine
+- [ ] Playlists & launch: launch a scenario in KovaaK's from the app (same
+  deep-link style evxl uses), plus benchmark playlist sharecodes / playlist
+  launching like scenarios
 
 ## Later (unpromised)
 
