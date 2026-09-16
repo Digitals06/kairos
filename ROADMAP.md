@@ -79,11 +79,11 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 
 ## v0.2.1 — polish
 
-- [ ] Grind chips on overview family cards (X runs to next tier / plateaued
-  badges inline; reuses the grind payloads family cards already carry)
-- [ ] Time-trained estimate in the weekly strip (scored-play minutes; labeled
-  score-time, never guessed)
-- [ ] Scenario sort control on benchmark deep pages: weakest → strongest
+- [x] Grind chips on overview family cards — per-difficulty "▶ N runs to next
+  tier", "plateaued", or "complete" badges inline in the unrolled rows
+- [x] Time-trained estimate in the weekly strip — scored-min chip (sum of
+  hit_count / avg_fps per local play; never guessed)
+- [x] Scenario sort control on benchmark deep pages: weakest → strongest
   ordering (by rank tier, then score gap to next tier)
 
 ## v0.3.0 — workflows while playing
