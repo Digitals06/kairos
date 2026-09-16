@@ -45,17 +45,18 @@
   const scenarios = $derived(detail?.scenario_ranks ?? [])
   // 'document' = API order (evxl); 'weakest' = rank tier ascending, tiebroken
   // by the score gap to the scenario's next tier (closest-to-flip first).
-  let scenSort: 'document' | 'weakest' = $state('document')
+  let scenSort: 'document' | 'weakest' | 'strongest' = $state('document')
   const sortedScenarios = $derived.by(() => {
     const list = [...(detail?.scenario_ranks ?? [])]
-    if (scenSort !== 'weakest') return list
+    if (scenSort === 'document') return list
     const gapOf = (row: (typeof list)[number]): number => {
       const top = (row.rank_maxes ?? []).at(-1)
       return top === undefined ? Infinity : top - row.score
     }
+    const dir = scenSort === 'weakest' ? 1 : -1
     return list.sort((a, b) => {
-      if (a.scenario_rank !== b.scenario_rank) return a.scenario_rank - b.scenario_rank
-      return gapOf(a) - gapOf(b)
+      if (a.scenario_rank !== b.scenario_rank) return dir * (a.scenario_rank - b.scenario_rank)
+      return dir * (gapOf(a) - gapOf(b))
     })
   })
   // One scenario is ALWAYS selected (defaults to the first with data); the
@@ -470,8 +471,12 @@
     <section class="panel table-panel">
       <div class="table-head">
         <h3>Scenarios</h3>
-        <button class="btn btn-small" onclick={() => (scenSort = scenSort === 'document' ? 'weakest' : 'document')}>
-          {scenSort === 'document' ? 'Sort: weakest' : 'Sort: order'}
+        <button
+          class="btn btn-small"
+          onclick={() => (scenSort =
+            scenSort === 'document' ? 'weakest' : scenSort === 'weakest' ? 'strongest' : 'document')}
+        >
+          {scenSort === 'document' ? 'Sort: weakest' : scenSort === 'weakest' ? 'Sort: strongest' : 'Sort: order'}
         </button>
       </div>
       {#if sortedScenarios.length === 0}
