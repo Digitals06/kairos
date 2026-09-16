@@ -1007,17 +1007,25 @@ pub mod commands {
                                 let progress = stored_to_progress(&snap);
                                 let grind =
                                     kovaaks_core::grind::next_targets(&progress, def, &diff);
-                                let plateaued = snap.scenarios.iter().any(|row| {
-                                    let series = kovaaks_core::metrics::scenario_series_combined(
-                                        &state.store,
-                                        &steam_id,
-                                        c.benchmark_id,
-                                        &row.scenario,
-                                    )
-                                    .unwrap_or_default();
-                                    kovaaks_core::consistency::scenario_consistency(&series)
-                                        .plateaued
-                                });
+                                // A difficulty whose scenarios are all at
+                                // their top rung is COMPLETE — "plateaued"
+                                // (no new PB in 3+ days) is meaningless there
+                                // and reads as a bug, so suppress it.
+                                let plateaued = !(current_rank >= 0
+                                    && !tier_names.is_empty()
+                                    && current_rank as usize >= tier_names.len() - 1)
+                                    && snap.scenarios.iter().any(|row| {
+                                        let series =
+                                            kovaaks_core::metrics::scenario_series_combined(
+                                                &state.store,
+                                                &steam_id,
+                                                c.benchmark_id,
+                                                &row.scenario,
+                                            )
+                                            .unwrap_or_default();
+                                        kovaaks_core::consistency::scenario_consistency(&series)
+                                            .plateaued
+                                    });
                                 let runs = if grind.targets.is_empty() && grind.plan.is_empty() {
                                     // complete or no reachable path
                                     0
