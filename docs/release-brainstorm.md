@@ -128,3 +128,41 @@ via geometry; 4-micro motion; 5-all screens with feature freeze.
 ❓ Q5 — build order: theme tokens → RankBadge → overview/card → Detail →
    Weekly → Setup/App, one commit per screen with a live check after each? 
    (recommended)
+
+
+**Round 2 answers:** 1-yes dual themes + follow-system, BUT CRT scanlines are
+dropped entirely with the neon theme; 2-user proposes marble=light and
+basalt=dark, I reconsidered and agree with the user: one mode = one material
+(tonal steps keep chrome/content separation within each mode); 3-Cormorant BUT
+with a Greek twist — verification showed Cormorant has NO Greek glyph support,
+so the identity font is **GFS Didot** (the canonical Greek serif, Greek Font
+Society, Didot-style = classical Greek print since the 1800s) with JetBrains
+Mono for numerals; 4-engraved plates + meander rung bars confirmed; 5-build
+order confirmed.
+
+**SYNTHESIS — locked design decisions for v0.3.0 (identity):**
+
+- Two first-class themes: **Marble** (light) and **Basalt** (dark), toggled in
+  the gear menu, default = follow system.
+- Marble (light): ivory content `#f3ede3`, aegean-grey chrome `#cdbfa8`, text
+  `#241f19`, terracotta accent `#8b2b1f`, bronze `#8a6d3b`, hairlines
+  `#d8cdb9`, paper-grain texture (NO scanlines anywhere).
+- Basalt (dark): chrome `#101314`, panels `#1a1f1d`, moon-grey text `#b8bfc2`,
+  terracotta `#d1553f`, bronze `#c9a45c`, hairlines `#2a2f33`, meander accent
+  in gold.
+- Chrome-vs-content separation survives inside each mode via TONAL steps, not
+  material mixing.
+- Typography: **GFS Didot** (display/headings/labels) + **JetBrains Mono**
+  (all numerals, tabular data) + system-ui for body. Fonts bundled offline.
+- Tier colors stay **official evxl** — identity carried by GEOMETRY: badges
+  become engraved plates (square corners, hairline double border, tier color
+  only in the engraving line), rung bars become meander-pattern craved lattices
+  with lit segments stepped like fret progression.
+- Motion: micro only — rung fill animation, chip fade-ins, count-up numerals.
+- Screens all six, build order: tokens → RankBadge → overview/card → Detail →
+  Weekly → Setup/App; one commit per screen, live CDP check per screen,
+  site screenshots at the end.
+- Feature freeze during the pass; analytics view lands once the shell is done.
+
+OUT of scope for v0.3.0: new backend features, theming beyond the two modes,
+any chart color remapping.
