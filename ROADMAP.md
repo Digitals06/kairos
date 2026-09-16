@@ -77,7 +77,7 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
   API-fallback families remain
 - [x] Scenario deep pages with PB progression and plateau detection
 
-## v0.2.1 — polish
+## v0.2.1 — released
 
 - [x] Grind chips on overview family cards — per-difficulty "▶ N runs to next
   tier", "plateaued", or "complete" badges inline in the unrolled rows
