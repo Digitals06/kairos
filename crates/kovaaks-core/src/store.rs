@@ -367,6 +367,44 @@ impl Store {
     /// gate treats "no snapshot" as always-stale — freshly discovered
     /// benchmarks must be fully pulled the next sync, not sit as bare cards
     /// until the freshness window (2h) expires.
+    /// Estimated alive-time ("scored time") across the player's local plays
+    /// since `since`: sum of hit_count / avg_fps per run, in seconds. Runs
+    /// with avg_fps <= 0 contribute 0 (never guess). The time-window filter
+    /// happens in Rust over parsed timestamps to avoid SQLite's timestamp
+    /// format drift.
+    pub fn scored_seconds_since(
+        &self,
+        steam_id: &str,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<f64> {
+        let conn = self.lock();
+        let mut stmt =
+            conn.prepare("SELECT hit_count, avg_fps, played_at FROM plays WHERE steam_id = ?1")?;
+        let rows = stmt
+            .query_map(params![steam_id], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, f64>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<(i64, f64, String)>, _>>()?;
+        let total = rows
+            .into_iter()
+            .filter_map(|(hits, fps, ts)| {
+                if fps <= 0.0 || hits <= 0 {
+                    return None;
+                }
+                chrono::DateTime::parse_from_rfc3339(&ts)
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+                    .ok()
+                    .filter(|dt| *dt >= since)
+                    .map(|_| hits as f64 / fps)
+            })
+            .sum();
+        Ok(total)
+    }
+
     /// Distinct scenarios this player has any local play for.
     pub fn plays_scenarios(&self, steam_id: &str) -> Result<Vec<String>> {
         let conn = self.lock();

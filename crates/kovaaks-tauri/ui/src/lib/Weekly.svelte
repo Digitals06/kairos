@@ -55,6 +55,7 @@
     <div class="row">
       <span class="stat">
         <b>{report.plays}</b> plays · <b>{report.days_played}/7</b> days ·
+        <b>{Math.round(report.scored_seconds / 60)}</b> scored-min ·
         <b>{report.current_streak}</b> streak ·
         <span class="lv">LEVEL {report.level} — {report.level_name}</span>
       </span>

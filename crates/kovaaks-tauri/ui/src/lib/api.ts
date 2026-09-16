@@ -42,6 +42,8 @@ export interface BenchmarkCard {
     rank: { name: string; color: string } | null
     tier_names: string[]
     current_rank: number
+    runs_to_next?: number
+    plateaued?: boolean
   }[]
 }
 

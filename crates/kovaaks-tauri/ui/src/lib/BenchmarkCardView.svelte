@@ -80,7 +80,16 @@
     <div class="variants">
       {#each card.variants ?? [] as v (v.benchmark_id)}
         <button class="variant-row" onclick={(e) => variantClick(e, v.benchmark_id)}>
-          <span class="variant-diff">{v.difficulty_name}</span>
+          <span class="variant-diff">
+            {v.difficulty_name}
+            {#if (v.runs_to_next ?? 0) > 0}
+              <span class="chip-run">▶ {v.runs_to_next} {v.runs_to_next === 1 ? 'run' : 'runs'} to next tier</span>
+            {:else if v.plateaued}
+              <span class="chip-plateau">plateaued</span>
+            {:else if (v.runs_to_next ?? 0) === 0 && v.rank}
+              <span class="chip-run">complete</span>
+            {/if}
+          </span>
           {#if v.tier_names?.length}
             <span class="rung-bar">
               {#each v.tier_names as t, i}
@@ -145,6 +154,25 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .chip-run {
+    font-size: 10px;
+    color: var(--accent-2, #00e5ff);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+  }
+
+  .chip-plateau {
+    font-size: 10px;
+    color: #ff5470;
+    border: 1px solid rgba(255, 84, 112, 0.55);
+    border-radius: 4px;
+    padding: 1px 6px;
   }
 
   .rung-bar {

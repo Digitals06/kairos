@@ -43,6 +43,21 @@
 
   // --- scenario table (API document order — same as evxl) ---------------------
   const scenarios = $derived(detail?.scenario_ranks ?? [])
+  // 'document' = API order (evxl); 'weakest' = rank tier ascending, tiebroken
+  // by the score gap to the scenario's next tier (closest-to-flip first).
+  let scenSort: 'document' | 'weakest' = $state('document')
+  const sortedScenarios = $derived.by(() => {
+    const list = [...(detail?.scenario_ranks ?? [])]
+    if (scenSort !== 'weakest') return list
+    const gapOf = (row: (typeof list)[number]): number => {
+      const top = (row.rank_maxes ?? []).at(-1)
+      return top === undefined ? Infinity : top - row.score
+    }
+    return list.sort((a, b) => {
+      if (a.scenario_rank !== b.scenario_rank) return a.scenario_rank - b.scenario_rank
+      return gapOf(a) - gapOf(b)
+    })
+  })
   // One scenario is ALWAYS selected (defaults to the first with data); the
   // chart and the stat cards both reflect it. When the payload changes
   // (different benchmark), reset to that benchmark's first scenario.
@@ -455,8 +470,11 @@
     <section class="panel table-panel">
       <div class="table-head">
         <h3>Scenarios</h3>
+        <button class="btn btn-small" onclick={() => (scenSort = scenSort === 'document' ? 'weakest' : 'document')}>
+          {scenSort === 'document' ? 'Sort: weakest' : 'Sort: order'}
+        </button>
       </div>
-      {#if scenarios.length === 0}
+      {#if sortedScenarios.length === 0}
         <p class="muted">No scenarios in the latest snapshot.</p>
       {:else}
         <div class="table-scroll">
@@ -480,7 +498,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each scenarios as s (s.scenario)}
+              {#each sortedScenarios as s (s.scenario)}
                 {@const achieved = achievedIdx(s)}
                 {@const top = thresholdFor(s.rank_maxes, s.rank_maxes.length - 1)}
                 <tr>

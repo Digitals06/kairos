@@ -95,6 +95,12 @@ pub struct BenchmarkVariant {
     pub tier_names: Vec<String>,
     /// achieved tier index (0-based, -1 unranked).
     pub current_rank: i64,
+    /// Grind summary for this difficulty: cheapest single-scenario flips to
+    /// the next tier, or plan steps when no single run flips it. 0 when
+    /// the tier is complete or the difficulty is unranked.
+    pub runs_to_next: u32,
+    /// True when the difficulty's grind engine reports a plateaued state.
+    pub plateaued: bool,
 }
 
 /// One scenario row in the benchmark detail view.
@@ -279,6 +285,7 @@ pub struct WeeklyReportDto {
     pub plays: u32,
     pub scenarios_played: u32,
     pub pb_events: u32,
+    pub scored_seconds: f64,
     pub current_streak: u32,
     pub xp: u64,
     pub level_name: String,
@@ -315,6 +322,7 @@ impl From<kovaaks_core::weekly::WeeklyReport> for WeeklyReportDto {
             plays: r.plays,
             scenarios_played: r.scenarios_played,
             pb_events: r.pb_events,
+            scored_seconds: r.scored_seconds,
             current_streak: r.current_streak,
             xp: r.xp,
             level_name: r.level_name,
@@ -989,12 +997,46 @@ pub mod commands {
                                 (names, idx)
                             })
                             .unwrap_or_default();
+                        // Grind chip data: how many scenario runs flip this
+                        // difficulty to the next tier (local engine, cheap).
+                        let (runs_to_next, plateaued) = state
+                            .registry
+                            .by_id(c.benchmark_id as u64)
+                            .and_then(|(def, diff)| {
+                                let snap = state.store.latest(&steam_id, c.benchmark_id).ok()??;
+                                let progress = stored_to_progress(&snap);
+                                let grind =
+                                    kovaaks_core::grind::next_targets(&progress, def, &diff);
+                                let plateaued = snap.scenarios.iter().any(|row| {
+                                    let series = kovaaks_core::metrics::scenario_series_combined(
+                                        &state.store,
+                                        &steam_id,
+                                        c.benchmark_id,
+                                        &row.scenario,
+                                    )
+                                    .unwrap_or_default();
+                                    kovaaks_core::consistency::scenario_consistency(&series)
+                                        .plateaued
+                                });
+                                let runs = if grind.targets.is_empty() && grind.plan.is_empty() {
+                                    // complete or no reachable path
+                                    0
+                                } else if grind.targets.is_empty() {
+                                    grind.plan.len() as u32
+                                } else {
+                                    grind.targets.len() as u32
+                                };
+                                Some((runs, plateaued))
+                            })
+                            .unwrap_or((0, false));
                         BenchmarkVariant {
                             benchmark_id: c.benchmark_id,
                             difficulty_name: c.difficulty_name.clone(),
                             rank: c.rank.clone(),
                             tier_names,
                             current_rank,
+                            runs_to_next,
+                            plateaued,
                         }
                     })
                     .collect();

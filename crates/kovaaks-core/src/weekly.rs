@@ -30,6 +30,8 @@ pub struct WeeklyReport {
     pub scenarios_played: u32,
     /// Personal-best events (new highs) inside the week.
     pub pb_events: u32,
+    /// Estimated alive-time ("scored time") across the week, in seconds.
+    pub scored_seconds: f64,
     /// Max play-streak from streaks module (current streak at report time).
     pub current_streak: u32,
     pub xp: u64,
@@ -218,6 +220,7 @@ pub fn weekly_report(
                 .unwrap_or(0),
         )
         .progress_pct,
+        scored_seconds: store.scored_seconds_since(steam_id, since)?,
         improvements: rows.clone(),
         rank_changes,
     })
