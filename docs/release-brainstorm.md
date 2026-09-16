@@ -68,3 +68,36 @@ Other candidates:
   scenarios (public KovaaK's API) to see how far you are from the 99th-99.99th
   percentile. Failure mode: this reintroduces the network dependency the whole
   rank engine exists to avoid; make it opt-in per scenario and cache hard.
+
+
+---
+
+## Grill-me round 1 — the identity pass (v0.3.0)
+
+Facts gathered: 6 Svelte screens to restyle (App, BenchmarkCardView, Detail,
+RankBadge, Setup, Weekly); cyberpunk tokens in theme.css (#0a0e14 bg,
+#ff2e88/#00e5ff accents, CRT scanlines); system-ui fonts, no brand font;
+Chart.js charts styled inline; rank tier colors come from evxl's registry.
+
+❓ Q1 — visual direction: what IS the Kairos look?
+  (a) "Time-terminal": lean into KAIROS = the opportune moment — mono numerals,
+      clock-gradient accents, chronometer ticks framing rank badges, scanlines
+      become timeline ticks. (recommended)
+  (b) pure terminal / retro-computing
+  (c) industrial HUD
+  (d) something else
+
+❓ Q2 — typography: bundle a brand font for numerals/headings (JetBrains Mono /
+   Geist Mono) or stay on system stacks? (recommended: bundle one mono display
+   font; body stays system-ui)
+
+❓ Q3 — tier colors: keep evxl official colors and carry identity via GEOMETRY
+   (bracket frames, tick marks) — recommended — or remap colors to a Kairos
+   palette?
+
+❓ Q4 — motion budget: none / micro (rung fill animation, chip fades, count-up
+   numerals) / full scene transitions? (recommended: micro-only; 117-card grid
+   must stay fast)
+
+❓ Q5 — scope: all 6 screens in one commit-per-screen pass with a hard freeze on
+   new features (analytics view waits), recommended.
