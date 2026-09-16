@@ -86,29 +86,32 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 - [x] Scenario sort control on benchmark deep pages: weakest → strongest
   ordering (by rank tier, then score gap to next tier)
 
-## v0.3.0 — workflows while playing
+## v0.3.0 — the Kairos identity
+
+- [ ] Design pass first: signature typography, Kairos-branded rank/tier color
+  system, motion language, and a legacy-free component sheet applied across
+  every screen (overview, deep pages, weekly strip, setup, menus) — features
+  after this build ON the final identity instead of being rewired to it later
+- [ ] Scenario analytics view on the new components: ALL scenarios of the
+  current benchmark on one screen at once (grid of per-scenario mini-charts
+  with PB progression, CV, plateau, improvement %) — built for
+  screenshot-ability
+- [ ] Capture button: composes that all-scenarios report into one image and
+  copies it to the clipboard (render path shared with the later Discord
+  share card)
+- [ ] Grind session coach: while KovaaK's runs, the app surfaces the next 3
+  scenarios to grind for the selected family (no game overlay, app polling
+  only) — small, lands so the identity is proven on a newer screen too
+
+## v0.4.0 — play-session workflows
 
 - [ ] Tray mode: background watcher keeps the app fresh while KovaaK's runs;
   auto-launch optional
 - [ ] Reconcile view: API snapshot vs local CSV discrepancy report, per-card
   mismatch chip (hidden when in sync)
-- [ ] Grind session coach: while KovaaK's runs, the app surfaces the next 3
-  scenarios to grind for the selected family (no game overlay, app polling
-  only)
 - [ ] Playlists & launch: launch a scenario in KovaaK's from the app (same
   deep-link style evxl uses), plus benchmark playlist sharecodes / playlist
   launching like scenarios
-
-## v0.4.0 — identity & analytics
-
-- [ ] Full UI revamp: a true unique identity for Kairos (not a generic dark
-  theme) — signature typography, Kairos-branded rank/tier color system, motion
-  language, and a legacy-free component sheet used across every screen
-- [ ] Scenario analytics view: ALL scenarios of the current benchmark on one
-  screen at once (grid of per-scenario mini-charts with PB progression, CV,
-  plateau, improvement %) — built for screenshot-ability
-- [ ] Capture button: composes that all-scenarios report into one image and
-  copies it to the clipboard (same render path as the Discord share card)
 
 ## v0.5.0 — custom benches & community
 
@@ -120,7 +123,6 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 - [ ] Opt-in global leaderboards: per-scenario global ranks/percentiles, cached
   hard, off by default — local-only rank engine untouched
 
-## Later (unpromised)
 ## Later (unpromised)
 
 - Windows installer (NSIS via Tauri bundler) — dropped from v0.2.1, revisit later
