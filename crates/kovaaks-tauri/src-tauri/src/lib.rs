@@ -744,7 +744,7 @@ pub mod commands {
         let latest = history.last();
         let metrics = metrics_for_benchmark(&state.store, steam_id, benchmark_id)?;
         let progress = latest.map(|s| s.benchmark_progress).unwrap_or(0);
-        let overall_rank = latest.map(|s| s.overall_rank).unwrap_or(0).max(0) as u32;
+        let _overall_rank = latest.map(|s| s.overall_rank).unwrap_or(0).max(0) as u32;
         // v0.2 rank engine: recompute the rank the way evxl does. Stored
         // snapshots and the engine both work in display units — no rescaling.
         // A snapshot with zero scored scenarios must NOT produce a tier.
@@ -752,13 +752,14 @@ pub mod commands {
             .map(|s| s.scenarios.iter().any(|row| row.score > 0))
             .unwrap_or(false);
         let rank_tier = if scored_any {
-            latest
-                .and_then(|snap| {
-                    let api_progress = stored_to_progress(snap);
-                    kovaaks_core::rankcalc::compute_rank(&api_progress, bench, &difficulty)
-                        .tier(&difficulty)
-                })
-                .or_else(|| kovaaks_core::rank_from_index(overall_rank, &difficulty))
+            latest.and_then(|snap| {
+                let api_progress = stored_to_progress(snap);
+                // Engine-first only: the stored server rank is stale-prone
+                // (it ranks 1-of-32-scored snapshots "Serenity"), so it is no
+                // longer a fallback tier. The engine's coverage gate decides.
+                kovaaks_core::rankcalc::compute_rank(&api_progress, bench, &difficulty)
+                    .tier(&difficulty)
+            })
         } else {
             None
         };

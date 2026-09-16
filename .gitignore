@@ -15,3 +15,4 @@ make_icon.py
 
 # Local agent/tool state (never ship tool folders)
 .hermes/
+.impeccable/

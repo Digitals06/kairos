@@ -455,6 +455,35 @@ pub fn compute_rank(
     difficulty: &Difficulty,
 ) -> RankResult {
     let method = benchmark.rank_calculation.as_str();
+    // Coverage gate: unless the method's own rules define a partial pool
+    // (selectable top-N / aimbeast averages), a benchmark only ranks when
+    // EVERY scenario of its difficulty layout is played (score > 0). One
+    // scored scenario + several unplayed must not fabricate a tier — evxl
+    // shows these as unranked, and so do we.
+    let partial_pool = matches!(method, "aimbeast" | "aimbeast-partial" | "selectable-top-n")
+        || difficulty
+            .scenario_selection
+            .as_ref()
+            .map(|s| s.enabled)
+            .unwrap_or(false);
+    if !partial_pool {
+        let (mut scored, mut total) = (0usize, 0usize);
+        for (_, cp) in &progress.categories {
+            for (_, e) in &cp.scenarios {
+                total += 1;
+                if e.score > 0.0 {
+                    scored += 1;
+                }
+            }
+        }
+        // Under half the scenarios played → not enough signal for a rank;
+        // evxl-partial math on a handful of runs fabricates tiers like
+        // "Serenity" off one strong run of eight. Anything from 50% up keeps
+        // the engine's honest partial semantics.
+        if total > 0 && scored * 2 < total {
+            return empty_result(difficulty.rank_colors.len() as u32);
+        }
+    }
     let ladder_len = difficulty.rank_colors.len() as u32;
     let floor = scenario_floor_rank(progress);
     let (engine_rank, complete): (u32, bool) = match method {
@@ -696,6 +725,16 @@ pub fn compute_rank(
         rank: final_rank,
         name,
         complete,
+        method: MethodSource::Engine,
+    }
+}
+
+/// Rank-0 (unranked) result for methods that failed the coverage gate.
+fn empty_result(_ladder_len: u32) -> RankResult {
+    RankResult {
+        rank: 0,
+        name: "Unranked".to_string(),
+        complete: false,
         method: MethodSource::Engine,
     }
 }
@@ -2711,6 +2750,69 @@ pub fn calc_tsk(progress: &BenchmarkProgress, difficulty: &Difficulty) -> (u32, 
 #[cfg(test)]
 mod tests {
     use crate::types::{BenchmarkDef, Difficulty, ScenarioEntry, ScenarioSelection};
+
+    #[test]
+    fn coverage_gate_partial_scored_is_unranked() {
+        // Layout requires BOTH scenarios; s2 unscored → unranked for full-
+        // coverage methods, regardless of the single good score.
+        let def = crate::registry::registry()
+            .all()
+            .iter()
+            .find(|b| b.rank_calculation == "avasive")
+            .expect("avasive benchmark in registry")
+            .clone();
+        let diff = &def.difficulties[0];
+        // Build progress: first scenario scored, second zero (both same rungs).
+        let rungs = vec![100.0, 200.0, 300.0, 400.0];
+        let entry = |score: f64| ScenarioEntry {
+            score,
+            leaderboard_rank: 0,
+            scenario_rank: 0,
+            rank_maxes: rungs.clone(),
+            leaderboard_id: 0,
+        };
+        let progress = crate::types::BenchmarkProgress {
+            benchmark_progress: 1000.0,
+            overall_rank: 0,
+            categories: vec![(
+                "X".into(),
+                crate::types::CategoryProgress {
+                    benchmark_progress: 0.0,
+                    category_rank: 0,
+                    rank_maxes: Vec::new(),
+                    scenarios: vec![
+                        ("s1".into(), entry(1000.0)),
+                        ("s2".into(), entry(0.0)),
+                        ("s3".into(), entry(0.0)),
+                        ("s4".into(), entry(0.0)),
+                    ],
+                },
+            )],
+        };
+        let r = compute_rank(&progress, &def, diff);
+        assert_eq!(
+            r.rank, 0,
+            "under-50% coverage must stay unranked ({} {})",
+            r.rank, r.name
+        );
+        assert_eq!(r.name, "Unranked");
+        // And a full-scored variant DOES produce a tier.
+        let full = crate::types::BenchmarkProgress {
+            benchmark_progress: 2000.0,
+            overall_rank: 0,
+            categories: vec![(
+                "X".into(),
+                crate::types::CategoryProgress {
+                    benchmark_progress: 0.0,
+                    category_rank: 0,
+                    rank_maxes: Vec::new(),
+                    scenarios: vec![("s1".into(), entry(1000.0)), ("s2".into(), entry(1200.0))],
+                },
+            )],
+        };
+        let r2 = compute_rank(&full, &def, &diff.clone());
+        assert!(r2.rank >= 1, "fully scored should rank, got {}", r2.name);
+    }
 
     #[test]
     fn tier_from_rungs_matches_evxl_u() {
