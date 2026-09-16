@@ -101,3 +101,30 @@ Chart.js charts styled inline; rank tier colors come from evxl's registry.
 
 ❓ Q5 — scope: all 6 screens in one commit-per-screen pass with a hard freeze on
    new features (analytics view waits), recommended.
+
+
+**Round 1 answers:** 1-d ancient-Greek marble/basalt with light AND dark modes;
+2-bundle a font matching the Greek style; 3-keep official tier colors, brand
+via geometry; 4-micro motion; 5-all screens with feature freeze.
+
+**Round 2 — screen-level frontier:**
+
+❓ Q1 — dual mode build: light and dark as first-class themes + follow-system
+   default, user toggle in the gear menu? (recommended: yes — both themes get
+   full contrast checks; scanlines survive only in dark mode, light mode gets
+   a subtle paper-grain instead)
+
+❓ Q2 — surface grammar: marble on CONTENT (cards, panels, tables, text zones),
+   basalt on CHROME (app frame, header, buttons)? Accents swap today's
+   magenta/cyan for deep terracotta red + patinated bronze/gold. (recommended)
+
+❓ Q3 — type stack: Cormorant (classical serif for headings/labels) + JetBrains
+   Mono (all numerals, tabular data)? Fallbacks ship regardless. (recommended)
+
+❓ Q4 — rank geometry: badges as engraved plates (square corners, hairline
+   double border, tier color only in the engraving) + meander-pattern rung
+   bars with lit segments stepped like fret progression? (recommended)
+
+❓ Q5 — build order: theme tokens → RankBadge → overview/card → Detail →
+   Weekly → Setup/App, one commit per screen with a live check after each? 
+   (recommended)
