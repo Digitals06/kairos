@@ -114,6 +114,24 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 - [ ] Grind "GO" button (deep-launch KovaaK's like evxl) — taste of v0.4.0 coach
 
 
+- [ ] Complex-widget candidates (v0.4.0+): prefer ZERO-dep Svelte 5 libs for
+  stateful widgets — mukade-ui (28 widget comps: Table/Input/Select/Toggle/
+  Progress/Alert/Spider; scoped <style>, --mukade-* token-driven, NO Tailwind —
+  remap tokens to marble/basalt for e.g. the 0.5.0 local-bench forms). Also
+  viable: svader (runes renderer, 465★) for specific needs. Avoid Tailwind-
+  coupled kits (svelte-5-ui-lib, sv5ui, shadcn-svelte) — they'd re-import the
+  grey-box problem Astryx conventions helped us avoid. open-props easing/shadow
+  tokens: cherry-pick MIT curves by hand (done in theme.css), don't ship the
+  29KB sheet.
+  ⚖ VERDICT after a live trial (2026-09-17): tailwind v4 + @tailwindcss/vite
+  wire up in ~5 min but our hand-carved theme.css (svg data-URI grain,
+  color-mix chains) breaks the lightningcss minifier Tailwind v4 forces in,
+  and the grey-palette override tax lands on every component we'd pull.
+  Cost/benefit says NO for themed surfaces; only reconsider if a 0.4.0+
+  feature (reconcile dialogs, tray menus) demands complex a11y primitives,
+  and then prefer UNSTYLED primitives (bits-ui-style) styled by our own
+  tokens over grey-box class libraries.
+
 ## v0.4.0 — play-session workflows
 
 - [ ] Tray mode: background watcher keeps the app fresh while KovaaK's runs;
