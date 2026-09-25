@@ -33,14 +33,14 @@ If Kairos helps your grind, consider supporting development:
 - **What to grind next** — on each benchmark's page: the cheapest per-scenario scores that push you to the next rank tier, probed against the local rank engine so they're exact for every method family. Targets are capped at each scenario's ladder top, so they're always actually achievable; when no single scenario can carry you up, the panel produces a numbered step-by-step plan (each step within its scenario's ladder) that reaches the next tier together.
 - **Search + favorites** — filter the grid by name, pin benchmarks to the top. Pins survive restarts.
 - **Backup export** — one click in the settings menu writes your entire history as a single JSON file in Documents.
-- **Consistency & plateau tags** — grind targets show CV (spread of your recent plays) and flag scenarios stalled without a new personal best, so you can swap a stalled grind for something still climbing.
+- **Consistency & plateau tags** — grind targets show **spread** (how steady your recent runs are, 0% = identical scores) and flag scenarios stalled without a new personal best, so you can swap a stalled grind for something still climbing.
 - **Private by design** — no accounts, no telemetry; only public APIs, and live API tests skip unless you opt in.
 
 ![Kairos Avasive S2 Easier detail header and stats](docs/screenshots/app-detail-top-v020.png)
 
 ![Kairos score history chart with PB progression and consistency chips](docs/screenshots/app-detail-chart-v020.png)
 
-![Kairos what-to-grind-next panel with per-scenario targets and CV](docs/screenshots/app-grind-v020.png)
+![Kairos what-to-grind-next panel with per-scenario targets and spread](docs/screenshots/app-grind-v020.png)
 
 ## How it works
 

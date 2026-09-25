@@ -28,3 +28,4 @@ tauri = { version = "2", features = [] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
+arboard = "3.6.1"

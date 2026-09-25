@@ -24,6 +24,8 @@ import { listen } from '@tauri-apps/api/event'
   import Setup from './lib/Setup.svelte'
   import BenchmarkCardView from './lib/BenchmarkCardView.svelte'
   import Detail from './lib/Detail.svelte'
+  import Analytics from './lib/Analytics.svelte'
+  import Coach from './lib/Coach.svelte'
   import Weekly from './lib/Weekly.svelte'
     import { humanError } from './lib/errors'
 
@@ -305,6 +307,8 @@ import { listen } from '@tauri-apps/api/event'
 
   // --- detail drill-down (client-side state, no router lib) -------------------
   let selectedBenchmarkId = $state<number | null>(null)
+  // Scenario analytics view (all scenarios of one benchmark on one tablet).
+  let analyticsBenchmarkId = $state<number | null>(null)
 
   // --- search filter + favorites ----------------------------------------------
   // Benchmark-type filter (evxl-style tabs): empty selection = show all.
@@ -362,6 +366,11 @@ import { listen } from '@tauri-apps/api/event'
   function closeDetail() {
     selectedBenchmarkId = null
   }
+
+  function closeAnalytics() {
+    analyticsBenchmarkId = null
+    loadOverview()
+  }
 </script>
 
 <svelte:window onclick={onWindowClick} />
@@ -416,7 +425,7 @@ import { listen } from '@tauri-apps/api/event'
           {#if settingsOpen}
             <div class="dropdown panel">
               <label class="row">
-                <span>Deep Scan<br /><small>re-probe every benchmark, ignore cache</small></span>
+                <span>Check everything at launch<br /><small>Refresh every benchmark from the leaderboard, even unchanged ones — slower, use it to fix odd ranks. Leave off for the quick daily check.</small></span>
                 <input
                   type="checkbox"
                   checked={deepScan}
@@ -424,10 +433,10 @@ import { listen } from '@tauri-apps/api/event'
                 />
               </label>
               <button class="btn" onclick={() => doExportBackup()} disabled={exporting}>
-                {exporting ? 'Exporting…' : 'Export data…'}
+                {exporting ? 'Exporting…' : 'Export backup…'}
               </button>
               <button class="btn" onclick={() => doExportSeriesCsv()} disabled={exportingCsv}>
-                {exportingCsv ? 'Exporting…' : 'Export CSV…'}
+                {exportingCsv ? 'Exporting…' : 'Export scores (CSV)…'}
               </button>
             <div class="theme-row" role="radiogroup" aria-label="Theme">
               <span class="theme-label">Theme</span>
@@ -464,10 +473,17 @@ import { listen } from '@tauri-apps/api/event'
         </header>
 
       {/if}
-      {#if selectedBenchmarkId !== null}
-        <Detail benchmarkId={selectedBenchmarkId} onback={closeDetail} />
+      {#if analyticsBenchmarkId !== null}
+        <Analytics benchmarkId={analyticsBenchmarkId} onback={closeAnalytics} />
+      {:else if selectedBenchmarkId !== null}
+        <Detail
+          benchmarkId={selectedBenchmarkId}
+          onback={closeDetail}
+          onanalytics={() => (analyticsBenchmarkId = selectedBenchmarkId)}
+        />
       {:else}
         <Weekly shared={weekly} />
+        <Coach />
         <div class="search-row">
           <input
             class="search-input"

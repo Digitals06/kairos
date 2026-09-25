@@ -18,3 +18,6 @@ make_icon.py
 .impeccable/
 
 /shots/
+
+# stray foreign project temporarily parked here — not part of Kairos
+crates/roleplay-chat/

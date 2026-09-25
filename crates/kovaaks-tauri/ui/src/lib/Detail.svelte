@@ -3,7 +3,11 @@
   import { getBenchmarkDetail, grindNext, type BenchmarkDetail, type GrindNext } from '../lib/api'
   import RankBadge from './RankBadge.svelte'
 
-  let { benchmarkId, onback }: { benchmarkId: number; onback: () => void } = $props()
+  let {
+    benchmarkId,
+    onback,
+    onanalytics,
+  }: { benchmarkId: number; onback: () => void; onanalytics?: () => void } = $props()
 
   // --- detail payload --------------------------------------------------------
   let detail = $state<BenchmarkDetail | null>(null)
@@ -336,7 +340,12 @@
         <h2>{detail.card.benchmark_name}</h2>
         <span class="detail-difficulty">{detail.card.difficulty_name}</span>
       </div>
-      <RankBadge tier={detail.card.rank} />
+      <div class="head-actions">
+        {#if onanalytics}
+          <button class="btn btn-small" onclick={onanalytics}>All scenarios</button>
+        {/if}
+        <RankBadge tier={detail.card.rank} />
+      </div>
     </header>
 
     {#if grind && !grind.complete}
@@ -393,7 +402,7 @@
                       · {t.rungsCrossed} tiers
                     {/if}
                     {#if t.cv !== null}
-                      · CV {(t.cv * 100).toFixed(0)}%
+                      · spread {(t.cv * 100).toFixed(0)}%
                     {/if}
                     {#if t.plateaued}
                       · plateaued
@@ -422,8 +431,12 @@
         <span class="chip">
           {activeProgression.days_since_pb >= 999 ? 'single sample' : `${Math.floor(activeProgression.days_since_pb)}d since PB`}
         </span>
-        <span class="chip" class:warn={activeProgression.cv < 0.08}>
-          CV {(activeProgression.cv * 100).toFixed(0)}%
+        <span
+          class="chip"
+          class:warn={activeProgression.cv < 0.08}
+          title="How steady your recent runs are — 0% means every run scored the same, higher = more up-and-down"
+        >
+          spread {(activeProgression.cv * 100).toFixed(0)}%
         </span>
       </div>
     {/if}
@@ -591,3 +604,11 @@
     </section>
   {/if}
 </div>
+
+<style>
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+</style>

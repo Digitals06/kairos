@@ -60,7 +60,7 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 
 ## v0.1.9 — released
 
-- [x] Consistency & plateau detection: grind targets carry CV (spread over the
+- [x] Consistency & plateau detection: grind targets carry spread (coefficient of variation over the
   recent merged series) and a plateaued tag (no new PB in 3+ days)
 - [x] Grind targets lead with the cheapest single-tier wins and label how many
   ladder tiers a step spans
@@ -88,18 +88,18 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 
 ## v0.3.0 — the Kairos identity
 
-- [ ] Design pass first: signature typography, Kairos-branded rank/tier color
+- [x] Design pass first: signature typography, Kairos-branded rank/tier color
   system, motion language, and a legacy-free component sheet applied across
   every screen (overview, deep pages, weekly strip, setup, menus) — features
   after this build ON the final identity instead of being rewired to it later
-- [ ] Scenario analytics view on the new components: ALL scenarios of the
+- [x] Scenario analytics view on the new components: ALL scenarios of the
   current benchmark on one screen at once (grid of per-scenario mini-charts
-  with PB progression, CV, plateau, improvement %) — built for
+  with PB progression, spread, plateau, improvement %) — built for
   screenshot-ability
-- [ ] Capture button: composes that all-scenarios report into one image and
+- [x] Capture button: composes that all-scenarios report into one image and
   copies it to the clipboard (render path shared with the later Discord
   share card)
-- [ ] Grind session coach: while KovaaK's runs, the app surfaces the next 3
+- [x] Grind session coach: while KovaaK's runs, the app surfaces the next 3
   scenarios to grind for the selected family (no game overlay, app polling
   only) — small, lands so the identity is proven on a newer screen too
 

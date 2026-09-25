@@ -1473,6 +1473,28 @@ pub mod commands {
             .set_meta(SETTINGS_KEY, &json)
             .map_err(|e| e.to_string())
     }
+    /// Copy a composed report image to the OS clipboard. The webview renders and
+    /// rasterizes the report (SVG → canvas); Rust only owns the platform write.
+    #[tauri::command]
+    pub fn copy_report_image(width: u32, height: u32, rgba: Vec<u8>) -> Result<(), String> {
+        use arboard::ImageData;
+        if rgba.len() != (width as usize) * (height as usize) * 4 {
+            return Err(format!(
+                "rgba length {} does not match {}x{}",
+                rgba.len(),
+                width,
+                height
+            ));
+        }
+        arboard::Clipboard::new()
+            .map_err(|e| e.to_string())?
+            .set_image(ImageData {
+                width: width as usize,
+                height: height as usize,
+                bytes: rgba.into(),
+            })
+            .map_err(|e| e.to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1538,6 +1560,7 @@ pub fn run() {
             commands::get_settings,
             commands::set_settings,
             commands::toggle_favorite,
+            commands::copy_report_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
