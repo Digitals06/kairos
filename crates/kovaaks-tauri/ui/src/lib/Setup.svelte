@@ -115,4 +115,20 @@
     color: var(--danger);
     font-size: 13px;
   }
+  .brand h1 {
+    position: relative;
+    font-family: var(--font-display);
+    font-size: 42px;
+    letter-spacing: 0.34em;
+    color: var(--text);
+  }
+
+  .brand .engrave {
+    position: absolute;
+    left: 3px;
+    right: -0.34em;
+    bottom: -6px;
+    height: 3px;
+    background: linear-gradient(to right, transparent, var(--accent) 16%, var(--accent) 72%, transparent);
+  }
 </style>

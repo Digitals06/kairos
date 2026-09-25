@@ -212,6 +212,11 @@ export interface RankChange {
   to: string
 }
 
+export interface LevelStep {
+  name: string
+  threshold: number
+}
+
 export interface WeeklyReport {
   since: string
   days_played: number
@@ -223,6 +228,8 @@ export interface WeeklyReport {
   level_name: string
   level: number
   level_progress_pct: number
+  level_steps: LevelStep[]
+  plays_per_day: number[]
   improvements: ImprovementRow[]
   rank_changes: RankChange[]
 }

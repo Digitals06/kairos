@@ -42,7 +42,12 @@
   }
 </script>
 
-<article class="panel card" class:favorited={card.is_favorite} class:expanded>
+<article
+  class="panel card"
+  class:favorited={card.is_favorite}
+  class:expanded
+  style={`--vx:${10 + (card.benchmark_id * 37) % 80}%; --vy:${10 + (card.benchmark_id * 53) % 70}%; --va:${(card.benchmark_id * 71) % 180}deg;`}
+>
   <button
     class="fav-btn"
     class:active={card.is_favorite}
@@ -115,9 +120,56 @@
     display: flex;
     align-items: center;
     flex-direction: column;
-    padding: 14px 16px;
+    padding: 14px 16px 12px 20px;
     cursor: pointer;
+    border-radius: var(--radius);
     transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  }
+  /* fluted left edge of a marble tablet */
+  .card::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 7px;
+    background: repeating-linear-gradient(180deg, color-mix(in srgb, var(--text) 9%, transparent) 0 2px, transparent 2px 7px);
+    pointer-events: none;
+  }
+    /* deterministic marble veining, unique per tablet (seeded by benchmark id) */
+  .card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    opacity: 0.55;
+    mix-blend-mode: multiply;
+    background-image:
+      radial-gradient(140% 60% at var(--vx, 50%) var(--vy, 40%), transparent 52%, color-mix(in srgb, #7d715c 30%, transparent) 76%, transparent 96%),
+      radial-gradient(220% 90% at calc(100% - var(--vx, 50%)) calc(100% - var(--vy, 30%)), transparent 58%, color-mix(in srgb, #a5988a 34%, transparent) 80%, transparent 97%),
+      repeating-linear-gradient(var(--va, 15deg), transparent 0 10px, color-mix(in srgb, #8a7f6d 12%, transparent) 10px 11.5px, transparent 11.5px 24px);
+  }
+
+  /* deterministic marble veining, unique per tablet (seeded by benchmark id) */
+  .card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    opacity: 0.5;
+    mix-blend-mode: multiply;
+    background-image:
+      radial-gradient(140% 60% at var(--vx, 50%) var(--vy, 40%), transparent 55%, color-mix(in srgb, #7d715c 26%, transparent) 78%, transparent 96%),
+      radial-gradient(220% 90% at calc(100% - var(--vx, 50%)) calc(100% - var(--vy, 30%)), transparent 60%, color-mix(in srgb, #a5988a 30%, transparent) 80%, transparent 97%),
+      repeating-linear-gradient(var(--va, 15deg), transparent 0 11px, color-mix(in srgb, #8a7f6d 9%, transparent) 11px 12px, transparent 12px 26px);
+  }
+
+  .card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent-2);
+    box-shadow: 0 10px 22px -14px color-mix(in srgb, var(--text) 55%, transparent);
   }
 
   .variants {
@@ -159,18 +211,18 @@
     gap: 6px;
   }
 
-  .chip-run {
+  .chip-run { animation: chipIn 0.2s ease both;
     font-size: 10px;
-    color: var(--accent-2, #00e5ff);
+    color: var(--accent-2);
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 1px 6px;
   }
 
-  .chip-plateau {
+  .chip-plateau { animation: chipIn 0.2s ease both;
     font-size: 10px;
-    color: #ff5470;
-    border: 1px solid rgba(255, 84, 112, 0.55);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
     border-radius: 4px;
     padding: 1px 6px;
   }
@@ -183,22 +235,26 @@
 
   .rung {
     flex: 1;
-    height: 4px;
-    border-radius: 2px;
-    background: color-mix(in srgb, var(--c) 18%, transparent);
+    height: 5px;
+    border-radius: 0;
+    position: relative;
+    background: var(--panel-sunken);
+    border: 1px solid var(--border);
+    transition: background 0.25s ease;
   }
 
   .rung.lit {
     background: var(--c);
+    box-shadow: 0 1px 0 color-mix(in srgb, #fff 30%, transparent) inset;
   }
 
   .card.favorited {
-    border-color: rgba(255, 210, 70, 0.55);
+    border-color: color-mix(in srgb, var(--accent-2) 60%, transparent);
   }
 
   .card:hover {
     border-color: var(--accent-2);
-    box-shadow: var(--glow-cyan);
+    box-shadow: var(--glow-accent-2);
   }
 
   .card:active {
@@ -273,9 +329,14 @@
 
   .diff-count {
     font-size: 10px;
-    color: var(--accent-2, #00e5ff);
+    color: var(--accent-2);
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 1px 5px;
+  }
+
+  @keyframes chipIn {
+    from { opacity: 0; transform: translateY(2px); }
+    to { opacity: 1; transform: none; }
   }
 </style>

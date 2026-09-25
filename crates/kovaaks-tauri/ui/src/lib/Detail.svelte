@@ -137,11 +137,23 @@
   // running-high step line, the 7-day rolling average, and the raw snapshot
   // line. Running high + rolling average are presentation-only series derived
   // from snapshot_history in TS; every plotted number originates from the DTO.
-  const CYAN = '#00e5ff'
-  const MAGENTA = '#ff2e88'
-  const GREEN = '#10b981'
-  const GREY = '#9ca3af'
-  const GRID = '#1f2937'
+  // Chart.js canvas cannot parse CSS custom properties or color-mix(), so the
+  // theme tokens are resolved to concrete colors at chart-build time.
+  function cssColor(token: string): string {
+    const probe = document.createElement('span')
+    probe.style.color = token
+    probe.style.display = 'none'
+    document.body.appendChild(probe)
+    const c = getComputedStyle(probe).color
+    probe.remove()
+    return c || '#888'
+  }
+
+  const CYAN = cssColor('var(--accent-2)')
+  const MAGENTA = cssColor('var(--accent)')
+  const GREEN = cssColor('var(--success)')
+  const GREY = cssColor('var(--muted)')
+  const GRID = cssColor('var(--border)')
   const DAY_MS = 7 * 24 * 60 * 60 * 1000
 
   let lineCanvas: HTMLCanvasElement | undefined = $state()
@@ -201,7 +213,8 @@
             data: highPts,
             stepped: 'before',
             borderColor: GREEN,
-            backgroundColor: 'rgba(16, 185, 129, 0.06)',
+            // fill alpha is baked in because canvas can't do color-mix()
+            backgroundColor: GREEN.startsWith('rgb') ? GREEN.replace('rgb(', 'rgba(').replace(')', ', 0.08)') : 'rgba(95, 132, 74, 0.08)',
             borderWidth: 1.5,
             pointRadius: 0,
             fill: true,
@@ -266,7 +279,7 @@
           },
         },
         plugins: {
-          legend: { labels: { color: '#e5e7eb', boxWidth: 12 } },
+          legend: { labels: { color: 'var(--text)', boxWidth: 12 } },
           tooltip: {
             callbacks: {
               title: (items) =>

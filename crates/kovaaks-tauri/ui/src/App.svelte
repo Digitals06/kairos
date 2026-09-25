@@ -17,6 +17,8 @@ import { listen } from '@tauri-apps/api/event'
     type BenchmarkCard,
     type PlayerProfile,
     type AppSettings,
+    weeklyReport,
+    type WeeklyReport as WeeklyRep,
   } from './lib/api'
   import Setup from './lib/Setup.svelte'
   import BenchmarkCardView from './lib/BenchmarkCardView.svelte'
@@ -40,6 +42,29 @@ import { listen } from '@tauri-apps/api/event'
     clearTimeout(toastTimer)
     toastTimer = setTimeout(() => (toast = null), 5000)
   }
+
+  // --- theme engine (Kairos identity: marble/basalt) -------------------------
+  type ThemeName = 'marble' | 'basalt' | 'system'
+  let theme = $state<ThemeName>('system')
+  let resolvedTheme = $state<'marble' | 'basalt'>('basalt')
+
+  const themeMedia = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: light)') : null
+
+  function currentSystemTheme(): 'marble' | 'basalt' {
+    return themeMedia?.matches ? 'marble' : 'basalt'
+  }
+
+  function applyTheme() {
+    resolvedTheme = theme === 'system' ? currentSystemTheme() : theme
+    document.documentElement.dataset.theme = resolvedTheme
+    try { localStorage.setItem('kairos-theme', theme) } catch {}
+  }
+
+  $effect(() => {
+    try { theme = (localStorage.getItem('kairos-theme') as ThemeName) ?? 'system' } catch { theme = 'system' }
+    applyTheme()
+    themeMedia?.addEventListener('change', () => { if (theme === 'system') applyTheme() })
+  })
 
   // --- sync bar state --------------------------------------------------------
   let syncing = $state(false)
@@ -222,10 +247,18 @@ import { listen } from '@tauri-apps/api/event'
     )
   }
 
+  let weekly = $state<WeeklyRep | null>(null)
+
   async function loadOverview() {
     loadingOverview = true
     try {
       cards = sortCards(await getOverview())
+      try {
+        weekly = await weeklyReport()
+      } catch (e) {
+        // Non-fatal: frieze stays hidden; daily cache may still be computing.
+        setTimeout(() => weeklyReport().then((r) => (weekly = r)).catch(() => {}), 4000)
+      }
     } catch (err) {
       showToast(`Failed to load overview: ${String(err)}`)
     } finally {
@@ -326,7 +359,7 @@ import { listen } from '@tauri-apps/api/event'
 
 {#if screen === 'loading'}
   <div class="boot">
-    <h1 class="logo">KAIROS</h1>
+    <h1 class="boot-logo display">ΚΑΙΡΟΣ</h1>
   </div>
 {:else if screen === 'setup'}
   <Setup onconnected={onConnected} />
@@ -387,6 +420,18 @@ import { listen } from '@tauri-apps/api/event'
               <button class="btn" onclick={() => doExportSeriesCsv()} disabled={exportingCsv}>
                 {exportingCsv ? 'Exporting…' : 'Export CSV…'}
               </button>
+            <div class="theme-row" role="radiogroup" aria-label="Theme">
+              <span class="theme-label">Thème</span>
+              {#each ['marble', 'system', 'basalt'] as it (it)}
+                <button
+                  class="theme-opt"
+                  class:active={theme === it}
+                  onclick={() => { theme = it as ThemeName; applyTheme() }}
+                >
+                  {it === 'marble' ? 'Marbre' : it === 'basalt' ? 'Basalte' : 'Système'}
+                </button>
+              {/each}
+            </div>
             </div>
           {/if}
         </div>
@@ -394,10 +439,20 @@ import { listen } from '@tauri-apps/api/event'
     </header>
 
     <main>
+      {#if selectedBenchmarkId === null}
+        <header class="pediment display">
+          <span class="roof" aria-hidden="true"></span>
+          <span class="cornice" aria-hidden="true"></span>
+          <h1 class="gable">ΚΑΙΡΟΣ</h1>
+          <p class="epigraph"><small>καιρός — the opportune moment</small></p>
+          <span class="meander" aria-hidden="true"></span>
+        </header>
+
+      {/if}
       {#if selectedBenchmarkId !== null}
         <Detail benchmarkId={selectedBenchmarkId} onback={closeDetail} />
       {:else}
-        <Weekly />
+        <Weekly shared={weekly} />
         <div class="search-row">
           <input
             class="search-input"
@@ -433,6 +488,7 @@ import { listen } from '@tauri-apps/api/event'
             </p>
           </div>
         {:else}
+          <h2 class="section-title display">Stoa <span>στοά — the colonnade of benchmarks</span></h2>
           <div class="grid">
             {#each filteredCards as card (card.benchmark_id)}
               <BenchmarkCardView
@@ -460,14 +516,75 @@ import { listen } from '@tauri-apps/api/event'
     place-items: center;
   }
 
-  .logo {
-    font-size: 26px;
-    letter-spacing: 0.3em;
-    color: var(--accent);
-    text-shadow: var(--glow-magenta);
+  .pediment {
+    position: relative;
+    text-align: center;
+    padding: 54px 0 10px;
+    margin-bottom: 8px;
   }
 
-  .app {
+  .pediment .roof {
+    position: absolute;
+    left: -6px;
+    right: -6px;
+    top: 0;
+    height: clamp(44px, 6.5vw, 68px);
+    background: linear-gradient(180deg, var(--panel-raised), var(--chrome));
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+    filter: drop-shadow(0 2px 0 color-mix(in srgb, var(--text) 16%, transparent));
+  }
+
+  .pediment .cornice {
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    top: clamp(44px, 6.5vw, 68px);
+    height: 3px;
+    background: linear-gradient(90deg, transparent, var(--border-strong) 12%, var(--border-strong) 88%, transparent);
+  }
+
+  .pediment .gable {
+    position: relative;
+    font-size: 34px;
+    font-weight: 900;
+    letter-spacing: 0.24em;
+    color: var(--accent);
+    margin: 0;
+    font-family: var(--font-display);
+  }
+
+  .pediment .epigraph {
+    margin: 4px 0 8px;
+  }
+
+  .pediment .epigraph small {
+    font-family: var(--font-serif);
+    font-size: 13px;
+    font-style: italic;
+    text-transform: none;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+
+  .pediment .meander {
+    height: 10px;
+    width: min(560px, 92%);
+    margin: 0 auto;
+    background: var(--meander);
+    opacity: 0.55;
+  }
+
+  .logo { display: none; }
+
+  .boot-logo {
+    font-family: var(--font-display);
+    font-size: 34px;
+    font-weight: 900;
+    letter-spacing: 0.2em;
+    color: var(--accent);
+  }
+
+    .app {
     max-width: 1280px;
     margin: 0 auto;
     padding: 0 24px 40px;
@@ -478,9 +595,11 @@ import { listen } from '@tauri-apps/api/event'
     display: flex;
     align-items: center;
     gap: 18px;
-    padding: 16px 0;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 20px;
+    padding: 16px 14px;
+    margin: 0 -14px 20px;          /* band stretch into the chrome zone */
+    background: var(--chrome);
+    border-bottom: 1px solid var(--border-strong);
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent);
   }
 
   .profile-chip {

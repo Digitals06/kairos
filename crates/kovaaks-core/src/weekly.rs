@@ -39,6 +39,10 @@ pub struct WeeklyReport {
     pub level_name: String,
     pub level: u32,
     pub level_progress_pct: u32,
+    /// Full 12-step Greek ladder (name, cumulative XP threshold) for the frieze.
+    pub level_steps: Vec<(String, u64)>,
+    /// Plays per calendar day, trailing 7 days, oldest → newest (torch strip).
+    pub plays_per_day: [u32; 7],
     /// Top 5 improvements by delta (improving then regressing rows).
     pub improvements: Vec<ImprovementRow>,
     /// Benchmark rank changes inside the week: (benchmark_id, benchmark,
@@ -220,6 +224,20 @@ pub fn weekly_report(
                 .unwrap_or(0),
         )
         .progress_pct,
+        level_steps: crate::streaks::LEVEL_STEPS
+            .iter()
+            .map(|(n, xp)| (n.to_string(), *xp))
+            .collect(),
+        plays_per_day: {
+            let mut counts = [0u32; 7];
+            for ts in &week_plays {
+                let day = (ts.date_naive() - since.date_naive())
+                    .num_days()
+                    .clamp(0, 6) as usize;
+                counts[day] += 1;
+            }
+            counts
+        },
         scored_seconds: store.scored_seconds_since(steam_id, since)?,
         improvements: rows.clone(),
         rank_changes,

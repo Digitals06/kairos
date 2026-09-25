@@ -133,7 +133,7 @@ pub struct Level {
     pub progress_pct: u32,
 }
 
-const LEVEL_STEPS: &[(&str, u64)] = &[
+pub const LEVEL_STEPS: &[(&str, u64)] = &[
     // Greek progression themed on Kairos (καιρός — the opportune moment):
     // Void → Spark of the moment → pursuit → mastery of time → godhood of
     // timing. Peak requires years of steady grinding.

@@ -1,141 +1,141 @@
 /* ===========================================================================
-   Kairos — cyberpunk theme
-   bg #0a0e14 · panels #111827 · accents #ff2e88 (magenta) / #00e5ff (cyan)
-   success #10b981 · text #e5e7eb · muted #9ca3af · borders #1f2937
+   Kairos — The Agora
+   The app IS a Greek temple. Fonts: Cinzel (inscription) + EB Garamond (body)
+   + JetBrains Mono (dense numerals). MARBLE = sunlit agora, BASALT = night
+   temple with torchlight gold. Meander rules, coin seals, fluted tablets.
    =========================================================================== */
 
+@font-face { font-family: 'Cinzel'; src: url('./assets/cinzel-400.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Cinzel'; src: url('./assets/cinzel-700.ttf') format('truetype'); font-weight: 700; font-display: swap; }
+@font-face { font-family: 'Cinzel'; src: url('./assets/cinzel-900.ttf') format('truetype'); font-weight: 900; font-display: swap; }
+@font-face { font-family: 'Garamond'; src: url('./assets/ebgaramond-400.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Garamond'; src: url('./assets/ebgaramond-600.ttf') format('truetype'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Garamond'; src: url('./assets/ebgaramond-italic.ttf') format('truetype'); font-style: italic; font-display: swap; }
+@font-face { font-family: 'JBMono'; src: url('./assets/JetBrainsMono-Regular.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'JBMono'; src: url('./assets/JetBrainsMono-SemiBold.ttf') format('truetype'); font-weight: 600; font-display: swap; }
+
 :root {
-  --bg: #0a0e14;
-  --panel: #111827;
-  --panel-raised: #161f31;
-  --accent: #ff2e88;
-  --accent-2: #00e5ff;
-  --success: #10b981;
-  --danger: #f43f5e;
-  --text: #e5e7eb;
-  --muted: #9ca3af;
-  --border: #1f2937;
-  --radius: 12px;
-  --mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas,
-    'Liberation Mono', monospace;
-  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --glow-magenta: 0 0 10px rgba(255, 46, 136, 0.45), 0 0 28px rgba(255, 46, 136, 0.18);
-  --glow-cyan: 0 0 10px rgba(0, 229, 255, 0.4), 0 0 28px rgba(0, 229, 255, 0.15);
+  --font-display: 'Cinzel', Georgia, serif;
+  --font-serif: 'Garamond', Georgia, 'Times New Roman', serif;
+  --mono: 'JBMono', ui-monospace, Consolas, monospace;
+  --sans: var(--font-body, system-ui);
+  --radius: 3px;
+  --radius-lg: 6px;
+  /* meander terracotta rule (height x 10px) */
+  --meander: linear-gradient(var(--accent), var(--accent)) 0 0 / 100% 2px no-repeat,
+    repeating-linear-gradient(90deg, transparent 0 4px, color-mix(in srgb, var(--accent) 70%, transparent) 4px 6px,
+      transparent 6px 10px, color-mix(in srgb, var(--accent) 70%, transparent) 10px 12px);
 }
 
-* {
-  box-sizing: border-box;
+/* ── MARBLE — sunlit agora ── */
+:root, html[data-theme='marble'] {
+  --bg: #efe9dc;
+  --chrome: #ddd4c2;
+  --panel: #f8f4ea;
+  --panel-raised: #fdfbf5;
+  --panel-sunken: #e7dfcf;
+  --text: #2a241d;
+  --muted: #6b6151;
+  --faint: #6f6350;        /* darkened for WCAG 4.5:1 on ivory panels */
+  --border: #cbbfa6;
+  --border-strong: #a3997a;
+  --accent: #b7412f;          /* terracotta pigment */
+  --accent-2: #b8892f;        /* bronze */
+  --success: #5c6b46;         /* laurel/olive */
+  --danger: #8e3122;          /* fired clay */
+  --aegean: #35617a;
+  --glow-accent: 0 1px 0 rgba(42, 36, 29, 0.5) inset, 0 6px 14px -10px rgba(42, 36, 29, 0.5);
+  --glow-accent-2: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+  --hair-shadow: 0 1px 0 rgba(255, 252, 244, 0.8) inset;
 }
 
-html,
-body {
-  height: 100%;
+/* ── BASALT — night temple, torchlight gold ── */
+html[data-theme='basalt'] {
+  --bg: #141210;
+  --chrome: #0e0c0a;
+  --panel: #1c1916;
+  --panel-raised: #242019;
+  --panel-sunken: #100e0c;
+  --text: #e8dfd0;
+  --muted: #b4a488;
+  --faint: #967f63;
+  --border: #3d3228;
+  --border-strong: #5c4a3a;
+  --accent: #d4a857;          /* torchlight gold */
+  --accent-2: #b8892f;
+  --success: #a4b06a;
+  --danger: #e06456;
+  --aegean: #7aa5c0;
+  --glow-accent: 0 1px 0 rgba(255, 232, 190, 0.06) inset, 0 6px 16px -10px rgba(0, 0, 0, 0.8);
+  --glow-accent-2: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  --hair-shadow: 0 1px 0 rgba(255, 236, 200, 0.05) inset;
 }
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--sans);
-  font-size: 14px;
-  line-height: 1.45;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.5;
   overflow-x: hidden;
 }
-
-/* Subtle CRT scanline overlay across the whole app */
-body::after {
+/* faint veining texture in marble; ember glow in basalt */
+html[data-theme='marble'] body::after {
   content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 9999;
-  background: repeating-linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.022) 0px,
-    rgba(255, 255, 255, 0.022) 1px,
-    transparent 1px,
-    transparent 3px
-  );
+  position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+  background-image: var(--grain, none);
+  opacity: 0.35;
 }
+html[data-theme='marble'] { --grain: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="140" height="140"%3E%3Cfilter id="n"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="2"/%3E%3CfeColorMatrix values="0 0 0 0 0.3 0 0 0 0 0.26 0 0 0 0 0.2 0 0 0 0.05 0"/%3E%3C/filter%3E%3Crect width="140" height="140" filter="url(%23n)"/%3E%3C/svg%3E'); }
 
-#app {
-  min-height: 100vh;
-}
+#app { min-height: 100vh; }
 
-h1,
-h2,
-h3 {
+h1, h2, h3 {
   margin: 0;
+  font-family: var(--font-display);
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
-a {
-  color: var(--accent-2);
-  text-decoration: none;
-}
+a { color: var(--aegean); text-decoration: none; }
 
-button {
-  font-family: inherit;
-  font-size: inherit;
-  color: inherit;
-  background: none;
-  border: none;
-  cursor: pointer;
-}
+button { font-family: inherit; font-size: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+input { font-family: inherit; font-size: inherit; }
 
-input {
-  font-family: inherit;
-  font-size: inherit;
-}
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.display { font-family: var(--font-display); }
 
-.num {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-}
-
-/* --- shared panel / button primitives ------------------------------------ */
-
+/* ── shared primitives: stone panels & buttons ── */
 .panel {
-  background: var(--panel);
+  background: linear-gradient(180deg, var(--panel-raised) 0%, var(--panel) 100%);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: var(--hair-shadow), 0 2px 6px rgba(42, 36, 29, 0.08);
 }
+html[data-theme='basalt'] .panel { box-shadow: var(--hair-shadow), 0 2px 10px rgba(0, 0, 0, 0.5); }
 
 .btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
   background: var(--panel-raised);
   color: var(--text);
-  transition: border-color 0.15s, box-shadow 0.15s, color 0.15s;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  transition: border-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
-
-.btn:hover:not(:disabled) {
-  border-color: var(--accent-2);
-  color: var(--accent-2);
-  box-shadow: var(--glow-cyan);
-}
-
-.btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.btn-accent {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: rgba(255, 46, 136, 0.08);
-}
-
-.btn-accent:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: #fff;
-  box-shadow: var(--glow-magenta);
-}
+.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); box-shadow: var(--glow-accent-2); }
+.btn:disabled { opacity: 0.55; cursor: default; }
+.btn-accent { background: var(--accent); color: var(--panel-raised); border-color: var(--accent); }
+.btn-accent:hover:not(:disabled) { background: var(--accent-2, var(--accent)); color: #fff; box-shadow: none; }
 
 /* --- loading skeleton ----------------------------------------------------- */
 
@@ -155,8 +155,8 @@ input {
   background: linear-gradient(
     100deg,
     transparent 20%,
-    rgba(0, 229, 255, 0.07) 45%,
-    rgba(255, 46, 136, 0.06) 55%,
+    rgba(201, 164, 92, 0.07) 45%,
+    rgba(139, 43, 31, 0.06) 55%,
     transparent 80%
   );
   animation: shimmer 1.4s infinite;
@@ -185,7 +185,7 @@ input {
   border: 1px solid var(--danger);
   border-radius: var(--radius);
   color: var(--text);
-  box-shadow: 0 0 14px rgba(244, 63, 94, 0.35);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
   font-size: 13px;
 }
 
@@ -204,7 +204,7 @@ input {
 
 .field:focus {
   border-color: var(--accent-2);
-  box-shadow: var(--glow-cyan);
+  box-shadow: var(--glow-accent-2);
 }
 
 .field::placeholder {
@@ -336,8 +336,8 @@ input {
 
 .scope-select:focus {
   outline: none;
-  border-color: var(--accent-2, #00e5ff);
-  box-shadow: 0 0 8px rgba(0, 229, 255, 0.35);
+  border-color: var(--accent-2);
+  box-shadow: var(--glow-accent-2);
 }
 
 .chart-box {
@@ -410,7 +410,7 @@ input {
 }
 
 .bench-table tbody tr:hover td {
-  background: rgba(0, 229, 255, 0.05);
+  background: color-mix(in srgb, var(--accent-2) 6%, transparent);
 }
 
 .scenario-name {
@@ -431,7 +431,7 @@ input {
 }
 
 .scenario-name:hover {
-  color: var(--accent-2, #00e5ff);
+  color: var(--accent-2);
 }
 
 .score-pair {
@@ -508,7 +508,7 @@ input {
 }
 
 .detail-table tbody tr:hover td {
-  background: rgba(0, 229, 255, 0.03);
+  background: color-mix(in srgb, var(--accent-2) 4%, transparent);
 }
 
 .empty-state {
@@ -543,7 +543,7 @@ input {
 }
 .grind-next {
   font-weight: 700;
-  color: var(--accent, #ff2e88);
+  color: var(--accent);
 }
 .grind-list {
   list-style: none;
@@ -563,7 +563,7 @@ input {
   white-space: nowrap;
 }
 .grind-delta {
-  color: var(--accent, #ff2e88);
+  color: var(--accent);
 }
 .grind-note {
   margin: 10px 0 0;
@@ -572,4 +572,120 @@ input {
 }
 .grind-more {
   color: var(--muted-foreground, #9ca3af);
+}
+
+
+/* --- theme toggle --------------------------------------------------------- */
+
+.theme-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.theme-label {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-right: 6px;
+}
+
+.theme-opt {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+}
+
+.theme-opt.active {
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+  box-shadow: var(--glow-accent-2);
+}
+
+
+/* ── level frieze: the Greek ladder strip ── */
+.frieze {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 6px;
+  margin: 12px 0 0;
+  width: 100%;
+  padding: 10px 14px 12px;
+  border-top: 2px solid var(--border);
+  border-bottom: 2px solid var(--border);
+  background: linear-gradient(180deg, var(--panel-raised), var(--panel));
+  box-shadow: var(--hair-shadow), 0 2px 6px rgba(42, 36, 29, 0.08);
+}
+
+.frieze .step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 2px 8px;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 8.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+  border-right: 1px dotted var(--border);
+}
+
+.frieze .step:last-child { border-right: none; }
+
+.frieze .step.done { color: var(--muted); }
+.frieze .step.done i { text-decoration: line-through; text-decoration-thickness: 1px; opacity: 0.5; }
+
+.frieze .step.here {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.frieze .step .bar {
+  position: absolute;
+  bottom: 3px;
+  left: 20%;
+  right: 20%;
+  height: 3px;
+  background: var(--panel-sunken);
+  border: 1px solid var(--border);
+}
+
+.frieze .step .bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* app-level frieze placement helper */
+.pediment { margin-bottom: 6px; }
+
+
+/* ── section titles: inscription + greek gloss ── */
+.section-title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 14px 0 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.section-title span {
+  font-family: var(--font-serif);
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-size: 12.5px;
+  color: var(--faint);
 }

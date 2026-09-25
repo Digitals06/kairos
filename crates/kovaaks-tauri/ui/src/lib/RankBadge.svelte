@@ -3,59 +3,66 @@
 
   let { tier, progress = null }: { tier: RankTier | null; progress?: number | null } = $props()
 
-  // Decode a tier hex color and return readable text (black/white) + a dim
-  // variant for the badge background wash.
-  function readable(color: string): { fg: string; bg: string } {
-    const m = /^#?([0-9a-f]{6})$/i.exec(color.trim())
-    if (!m) return { fg: '#0a0e14', bg: color || '#9ca3af' }
-    const n = parseInt(m[1], 16)
-    const r = (n >> 16) & 0xff
-    const g = (n >> 8) & 0xff
-    const b = n & 0xff
-    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    return {
-      fg: luminance > 140 ? '#0a0e14' : '#ffffff',
-      bg: `rgba(${r}, ${g}, ${b}, 0.22)`,
-    }
-  }
-
-  const style = $derived(
-    tier
-      ? `color: ${readable(tier.color).fg}; background: ${readable(tier.color).bg};` +
-          ` border-color: ${tier.color}; text-shadow: 0 0 8px ${tier.color}66;`
-      : ''
-  )
+  const color = $derived(tier ? tier.color : 'var(--faint)')
+  const label = $derived(tier ? tier.name : 'UNRANKED')
 </script>
 
 {#if tier}
   <span
-    class="badge num"
-    style={style}
+    class="seal num"
+    style={`--ink:${color}`}
     title={progress !== null ? `Progress ${progress.toLocaleString()}` : tier.name}
   >
-    {tier.name}
+    <b>{label}</b>
   </span>
 {:else}
-  <span class="badge num unranked" title="No rank data yet">UNRANKED</span>
+  <span class="seal num none" title="No rank data yet">
+    <b>UNRANKED</b>
+  </span>
 {/if}
 
 <style>
-  .badge {
-    display: inline-block;
-    padding: 3px 12px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-size: 12px;
+  /* ancient coin seal — official tier ink; sized so every rank fits one line */
+  .seal {
+    position: relative;
+    flex: none;
+    width: 62px;
+    height: 62px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    font-family: var(--font-display);
+    font-size: 8.5px;
     font-weight: 700;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    white-space: nowrap;
+    line-height: 1.05;
+    padding: 6px;
+    border: 2px solid var(--ink);
+    color: var(--ink);
+    background:
+      radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--text) 6%, transparent), transparent 60%),
+      var(--panel-raised);
+    overflow-wrap: anywhere;
+    hyphens: auto;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
   }
 
-  .unranked {
-    color: var(--muted);
-    background: rgba(156, 163, 175, 0.08);
-    border-color: var(--border);
-    text-shadow: none;
+  .seal::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    border: 1px dotted currentColor;
+    opacity: 0.45;
   }
+
+  /* coin catches the light on hover */
+  button:hover > .seal,
+  .variant-row:hover .seal {
+    transform: translateY(-2px) rotateX(12deg) rotateZ(-2deg);
+    box-shadow: 0 4px 10px color-mix(in srgb, var(--text) 22%, transparent);
+  }
+
+  .seal b { display: block; }
+  .seal.none { color: var(--faint); font-size: 7px; }
 </style>

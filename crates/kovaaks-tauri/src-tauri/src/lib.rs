@@ -291,6 +291,8 @@ pub struct WeeklyReportDto {
     pub level_name: String,
     pub level: u32,
     pub level_progress_pct: u32,
+    pub level_steps: Vec<LevelStepDto>,
+    pub plays_per_day: [u32; 7],
     pub improvements: Vec<ImprovementRowDto>,
     pub rank_changes: Vec<RankChangeDto>,
 }
@@ -314,6 +316,13 @@ pub struct RankChangeDto {
     pub to: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LevelStepDto {
+    pub name: String,
+    pub threshold: u64,
+}
+
 impl From<kovaaks_core::weekly::WeeklyReport> for WeeklyReportDto {
     fn from(r: kovaaks_core::weekly::WeeklyReport) -> Self {
         Self {
@@ -328,6 +337,12 @@ impl From<kovaaks_core::weekly::WeeklyReport> for WeeklyReportDto {
             level_name: r.level_name,
             level: r.level,
             level_progress_pct: r.level_progress_pct,
+            level_steps: r
+                .level_steps
+                .into_iter()
+                .map(|(name, threshold)| LevelStepDto { name, threshold })
+                .collect(),
+            plays_per_day: r.plays_per_day,
             improvements: r
                 .improvements
                 .into_iter()
