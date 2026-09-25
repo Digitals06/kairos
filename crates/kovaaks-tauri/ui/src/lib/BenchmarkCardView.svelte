@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { slide } from 'svelte/transition'
   import type { BenchmarkCard } from '../api'
   import RankBadge from './RankBadge.svelte'
 
@@ -82,13 +83,13 @@
     <RankBadge tier={card.rank} />
   </header>
   {#if expanded}
-    <div class="variants">
+    <div class="variants" transition:slide={{ duration: 180 }}>
       {#each card.variants ?? [] as v (v.benchmark_id)}
         <button class="variant-row" onclick={(e) => variantClick(e, v.benchmark_id)}>
           <span class="variant-diff">
             {v.difficulty_name}
             {#if (v.runs_to_next ?? 0) > 0}
-              <span class="chip-run">▶ {v.runs_to_next} {v.runs_to_next === 1 ? 'run' : 'runs'} to next tier</span>
+              <span class="chip-run">▶ {v.runs_to_next} to next tier</span>
             {:else if v.plateaued}
               <span class="chip-plateau">plateaued</span>
             {:else if (v.runs_to_next ?? 0) === 0 && v.rank}
@@ -176,24 +177,35 @@
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    margin-top: 10px;
-    padding-top: 8px;
+    gap: 2px;
+    margin-top: 8px;
+    padding: 6px 0 2px 12px;
     border-top: 1px solid var(--border);
+    position: relative;
   }
 
+  /* carved inscription rows: rule + hover engraving, no boxes */
   .variant-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
     background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 10px;
+    border: none;
+    border-bottom: 1px dotted var(--border);
+    border-radius: 0;
+    padding: 6px 8px 6px 10px;
     color: inherit;
     cursor: pointer;
     text-align: left;
+  }
+
+  .variant-row:last-child { border-bottom: none; }
+
+  .variant-row:hover {
+    background: color-mix(in srgb, var(--accent-2) 6%, transparent);
+    border-radius: var(--radius);
+    border-bottom-color: transparent;
   }
 
   .variant-row:hover {

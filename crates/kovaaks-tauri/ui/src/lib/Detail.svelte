@@ -149,11 +149,15 @@
     return c || '#888'
   }
 
-  const CYAN = cssColor('var(--accent-2)')
-  const MAGENTA = cssColor('var(--accent)')
-  const GREEN = cssColor('var(--success)')
-  const GREY = cssColor('var(--muted)')
-  const GRID = cssColor('var(--border)')
+  const isDark = document.documentElement.dataset.theme === 'basalt'
+  // Chart palettes tuned per theme for legibility on stone (light) vs basalt
+  // (dark): runs line in terracotta pigment (light) / torch-gold (dark);
+  // running-high in deep laurel; grid as hairline, not full border tone.
+  const CYAN = isDark ? cssColor('var(--accent-2)') : '#35617a'
+  const MAGENTA = isDark ? cssColor('var(--accent)') : '#a8482b'
+  const GREEN = isDark ? cssColor('var(--success)') : '#4b6b3c'
+  const GREY = isDark ? cssColor('var(--muted)') : '#5a5142'
+  const GRID = isDark ? cssColor('var(--border)') : '#d9cfba'
   const DAY_MS = 7 * 24 * 60 * 60 * 1000
 
   let lineCanvas: HTMLCanvasElement | undefined = $state()
@@ -173,6 +177,9 @@
   let lineChart: Chart | undefined
 
   $effect(() => {
+    // Re-run the whole chart build whenever the theme flips (colors are
+    // resolved per theme at build time).
+    document.documentElement.dataset.theme
     const d = detail
     if (!d || !lineCanvas) return
 
@@ -214,7 +221,7 @@
             stepped: 'before',
             borderColor: GREEN,
             // fill alpha is baked in because canvas can't do color-mix()
-            backgroundColor: GREEN.startsWith('rgb') ? GREEN.replace('rgb(', 'rgba(').replace(')', ', 0.08)') : 'rgba(95, 132, 74, 0.08)',
+            backgroundColor: GREEN.startsWith('rgb') ? GREEN.replace('rgb(', 'rgba(').replace(')', ', 0.16)') : 'rgba(75, 107, 60, 0.16)',
             borderWidth: 1.5,
             pointRadius: 0,
             fill: true,

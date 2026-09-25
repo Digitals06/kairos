@@ -103,6 +103,17 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
   scenarios to grind for the selected family (no game overlay, app polling
   only) — small, lands so the identity is proven on a newer screen too
 
+## v0.3.1+ — QoL candidates (pre-0.4.0, unscoped — pick & bundle)
+
+- [ ] Copy-to-clipboard on detail scores (click a score → copy)
+- [ ] Remember expanded families across sessions (localStorage)
+- [ ] Weak-spot footer strip in detail (next scenario + gap, always visible)
+- [ ] Sort memory (weakest/strongest persists)
+- [ ] Keyboard navigation in the stoa (↑/↓/Enter/Esc)
+- [ ] Favorites inline tick instead of full reorder jump
+- [ ] Grind "GO" button (deep-launch KovaaK's like evxl) — taste of v0.4.0 coach
+
+
 ## v0.4.0 — play-session workflows
 
 - [ ] Tray mode: background watcher keeps the app fresh while KovaaK's runs;
