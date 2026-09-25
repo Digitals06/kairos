@@ -103,6 +103,18 @@ pub struct BenchmarkVariant {
     pub plateaued: bool,
 }
 
+
+/// Phase-2 grind chip payload: the slow grind-engine summary for one
+/// difficulty, computed after the overview grid has painted (see
+/// `grind_overview`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GrindChipDto {
+    pub benchmark_id: i64,
+    pub runs_to_next: u32,
+    pub plateaued: bool,
+}
+
 /// One scenario row in the benchmark detail view.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -677,10 +689,21 @@ pub mod commands {
             let _ = store.set_meta(INGEST_INSERTED_KEY, &scan.inserted.to_string());
         }
         let new_plays = scan.as_ref().map(|s| s.inserted).unwrap_or(0);
-        let discovery = engine
-            .discover(&steam_id, deep)
-            .await
-            .map_err(|e| e.to_string())?;
+        // Launch sync (deep off): probe only benchmarks the player already has
+        // rows for — the old full major-family registry sweep (hundreds of
+        // probes at 4/s) was the app's launch-time cost. Deep runs keep the
+        // full sweep (that's how new families are discovered).
+        let discovery = if deep {
+            engine
+                .discover(&steam_id, true)
+                .await
+                .map_err(|e| e.to_string())?
+        } else {
+            engine
+                .discover_played(&steam_id)
+                .await
+                .map_err(|e| e.to_string())?
+        };
         let stale = engine
             .sync_stale(&steam_id, SYNC_MAX_AGE_HOURS, deep || new_plays > 0)
             .await
@@ -904,6 +927,7 @@ pub mod commands {
     pub async fn get_overview(state: State<'_, AppState>) -> Result<Vec<BenchmarkCard>, String> {
         let state = state.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
+        let __instant = std::time::Instant::now();
             let steam_id = state
                 .profile()
                 .map_err(|e| e.to_string())?
@@ -931,6 +955,7 @@ pub mod commands {
             // The shown rank/metrics are those of the played difficulty with
             // the deepest tier in its own ladder; the card keeps the winner's
             // kovaaks id so click-through opens that detail page.
+            eprintln!("[perf] build_cards: {:?}", __instant.elapsed());
             let mut counts: std::collections::HashMap<String, u32> = Default::default();
             for c in &cards {
                 *counts.entry(c.benchmark_name.clone()).or_insert(0) += 1;
@@ -1010,46 +1035,15 @@ pub mod commands {
                                 (names, idx)
                             })
                             .unwrap_or_default();
-                        // Grind chip data: how many scenario runs flip this
-                        // difficulty to the next tier (local engine, cheap).
-                        let (runs_to_next, plateaued) = state
-                            .registry
-                            .by_id(c.benchmark_id as u64)
-                            .and_then(|(def, diff)| {
-                                let snap = state.store.latest(&steam_id, c.benchmark_id).ok()??;
-                                let progress = stored_to_progress(&snap);
-                                let grind =
-                                    kovaaks_core::grind::next_targets(&progress, def, &diff);
-                                // A difficulty whose scenarios are all at
-                                // their top rung is COMPLETE — "plateaued"
-                                // (no new PB in 3+ days) is meaningless there
-                                // and reads as a bug, so suppress it.
-                                let plateaued = !(current_rank >= 0
-                                    && !tier_names.is_empty()
-                                    && current_rank as usize >= tier_names.len() - 1)
-                                    && snap.scenarios.iter().any(|row| {
-                                        let series =
-                                            kovaaks_core::metrics::scenario_series_combined(
-                                                &state.store,
-                                                &steam_id,
-                                                c.benchmark_id,
-                                                &row.scenario,
-                                            )
-                                            .unwrap_or_default();
-                                        kovaaks_core::consistency::scenario_consistency(&series)
-                                            .plateaued
-                                    });
-                                let runs = if grind.targets.is_empty() && grind.plan.is_empty() {
-                                    // complete or no reachable path
-                                    0
-                                } else if grind.targets.is_empty() {
-                                    grind.plan.len() as u32
-                                } else {
-                                    grind.targets.len() as u32
-                                };
-                                Some((runs, plateaued))
-                            })
-                            .unwrap_or((0, false));
+                        // Grind chip data: filled in the second phase
+                        // (`grind_overview`) AFTER first paint — the grind
+                        // engine's per-scenario binary searches over ~250
+                        // difficulties cost several seconds here and were
+                        // THE app's launch bottleneck; the grid must not wait
+                        // for them. Phase 1 paints the structure instantly,
+                        // the chips ride in a beat later (cards flash-update
+                        // only the affected rows).
+                        let (runs_to_next, plateaued) = (0u32, false);
                         BenchmarkVariant {
                             benchmark_id: c.benchmark_id,
                             difficulty_name: c.difficulty_name.clone(),
@@ -1069,7 +1063,8 @@ pub mod commands {
                     .cmp(&a.is_favorite)
                     .then_with(|| a.benchmark_name.cmp(&b.benchmark_name))
             });
-            Ok(folded)
+                                    eprintln!("[perf] get_overview total: {:?}", __instant.elapsed());
+Ok(folded)
         })
         .await
         .map_err(|e| format!("overview join error: {e}"))?
@@ -1465,6 +1460,84 @@ pub mod commands {
     }
 
     /// Persist app settings (stats dir override, sync interval).
+
+    /// Phase 2 of the overview: grind chips for every played difficulty. The
+    /// grind engine binary-searches per scenario — seconds of work that the
+    /// first paint must not queue behind; the UI calls this after render and
+    /// merges the chips into the already-visible cards.
+    #[tauri::command]
+    pub async fn grind_overview(state: State<'_, AppState>) -> Result<Vec<GrindChipDto>, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let __t0 = std::time::Instant::now();
+            let steam_id = state
+                .profile()
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "no profile connected".to_string())?
+                .steam_id;
+            let mut chips = Vec::new();
+            for benchmark_id in state
+                .store
+                .played_benchmarks(&steam_id)
+                .map_err(|e| e.to_string())?
+            {
+                let Some((def, diff)) = state.registry.by_id(benchmark_id as u64) else {
+                    continue;
+                };
+                let Some(snap) = state
+                    .store
+                    .latest(&steam_id, benchmark_id)
+                    .map_err(|e| e.to_string())?
+                    .filter(|snap| !snap.scenarios.is_empty())
+                else {
+                    continue;
+                };
+                let progress = stored_to_progress(&snap);
+                let grind =
+                    kovaaks_core::grind::next_targets(&progress, def, &diff);
+                let plateaued = {
+                    // complete tiers can't plateau: a meaningless tag would
+                    // read as a bug (suppressed, as the old inline chip did).
+                    let complete = grind.next_rank == grind.current_rank
+                        || (grind.targets.is_empty() && grind.plan.is_empty());
+                    if complete {
+                        false
+                    } else {
+                        snap.scenarios.iter().any(|row| {
+                            kovaaks_core::metrics::scenario_series_combined(
+                                &state.store,
+                                &steam_id,
+                                benchmark_id,
+                                &row.scenario,
+                            )
+                            .map(|series| {
+                                kovaaks_core::consistency::scenario_consistency(&series)
+                                    .plateaued
+                            })
+                            .unwrap_or(false)
+                        })
+                    }
+                };
+                let runs = if grind.targets.is_empty() && grind.plan.is_empty() {
+                    0
+                } else if grind.targets.is_empty() {
+                    grind.plan.len() as u32
+                } else {
+                    grind.targets.len() as u32
+                };
+                chips.push(GrindChipDto {
+                    benchmark_id,
+                    runs_to_next: runs,
+                    plateaued,
+                });
+            }
+            eprintln!("[perf] grind_overview: {:?}", __t0.elapsed());
+            Ok(chips)
+        })
+        .await
+        .map_err(|e| format!("grind_overview join error: {e}"))?
+    }
+
     #[tauri::command]
     pub fn set_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
         let json = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
@@ -1559,6 +1632,7 @@ pub fn run() {
             commands::dashboard_rollup,
             commands::get_settings,
             commands::set_settings,
+            commands::grind_overview,
             commands::toggle_favorite,
             commands::copy_report_image,
         ])

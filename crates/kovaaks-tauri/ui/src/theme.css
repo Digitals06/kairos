@@ -47,6 +47,7 @@
   --text: #2a241d;
   --muted: #6b6151;
   --faint: #6f6350;        /* darkened for WCAG 4.5:1 on ivory panels */
+  --warn: #8a5a1e;         /* stale-state amber, 4.9:1 on ivory */
   --border: #cbbfa6;
   --border-strong: #a3997a;
   --accent: #b7412f;          /* terracotta pigment */
@@ -68,6 +69,7 @@ html[data-theme='basalt'] {
   --panel-sunken: #100e0c;
   --text: #e8dfd0;
   --muted: #b4a488;
+  --warn: #e0b25c;         /* stale-state amber, 9.2:1 on basalt */
   --faint: #967f63;
   --border: #3d3228;
   --border-strong: #5c4a3a;
@@ -732,4 +734,17 @@ html[data-theme='basalt'] .panel { box-shadow: var(--hair-shadow), 0 2px 10px rg
 
 ::-webkit-scrollbar-corner {
   background: var(--panel-sunken);
+}
+
+/* keyboard focus floor: inset-selected ring on any interactive element lacking its own */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-inset-selected);
+}
+
+/* rank seals: light theme — pale tier inks fail AA on the light coin face;
+   keep tier in the metal ring, ink the wordmark */
+[data-theme='marble'] .seal,
+[data-theme='marble'] span.seal {
+  color: var(--text) !important;
 }

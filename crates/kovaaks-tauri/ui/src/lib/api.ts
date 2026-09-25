@@ -189,6 +189,12 @@ export interface GrindNext {
   plan: GrindTarget[]
 }
 
+export interface GrindChipDto { benchmark_id: number; runs_to_next: number; plateaued: boolean }
+
+export function grindOverview(): Promise<GrindChipDto[]> {
+  return invoke('grind_overview')
+}
+
 export function grindNext(benchmarkId: number): Promise<GrindNext | null> {
   return invoke('grind_next', { benchmarkId })
 }

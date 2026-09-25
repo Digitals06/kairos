@@ -77,7 +77,7 @@
         <span class="diff muted-label">best of {card.difficulty_count}</span>
       {/if}
       {#if (card.difficulty_count ?? 1) > 1}
-        <span class="diff-count">{expanded ? '▾' : '▸'} {card.difficulty_count}</span>
+        <span class="diff-count" title="Expand — {card.difficulty_count} difficulties">{expanded ? '▾' : '▸'} {card.difficulty_count}</span>
       {/if}
     </div>
     <RankBadge tier={card.rank} />

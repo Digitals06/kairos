@@ -291,7 +291,6 @@ fn consolidate_plan(plan: Vec<GrindTarget>) -> Vec<GrindTarget> {
 }
 
 /// Compute grind targets for one benchmark difficulty from a stored progress
-/// payload. Scenarios missing from it are treated as 0./// Compute grind targets for one benchmark difficulty from a stored progress
 /// payload. Scenarios missing from it are treated as 0.
 pub fn next_targets(
     base: &BenchmarkProgress,
@@ -315,6 +314,20 @@ pub fn next_targets(
             .map(|t| t.name.clone())
             .unwrap_or_default()
     };
+
+    // Complete ladders have no next tier: nothing to search. (The overview
+    // fold calls this per difficulty row; a full scenario sweep with binary
+    // searches per scenario — ~30 engine evals each — is the single biggest
+    // launch-cost item, all wasted when nothing can rank up.)
+    if current.complete {
+        return GrindResult {
+            current_rank: current.name,
+            next_rank: next_name,
+            next_rank_index: next_index,
+            targets: Vec::new(),
+            plan: Vec::new(),
+        };
+    }
 
     // Per-scenario (name, current score, reachable ceiling). The scenario's own
     // ladder top is the highest score a real player can set; probing beyond it

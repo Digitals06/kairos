@@ -5,7 +5,8 @@ import { listen } from '@tauri-apps/api/event'
   import {
     getProfile,
     getOverview,
-    ingestStatus,
+    grindOverview,
+  ingestStatus,
     refreshLocal,
     syncNow,
     rankChanges,
@@ -264,6 +265,7 @@ import { listen } from '@tauri-apps/api/event'
     loadingOverview = true
     try {
       cards = sortCards(await getOverview())
+      void loadGrindChips()
       try {
         weekly = await weeklyReport()
       } catch (e) {
@@ -274,6 +276,24 @@ import { listen } from '@tauri-apps/api/event'
       showToast(`Failed to load overview: ${String(err)}`)
     } finally {
       loadingOverview = false
+    }
+  }
+
+  /** Phase-2 chips: grind-engine summaries arrive after first paint so the
+   * grid never queues behind the per-scenario binary searches. */
+  async function loadGrindChips() {
+    try {
+      const chips = await grindOverview()
+      const byId = new Map(chips.map((c) => [c.benchmark_id, c]))
+      cards = cards.map((card) => ({
+        ...card,
+        variants: card.variants.map((v) => {
+          const chip = byId.get(v.benchmark_id)
+          return chip ? { ...v, runs_to_next: chip.runs_to_next, plateaued: chip.plateaued } : v
+        }),
+      }))
+    } catch {
+      /* chips are supplementary; a retry happens with the next sync */
     }
   }
 
@@ -295,7 +315,9 @@ import { listen } from '@tauri-apps/api/event'
     // Auto-sync on launch: smart-sync keeps it cheap when nothing changed
     // (no new CSVs -> only stale rows probed). Fire-and-forget; failures
     // surface through the sync toast path.
-    void doSync(false)
+    // Auto-sync AFTER the first grid paints: launch paint must never queue
+    // behind sync work (get_overview + sync contend on the store mutex).
+    setTimeout(() => void doSync(false), 4000)
   })
 
   function onConnected(p: PlayerProfile) {
@@ -680,13 +702,13 @@ import { listen } from '@tauri-apps/api/event'
   }
 
   .last-synced.stale {
-    color: #f59e0b;
+    color: var(--warn, #a06b2e);
   }
 
   .stale-badge {
     margin-left: 6px;
     padding: 1px 6px;
-    border: 1px solid #f59e0b;
+    border: 1px solid var(--warn, #a06b2e);
     border-radius: 6px;
     font-size: 10px;
     font-weight: 700;
@@ -696,7 +718,7 @@ import { listen } from '@tauri-apps/api/event'
   .spinner {
     width: 12px;
     height: 12px;
-    border: 2px solid rgba(255, 46, 136, 0.3);
+    border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
     border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
@@ -755,11 +777,11 @@ import { listen } from '@tauri-apps/api/event'
   .type-tab {
     font: inherit;
     font-size: 12px;
-    padding: 3px 12px;
+    padding: 6px 14px;   /* ≥30px tall tap target */
     border-radius: 999px;
-    border: 1px solid var(--border, #1f2937);
+    border: 1px solid var(--border);
     background: transparent;
-    color: var(--muted-foreground, #9ca3af);
+    color: var(--muted);
     cursor: pointer;
     transition:
       color 0.15s,
@@ -770,9 +792,9 @@ import { listen } from '@tauri-apps/api/event'
     color: var(--foreground);
   }
   .type-tab.active {
-    color: #0a0e14;
-    background: var(--accent, #ff2e88);
-    border-color: var(--accent, #ff2e88);
+    color: var(--background);
+    background: var(--accent);
+    border-color: var(--accent);
     font-weight: 600;
   }
   .search-row {

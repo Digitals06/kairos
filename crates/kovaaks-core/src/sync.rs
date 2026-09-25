@@ -217,6 +217,26 @@ impl<S: ProgressSource> SyncEngine<S> {
         ids
     }
 
+    /// Launch-sync discovery universe: already-played benchmarks only.
+    ///
+    /// Non-deep launches must not probe the entire major-family registry
+    /// (hundreds of leaderboard hits at 4/s dominate the launch cost);
+    /// played rows revalidate ranks for content the player actually has,
+    /// while `sync_stale`'s max-age pass covers drift. Deep scans (the
+    /// settings toggle) keep the full registry sweep that finds new plays.
+    pub fn candidate_ids_played(&self, steam_id: &str) -> Vec<i64> {
+        let mut ids: Vec<i64> = self
+            .store
+            .benchmarks_playing_rows(steam_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
     /// Probe candidate difficulties and persist played flags.
     ///
     /// A benchmark counts as played when `benchmark_progress > 0` OR any
@@ -227,6 +247,15 @@ impl<S: ProgressSource> SyncEngine<S> {
     pub async fn discover(&self, steam_id: &str, deep: bool) -> Result<SyncReport> {
         KovaaksClient::validate_steam_id(steam_id)?;
         let ids = self.candidate_ids(deep);
+        let ids = ids.into_iter().map(|id| (id, false)).collect();
+        Ok(self.probe_all(steam_id, ids, PersistMode::Played).await)
+    }
+
+    /// Launch-path discovery over the player's own benchmarks only (see
+    /// [`candidate_ids_played`]).
+    pub async fn discover_played(&self, steam_id: &str) -> Result<SyncReport> {
+        KovaaksClient::validate_steam_id(steam_id)?;
+        let ids = self.candidate_ids_played(steam_id);
         let ids = ids.into_iter().map(|id| (id, false)).collect();
         Ok(self.probe_all(steam_id, ids, PersistMode::Played).await)
     }
