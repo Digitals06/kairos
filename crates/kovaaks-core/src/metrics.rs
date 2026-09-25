@@ -130,6 +130,27 @@ pub fn metrics_for_scenario_combined(
 
 /// The merged (plays + new-high snapshots) chronological series — the single
 /// owner of the dedup semantics, reused by consistency analytics.
+/// Build a merged series from pre-loaded plays and snapshot pairs (bulk path).
+pub fn series_from_parts(
+    plays: &[(DateTime<Utc>, f64)],
+    snapshots: Vec<(DateTime<Utc>, f64)>,
+) -> Vec<(DateTime<Utc>, f64)> {
+    let play_tuples: Vec<(String, DateTime<Utc>, f64)> = Vec::new();
+    let _ = play_tuples;
+    // reuse the same dedup logic through the set-based merge
+    let is = improving_only(&snapshots);
+    let mut set: std::collections::HashSet<i64> =
+        plays.iter().map(|(_, s)| s.round() as i64).collect();
+    let mut merged: Vec<(DateTime<Utc>, f64)> = plays.iter().copied().collect();
+    for (at, score) in is {
+        if !set.contains(&(score.round() as i64)) {
+            merged.push((at, score));
+        }
+    }
+    merged.sort_by_key(|(t, _)| *t);
+    merged
+}
+
 pub fn scenario_series_combined(
     store: &Store,
     steam_id: &str,
@@ -206,15 +227,17 @@ pub fn merge_plays_snapshots_dedup(
     plays: &[(String, DateTime<Utc>, f64)],
     snapshots: &[(DateTime<Utc>, f64)],
 ) -> Vec<(DateTime<Utc>, f64, bool)> {
+    // O(n+m): quantized play scores in a set (`is_same_run` = same rounded
+    // integer), so each snapshot point tests one hash lookup instead of a
+    // linear scan over every play of the scenario.
+    let play_scores: std::collections::HashSet<i64> =
+        plays.iter().map(|(_, _, s)| s.round() as i64).collect();
     let mut merged: Vec<(DateTime<Utc>, f64, bool)> = plays
         .iter()
         .map(|(_, at, score)| (*at, *score, true))
         .collect();
     for &(at, score) in snapshots {
-        let dup = plays
-            .iter()
-            .any(|(_, _, pscore)| is_same_run(*pscore, score));
-        if !dup {
+        if !play_scores.contains(&(score.round() as i64)) {
             merged.push((at, score, false));
         }
     }

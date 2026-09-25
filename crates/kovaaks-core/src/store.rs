@@ -405,6 +405,32 @@ impl Store {
         Ok(total)
     }
 
+    /// Every play for a player, ascending played_at (bulk weekly-report load:
+    /// replaces per-scenario plays_history round trips).
+    pub fn all_plays(&self, steam_id: &str) -> Result<Vec<PlayRecord>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare(
+            "SELECT scenario, played_at, score, hit_count, avg_fps
+             FROM plays WHERE steam_id = ?1
+             ORDER BY played_at, id",
+        )?;
+        let rows = stmt
+            .query_map(params![steam_id], |row| {
+                let played: String = row.get(1)?;
+                let played_at = parse_rfc3339_column(1, &played)?;
+                Ok(PlayRecord {
+                    scenario: row.get(0)?,
+                    played_at,
+                    score: row.get(2)?,
+                    hit_count: row.get::<_, i64>(3)? as u64,
+                    avg_fps: row.get(4)?,
+                    source: crate::types::PlaySource::Csv,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// Distinct scenarios this player has any local play for.
     pub fn plays_scenarios(&self, steam_id: &str) -> Result<Vec<String>> {
         let conn = self.lock();

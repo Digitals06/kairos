@@ -103,7 +103,6 @@ pub struct BenchmarkVariant {
     pub plateaued: bool,
 }
 
-
 /// Phase-2 grind chip payload: the slow grind-engine summary for one
 /// difficulty, computed after the overview grid has painted (see
 /// `grind_overview`).
@@ -927,7 +926,7 @@ pub mod commands {
     pub async fn get_overview(state: State<'_, AppState>) -> Result<Vec<BenchmarkCard>, String> {
         let state = state.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
-        let __instant = std::time::Instant::now();
+            let __instant = std::time::Instant::now();
             let steam_id = state
                 .profile()
                 .map_err(|e| e.to_string())?
@@ -1063,8 +1062,8 @@ pub mod commands {
                     .cmp(&a.is_favorite)
                     .then_with(|| a.benchmark_name.cmp(&b.benchmark_name))
             });
-                                    eprintln!("[perf] get_overview total: {:?}", __instant.elapsed());
-Ok(folded)
+            eprintln!("[perf] get_overview total: {:?}", __instant.elapsed());
+            Ok(folded)
         })
         .await
         .map_err(|e| format!("overview join error: {e}"))?
@@ -1354,7 +1353,10 @@ Ok(folded)
             .ok_or("no profile connected")?;
         let store = state.store.clone();
         let report = tauri::async_runtime::spawn_blocking(move || {
-            kovaaks_core::weekly::weekly_report(&store, &steam_id, chrono::Utc::now())
+            let __t = std::time::Instant::now();
+            let r = kovaaks_core::weekly::weekly_report(&store, &steam_id, chrono::Utc::now());
+            eprintln!("[perf] weekly_report compute: {:?}", __t.elapsed());
+            r
         })
         .await
         .map_err(|e| format!("weekly join error: {e}"))?
@@ -1493,8 +1495,7 @@ Ok(folded)
                     continue;
                 };
                 let progress = stored_to_progress(&snap);
-                let grind =
-                    kovaaks_core::grind::next_targets(&progress, def, &diff);
+                let grind = kovaaks_core::grind::next_targets(&progress, def, &diff);
                 let plateaued = {
                     // complete tiers can't plateau: a meaningless tag would
                     // read as a bug (suppressed, as the old inline chip did).
@@ -1511,8 +1512,7 @@ Ok(folded)
                                 &row.scenario,
                             )
                             .map(|series| {
-                                kovaaks_core::consistency::scenario_consistency(&series)
-                                    .plateaued
+                                kovaaks_core::consistency::scenario_consistency(&series).plateaued
                             })
                             .unwrap_or(false)
                         })

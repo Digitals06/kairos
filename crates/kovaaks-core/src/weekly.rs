@@ -56,6 +56,7 @@ pub fn weekly_report(
     steam_id: &str,
     now: chrono::DateTime<chrono::Utc>,
 ) -> crate::Result<WeeklyReport> {
+    let __t = std::time::Instant::now();
     let since = now - chrono::Duration::days(7);
 
     // Plays inside the week (from the plays table, all scenarios).
@@ -78,23 +79,73 @@ pub fn weekly_report(
         store.plays_scenarios(steam_id)?.len() as u32
     };
 
-    let pb_events = all_pb_events(store, steam_id, since, now)?;
+    eprintln!("[perf] weekly: plays+scans {:?}", __t.elapsed());
+    eprintln!("[perf] weekly: plays+scans {:?}", __t.elapsed());
+
+    // Improvements + PB events share ONE series pass per (benchmark, scenario).
+    // Bulk loads: every play (854 rows) arrives in ONE query; per-bid history
+    // is loaded once and reused for the series + the rank-change pass below.
+    let all_plays: std::collections::HashMap<String, Vec<(chrono::DateTime<chrono::Utc>, f64)>> = {
+        let mut map: std::collections::HashMap<String, Vec<(chrono::DateTime<chrono::Utc>, f64)>> =
+            Default::default();
+        for rec in store.all_plays(steam_id)? {
+            map.entry(rec.scenario.clone())
+                .or_default()
+                .push((rec.played_at, rec.score));
+        }
+        map
+    };
+    eprintln!("[perf] weekly: bulk plays {:?}", __t.elapsed());
+    let mut pb_events: u32 = 0;
 
     // Improvements: across all benchmarks snapshotted in the reporting
     // week (or earlier — prev-week pairs still need a current series).
     let bids: Vec<i64> = store.snapshot_benchmark_ids(steam_id, since)?;
     let mut rows: Vec<ImprovementRow> = Vec::new();
+    if bids.is_empty() {
+        eprintln!(
+            "[perf] weekly: no snapshotted bids, skipped loops {:?}",
+            __t.elapsed()
+        );
+    }
+    let mut histories: std::collections::HashMap<i64, Vec<crate::store::StoredSnapshot>> =
+        Default::default();
     for bid in bids.clone() {
         let history = store.history(steam_id, bid)?;
         let Some(latest) = history.last() else {
             continue;
         };
+        histories.insert(bid, history.clone());
         let mut seen: std::collections::HashSet<String> = Default::default();
         for row in &latest.scenarios {
             if !seen.insert(row.scenario.clone()) {
                 continue;
             }
-            let series = metrics::scenario_series_combined(store, steam_id, bid, &row.scenario)?;
+            let snapshots: Vec<(chrono::DateTime<chrono::Utc>, f64)> = history
+                .iter()
+                .filter_map(|snap| {
+                    snap.scenarios
+                        .iter()
+                        .find(|r| r.scenario == row.scenario)
+                        .map(|r| (snap.captured_at, r.score as f64))
+                })
+                .collect();
+            let plays = all_plays
+                .get(&row.scenario)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            let series = {
+                let mut merged: Vec<(chrono::DateTime<chrono::Utc>, f64)> = plays.to_vec();
+                let play_scores: std::collections::HashSet<i64> =
+                    plays.iter().map(|(_, s)| s.round() as i64).collect();
+                for (at, sc) in metrics::improving_only(&snapshots) {
+                    if !play_scores.contains(&(sc.round() as i64)) {
+                        merged.push((at, sc));
+                    }
+                }
+                merged.sort_by_key(|(t, _)| *t);
+                merged
+            };
             let week = metrics::compute_window(&series, now, chrono::Duration::days(7));
             let prev = metrics::compute_window(
                 &series,
@@ -109,16 +160,23 @@ pub fn weekly_report(
                 continue;
             }
             // PB inside the week: best of series > best before the week start.
+            // Count PB events for the whole scenario here (not only when the
+            // delta row qualifies) — the old separate loop recomputed every series.
             let pre_best = series
                 .iter()
                 .filter(|(ts, _)| *ts < since)
                 .map(|(_, s)| *s)
                 .fold(0.0_f64, f64::max);
-            let inweek_best = series
-                .iter()
-                .filter(|(ts, _)| *ts >= since)
-                .map(|(_, s)| *s)
-                .fold(0.0_f64, f64::max);
+            let mut inweek_pb = false;
+            for (ts, s) in &series {
+                if *ts >= since && *s > pre_best && *s > 0.0 {
+                    inweek_pb = true;
+                    break;
+                }
+            }
+            if inweek_pb {
+                pb_events += 1;
+            }
             rows.push(ImprovementRow {
                 scenario: row.scenario.clone(),
                 benchmark_id: bid,
@@ -130,10 +188,11 @@ pub fn weekly_report(
                 } else {
                     0
                 },
-                pb_this_week: inweek_best > pre_best,
+                pb_this_week: inweek_pb,
             });
         }
     }
+    eprintln!("[perf] weekly: fused series pass {:?}", __t.elapsed());
     // Fold same-name rows (a scenario can appear under several categories).
     let mut deduped: Vec<ImprovementRow> = Vec::new();
     let mut seen_names: std::collections::HashSet<String> = Default::default();
@@ -160,10 +219,17 @@ pub fn weekly_report(
     rows = improving;
     rows.extend(regressing);
 
-    // Rank changes: diff consecutive snapshots inside the week window.
+    eprintln!("[perf] weekly: before rank pass {:?}", __t.elapsed());
+    // Rank changes: diff consecutive snapshots inside the week window
+    // (histories reused from the fused pass — no re-query).
     let mut rank_changes: Vec<(i64, String, String, String)> = Vec::new();
+    let mut __nwins: usize = 0;
     for bid in bids.clone() {
-        let history = store.history(steam_id, bid)?;
+        let Some(history) = histories.get(&bid) else {
+            continue;
+        };
+        // iterate by reference — cloning stored snapshots (with all their
+        // scenario rows) here was the multi-second hotspot
         // consecutive snapshot rank transitions inside the window
         let mut prevs: Vec<&crate::store::StoredSnapshot> =
             history.iter().filter(|s| s.captured_at >= since).collect();
@@ -177,6 +243,8 @@ pub fn weekly_report(
             prevs.insert(0, boundary);
         }
         prevs = trim(prevs);
+        let __nv = prevs.len();
+        __nwins += __nv;
         for w in prevs.windows(2) {
             let from = w[0].overall_rank;
             let to = w[1].overall_rank;
@@ -193,37 +261,31 @@ pub fn weekly_report(
         }
     }
 
+    eprintln!(
+        "[perf] weekly: rank pass weighted. windows over {} snaps",
+        __nwins
+    );
+    eprintln!("[perf] weekly: after rank pass {:?}", __t.elapsed());
+    let streak =
+        crate::streaks::streak_summary(store, steam_id).unwrap_or(crate::streaks::StreakSummary {
+            current: 0,
+            best: 0,
+            total_plays: 0,
+            xp: 0,
+        });
+    let level = crate::streaks::level_from_xp(streak.xp);
+    eprintln!("[perf] weekly: loops+streak done {:?}", __t.elapsed());
     Ok(WeeklyReport {
         since,
         days_played,
         plays: week_plays.len() as u32,
         scenarios_played,
         pb_events,
-        current_streak: crate::streaks::streak_summary(store, steam_id)
-            .map(|s| s.current)
-            .unwrap_or(0),
-        xp: crate::streaks::streak_summary(store, steam_id)
-            .map(|s| s.xp)
-            .unwrap_or(0),
-        level_name: crate::streaks::level_from_xp(
-            crate::streaks::streak_summary(store, steam_id)
-                .map(|s| s.xp)
-                .unwrap_or(0),
-        )
-        .name
-        .to_string(),
-        level: crate::streaks::level_from_xp(
-            crate::streaks::streak_summary(store, steam_id)
-                .map(|s| s.xp)
-                .unwrap_or(0),
-        )
-        .level,
-        level_progress_pct: crate::streaks::level_from_xp(
-            crate::streaks::streak_summary(store, steam_id)
-                .map(|s| s.xp)
-                .unwrap_or(0),
-        )
-        .progress_pct,
+        current_streak: streak.current,
+        xp: streak.xp,
+        level_name: level.name.to_string(),
+        level: level.level,
+        level_progress_pct: level.progress_pct,
         level_steps: crate::streaks::LEVEL_STEPS
             .iter()
             .map(|(n, xp)| (n.to_string(), *xp))
@@ -255,42 +317,6 @@ fn trim(list: Vec<&crate::store::StoredSnapshot>) -> Vec<&crate::store::StoredSn
         }
     }
     out
-}
-
-/// New personal bests inside a window across all tracked scenarios: count
-/// running-high increments across merged series.
-fn all_pb_events(
-    store: &Store,
-    steam_id: &str,
-    since: chrono::DateTime<chrono::Utc>,
-    now: chrono::DateTime<chrono::Utc>,
-) -> crate::Result<u32> {
-    let mut count = 0u32;
-    let bids = store.snapshot_benchmark_ids(steam_id, since)?;
-    for bid in bids {
-        let history = store.history(steam_id, bid)?;
-        let Some(latest) = history.last() else {
-            continue;
-        };
-        let mut seen: std::collections::HashSet<String> = Default::default();
-        for row in &latest.scenarios {
-            if !seen.insert(row.scenario.clone()) {
-                continue;
-            }
-            let series = metrics::scenario_series_combined(store, steam_id, bid, &row.scenario)?;
-            let mut high = 0.0_f64;
-            for (ts, s) in &series {
-                if *ts < since || *ts > now {
-                    continue;
-                }
-                if *s > high {
-                    count += 1;
-                    high = *s;
-                }
-            }
-        }
-    }
-    Ok(count)
 }
 
 fn tier_name(benchmark_id: u64, rank_index: i64) -> String {
