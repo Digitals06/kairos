@@ -1,5 +1,6 @@
 <script lang="ts">
 import { listen } from '@tauri-apps/api/event'
+  import { getCurrentWindow } from '@tauri-apps/api/window'
   import { onMount } from 'svelte'
   import {
     getProfile,
@@ -65,6 +66,14 @@ import { listen } from '@tauri-apps/api/event'
     applyTheme()
     themeMedia?.addEventListener('change', () => { if (theme === 'system') applyTheme() })
   })
+
+  // --- frameless window controls (custom titlebar) ---------------------------
+  const appWindow = getCurrentWindow()
+  async function winMin() { await appWindow.minimize() }
+  async function winToggle() {
+    if (await appWindow.isMaximized()) { await appWindow.unmaximize() } else { await appWindow.maximize() }
+  }
+  async function winClose() { await appWindow.close() }
 
   // --- sync bar state --------------------------------------------------------
   let syncing = $state(false)
@@ -365,7 +374,7 @@ import { listen } from '@tauri-apps/api/event'
   <Setup onconnected={onConnected} />
 {:else if profile}
   <div class="app">
-    <header class="topbar">
+    <header class="topbar" data-tauri-drag-region>
       <h1 class="logo">KAIROS</h1>
 
       <div class="profile-chip" title={profile.steam_id}>
@@ -402,7 +411,7 @@ import { listen } from '@tauri-apps/api/event'
             aria-expanded={settingsOpen}
             onclick={toggleSettings}
           >
-            ⚙
+            <span class="gear-glyph" aria-hidden="true"></span>
           </button>
           {#if settingsOpen}
             <div class="dropdown panel">
@@ -436,7 +445,13 @@ import { listen } from '@tauri-apps/api/event'
           {/if}
         </div>
       </div>
-    </header>
+    
+        <div class="win-controls" role="group" aria-label="Window controls">
+          <button class="win-btn" onclick={winMin} aria-label="Minimize"><span class="g g-min"></span></button>
+          <button class="win-btn" onclick={winToggle} aria-label="Maximize"><span class="g g-max"></span></button>
+          <button class="win-btn close" onclick={winClose} aria-label="Close"><span class="g g-close"></span></button>
+        </div>
+      </header>
 
     <main>
       {#if selectedBenchmarkId === null}
@@ -787,5 +802,107 @@ import { listen } from '@tauri-apps/api/event'
 
   .empty .muted {
     color: var(--muted);
+  }
+
+  /* settings as ancient coin-boss wheel: ring + center hub dot */
+  :global(.gear-glyph) {
+    position: relative;
+    display: block;
+    width: 14px;
+    height: 14px;
+  }
+  :global(.gear-glyph)::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 1.5px solid currentColor;
+    border-radius: 50%;
+    box-shadow:
+      0 0 0 2px transparent,
+      0 -3px 0 -1px currentColor, 0 3px 0 -1px currentColor,
+      -3px 0 0 -1px currentColor, 3px 0 0 -1px currentColor,
+      -2px 2px 0 -1.5px currentColor, 2px -2px 0 -1.5px currentColor,
+      2px 2px 0 -1.5px currentColor, -2px -2px 0 -1.5px currentColor;
+  }
+  :global(.gear-glyph)::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 4px;
+    height: 4px;
+    transform: translate(-50%, -50%);
+    background: currentColor;
+    border-radius: 50%;
+  }
+
+  /* frameless window: titlebar merges with the app chrome */
+  .win-controls {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+  }
+
+  .win-btn {
+    width: 34px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border-strong);
+    outline: 1px solid var(--border);
+    outline-offset: 1px;
+    border-radius: var(--radius);
+    background: linear-gradient(180deg, var(--panel-raised), var(--panel));
+    color: var(--muted);
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent) inset;
+  }
+
+  .win-btn:hover {
+    color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+
+  .win-btn.close:hover {
+    color: var(--danger);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 14%, transparent);
+  }
+
+  .g { display: block; position: relative; filter: drop-shadow(0 0.5px 0.5px color-mix(in srgb, var(--text) 25%, transparent)); }
+  .g::before, .g::after {
+    content: '';
+    position: absolute;
+    background: currentColor;
+    border-radius: 0.5px;
+  }
+  /* minimize — a single carved underside bar (larger, bevel-tipped) */
+  .g-min { width: 12px; height: 12px; }
+  .g-min::before {
+    bottom: 2px; left: 0.5px;
+    width: 11px; height: 2.5px;
+    clip-path: polygon(0 0, 100% 0, calc(100% - 1.5px) 100%, 1.5px 100%);
+  }
+  /* maximize — a chisel-cut open square, 2.2px stroke with corner notches */
+  .g-max { width: 10px; height: 10px; }
+  .g-max::before {
+    inset: 0;
+    background: none;
+    border: 2.2px solid currentColor;
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 2px), calc(100% - 2px) 100%, 0 100%, 0 2px, 2px 0);
+  }
+  /* close — broad chisel x (2.6px strokes with bevel tips) */
+  .g-close { width: 12px; height: 12px; }
+  .g-close::before, .g-close::after {
+    top: 4.7px; left: 0.5px;
+    width: 11px; height: 2.6px;
+    border-radius: 0;
+    clip-path: polygon(0 0, calc(100% - 1px) 0, 100% 100%, 1px 100%);
+  }
+  .g-close::before { transform: rotate(45deg); }
+  .g-close::after  { transform: rotate(-45deg); }
+
+  .win-btn.close:hover {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
   }
 </style>
