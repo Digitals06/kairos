@@ -79,8 +79,6 @@ pub fn weekly_report(
         store.plays_scenarios(steam_id)?.len() as u32
     };
 
-    eprintln!("[perf] weekly: plays+scans {:?}", __t.elapsed());
-    eprintln!("[perf] weekly: plays+scans {:?}", __t.elapsed());
 
     // Improvements + PB events share ONE series pass per (benchmark, scenario).
     // Bulk loads: every play (854 rows) arrives in ONE query; per-bid history
@@ -155,7 +153,6 @@ pub fn weekly_report(
             });
         }
     }
-    eprintln!("[perf] weekly: fused series pass {:?}", __t.elapsed());
     // Fold same-name rows (a scenario can appear under several categories).
     let mut deduped: Vec<ImprovementRow> = Vec::new();
     let mut seen_names: std::collections::HashSet<String> = Default::default();
@@ -182,7 +179,6 @@ pub fn weekly_report(
     rows = improving;
     rows.extend(regressing);
 
-    eprintln!("[perf] weekly: before rank pass {:?}", __t.elapsed());
     // Rank changes: diff consecutive snapshots inside the week window
     // (histories reused from the fused pass — no re-query).
     let mut rank_changes: Vec<(i64, String, String, String)> = Vec::new();
@@ -225,10 +221,9 @@ pub fn weekly_report(
     }
 
     eprintln!(
-        "[perf] weekly: rank pass weighted. windows over {} snaps",
+        "[trace] weekly: rank pass weighted. windows over {} snaps",
         __nwins
     );
-    eprintln!("[perf] weekly: after rank pass {:?}", __t.elapsed());
     let streak =
         crate::streaks::streak_summary(store, steam_id).unwrap_or(crate::streaks::StreakSummary {
             current: 0,
@@ -237,7 +232,6 @@ pub fn weekly_report(
             xp: 0,
         });
     let level = crate::streaks::level_from_xp(streak.xp);
-    eprintln!("[perf] weekly: loops+streak done {:?}", __t.elapsed());
     Ok(WeeklyReport {
         since,
         days_played,

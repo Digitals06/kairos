@@ -1086,7 +1086,6 @@ pub mod commands {
                     .cmp(&a.is_favorite)
                     .then_with(|| a.benchmark_name.cmp(&b.benchmark_name))
             });
-            eprintln!("[perf] get_overview total: {:?}", __instant.elapsed());
             Ok(folded)
         })
         .await
@@ -1379,7 +1378,6 @@ pub mod commands {
         let report = tauri::async_runtime::spawn_blocking(move || {
             let __t = std::time::Instant::now();
             let r = kovaaks_core::weekly::weekly_report(&store, &steam_id, chrono::Utc::now());
-            eprintln!("[perf] weekly_report compute: {:?}", __t.elapsed());
             r
         })
         .await
@@ -1554,7 +1552,6 @@ pub mod commands {
                     plateaued,
                 });
             }
-            eprintln!("[perf] grind_overview: {:?}", __t0.elapsed());
             Ok(chips)
         })
         .await

@@ -64,6 +64,22 @@ export function applyTheme() {
   themeState.resolved =
     themeState.choice === 'system' ? currentSystemTheme() : themeState.choice
   document.documentElement.dataset.theme = themeState.resolved
+  try {
+    localStorage.setItem('kairos-theme', themeState.choice)
+  } catch {
+    /* private mode */
+  }
+}
+
+/// Load the saved theme choice from localStorage once at boot.
+export function loadTheme() {
+  try {
+    const saved = localStorage.getItem('kairos-theme') as ThemeChoice | null
+    themeState.choice = saved ?? 'system'
+  } catch {
+    themeState.choice = 'system'
+  }
+  applyTheme()
 }
 
 /// Follow OS theme flips while the user is on "system".

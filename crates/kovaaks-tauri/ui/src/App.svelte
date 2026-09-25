@@ -30,7 +30,7 @@ import { listen } from '@tauri-apps/api/event'
   import Weekly from './lib/Weekly.svelte'
     import { humanError } from './lib/errors'
   import type { ThemeChoice } from './lib/nav.svelte'
-  import { nav, themeState, applyTheme, openDetail, closeDetail, openAnalytics, closeAnalytics, showOverview, showSetup } from './lib/nav.svelte'
+  import { nav, themeState, applyTheme, loadTheme, openDetail, closeDetail, openAnalytics, closeAnalytics, showOverview, showSetup } from './lib/nav.svelte'
 
   // --- app flow state --------------------------------------------------------
     
@@ -48,15 +48,7 @@ import { listen } from '@tauri-apps/api/event'
   }
 
   // --- theme engine (Kairos identity: marble/basalt) — owned by lib/nav -----
-  $effect(() => {
-    try {
-      themeState.choice =
-        (localStorage.getItem('kairos-theme') as ThemeChoice) ?? 'system'
-    } catch {
-      themeState.choice = 'system'
-    }
-    applyTheme()
-  })
+  loadTheme()
 
   // --- frameless window controls (custom titlebar) ---------------------------
   const appWindow = getCurrentWindow()
@@ -444,7 +436,7 @@ import { listen } from '@tauri-apps/api/event'
                 <button
                   class="theme-opt"
                   class:active={themeState.choice === it}
-                  onclick={() => { themeState.choice = it as ThemeName; applyTheme() }}
+                  onclick={() => { themeState.choice = it; applyTheme() }}
                 >
                   {it === 'marble' ? 'Marble' : it === 'basalt' ? 'Basalt' : 'System'}
                 </button>
