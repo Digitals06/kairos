@@ -20,6 +20,7 @@
 //!   yields `None` — never `0.0` — so the UI can show "not enough data".
 
 use chrono::{DateTime, Utc};
+use ts_rs::TS;
 
 use crate::error::Result;
 use crate::store::Store;
@@ -28,8 +29,9 @@ use crate::store::Store;
 pub const TRAILING_WINDOW_DAYS: i64 = 30;
 
 /// Aggregated metrics for one score series.
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub struct Metrics {
     /// Mean of every score in the (windowed) series.
     pub avg_score: f64,
@@ -130,27 +132,6 @@ pub fn metrics_for_scenario_combined(
 
 /// The merged (plays + new-high snapshots) chronological series — the single
 /// owner of the dedup semantics, reused by consistency analytics.
-/// Build a merged series from pre-loaded plays and snapshot pairs (bulk path).
-pub fn series_from_parts(
-    plays: &[(DateTime<Utc>, f64)],
-    snapshots: Vec<(DateTime<Utc>, f64)>,
-) -> Vec<(DateTime<Utc>, f64)> {
-    let play_tuples: Vec<(String, DateTime<Utc>, f64)> = Vec::new();
-    let _ = play_tuples;
-    // reuse the same dedup logic through the set-based merge
-    let is = improving_only(&snapshots);
-    let mut set: std::collections::HashSet<i64> =
-        plays.iter().map(|(_, s)| s.round() as i64).collect();
-    let mut merged: Vec<(DateTime<Utc>, f64)> = plays.iter().copied().collect();
-    for (at, score) in is {
-        if !set.contains(&(score.round() as i64)) {
-            merged.push((at, score));
-        }
-    }
-    merged.sort_by_key(|(t, _)| *t);
-    merged
-}
-
 pub fn scenario_series_combined(
     store: &Store,
     steam_id: &str,

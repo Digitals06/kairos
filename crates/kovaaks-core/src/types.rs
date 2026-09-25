@@ -227,7 +227,8 @@ pub struct ScenarioEntry {
 }
 
 /// One rank tier: a display name and its official hex color.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RankTier {
     pub name: String,
     /// Hex color string as published by evxl (e.g. `#999999`).
@@ -383,7 +384,8 @@ pub struct PlayerProfile {
 }
 
 /// Where a play record came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum PlaySource {
     /// Parsed from a KovaaK's stats CSV on disk.

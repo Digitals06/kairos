@@ -4,66 +4,10 @@
  */
 import { invoke } from '@tauri-apps/api/core'
 
-// --- DTO mirrors -----------------------------------------------------------
-
-export interface RankTier {
-  name: string
-  color: string
-}
-
-export interface BenchmarkCard {
-  benchmark_id: number
-  benchmark_name: string
-  abbreviation: string
-  difficulty_name: string
-  rank: RankTier | null
-  benchmark_progress: number
-  next_rank_name: string | null
-  next_rank_delta: number | null
-  avg_score: number
-  high_score: number
-  avg_improvement_pct: number | null
-  high_improvement_pct: number | null
-  samples: number
-  last_synced: string | null
-  is_favorite: boolean
-  snapshot_history: SnapshotPoint[]
-  /** evxl-style types (Clicking, Tracking, …) — powers the type filter. */
-  benchmark_types: string[]
-  /** Single style (Static, Dynamic, …) when purely that style; null otherwise.
-   *  Style tabs only match pure benchmarks (evxl semantics). */
-  pure_type: string | null
-  difficulty_count?: number
-  /** All played difficulties of the family, best-first (populated when
-   *  difficulty_count > 1); the card unrolls these inline. */
-  variants?: {
-    benchmark_id: number
-    difficulty_name: string
-    rank: { name: string; color: string } | null
-    tier_names: string[]
-    current_rank: number
-    runs_to_next?: number
-    plateaued?: boolean
-  }[]
-}
-
-export interface SyncReport {
-  ok: number
-  failed: number
-  errors: string[]
-}
-
-/** Engine-computed rank change between two consecutive snapshots (post-sync toast). */
-export interface RankChange {
-  benchmarkId: number
-  benchmarkName: string
-  prevRank: number
-  curRank: number
-  prevName: string
-  curName: string
-  improved: boolean
-}
-
+/**
+ * PlayerProfile comes from the profile resolution command. Not ts-rs
+ * generated: it predates the binding workflow and is UI-owned.
+ */
 export interface PlayerProfile {
   steam_id: string
   persona: string
@@ -71,88 +15,58 @@ export interface PlayerProfile {
   country: string
 }
 
-export interface ScenarioRank {
-  scenario: string
-  score: number
-  leaderboard_rank: number
-  tier: RankTier | null
-  /** 1-based achieved tier index from the API (0 = unplayed). */
-  scenario_rank: number
-  /** This scenario's tier thresholds (display units), ascending. */
-  rank_maxes: number[]
-}
-
-export interface CategoryCard {
-  name: string
-  progress: number
-  rank_tier: RankTier | null
-}
-
-export interface SnapshotPoint {
-  captured_at: string
-  benchmark_progress: number
-}
-
-export interface PlayPoint {
-  scenario: string
-  played_at: string
-  score: number
-}
-
-export interface ScenarioHistoryPoint {
-  captured_at: string
-  score: number
-  /** True when this run came from a local CSV play (magenta dot). */
-  from_play: boolean
-}
-
-export interface ScenarioHistorySeries {
-  scenario: string
-  category: string
-  /** "snapshot" (synced scores) or "local" (CSV plays — no synced score). */
-  source: string
-  points: ScenarioHistoryPoint[]
-  /** Running-high PB progression (chronological). */
-  pb_points: ScenarioHistoryPoint[]
-  plateau: {
-    days_since_pb: number
-    plateaued: boolean
-    cv: number
-    best: number
-  }
-}
-
-export interface BenchmarkDetail {
-  card: BenchmarkCard
-  snapshot_history: SnapshotPoint[]
-  plays: PlayPoint[]
-  scenario_ranks: ScenarioRank[]
-  categories: CategoryCard[]
-  scenario_history: ScenarioHistorySeries[]
-  /** Rank ladder for the difficulty (name + color, worst → best). */
-  rank_tiers: RankTier[]
-  /** Per-scenario metrics from CSV plays, keyed by scenario name. */
-  scenario_metrics: Record<string, {
-    avg_score: number
-    high_score: number
-    avg_improvement_pct: number | null
-    high_improvement_pct: number | null
-    samples: number
-  }>
-}
-
-export interface IngestStatus {
-  csv_seen: number
-  csv_inserted: number
-  last_synced_at: string | null
-}
-
-export interface AppSettings {
-  stats_dir: string
-  sync_interval_hours: number
-}
-
-// --- command wrappers ------------------------------------------------------
+// --- DTO mirrors -----------------------------------------------------------
+// GENERATED at build time from the Rust DTOs by ts-rs (the single adapter
+// between the Rust command seam and the TS client). Source of truth:
+// crates/kovaaks-tauri/src-tauri/src/lib.rs — regenerate via
+// `cargo test -p kovaaks-tauri export`. Do NOT hand-edit: change the Rust
+// struct, rerun tests, wire drift becomes a compile error.
+import type { BenchmarkCard as GenBenchmarkCard } from './bindings/BenchmarkCard'
+export type BenchmarkCard = GenBenchmarkCard
+import type { BenchmarkVariant as GenBenchmarkVariant } from './bindings/BenchmarkVariant'
+export type BenchmarkVariant = GenBenchmarkVariant
+import type { RankTier as GenRankTier } from './bindings/RankTier'
+export type RankTier = GenRankTier
+import type { GrindChipDto as GenGrindChip } from './bindings/GrindChipDto'
+export type GrindChip = GenGrindChip
+import type { GrindTargetDto as GenGrindTarget } from './bindings/GrindTargetDto'
+export type GrindTarget = GenGrindTarget
+import type { GrindNextDto as GenGrindNext } from './bindings/GrindNextDto'
+export type GrindNext = GenGrindNext
+import type { ScenarioHistorySeries as GenScenarioHistorySeries } from './bindings/ScenarioHistorySeries'
+export type ScenarioHistorySeries = GenScenarioHistorySeries
+import type { ScenarioHistoryPoint as GenScenarioHistoryPoint } from './bindings/ScenarioHistoryPoint'
+export type ScenarioHistoryPoint = GenScenarioHistoryPoint
+import type { PlateauInfo as GenPlateauInfo } from './bindings/PlateauInfo'
+export type PlateauInfo = GenPlateauInfo
+import type { CategoryCard as GenCategoryCard } from './bindings/CategoryCard'
+export type CategoryCard = GenCategoryCard
+import type { SnapshotPoint as GenSnapshotPoint } from './bindings/SnapshotPoint'
+export type SnapshotPoint = GenSnapshotPoint
+import type { PlayPoint as GenPlayPoint } from './bindings/PlayPoint'
+export type PlayPoint = GenPlayPoint
+import type { BenchmarkDetail as GenBenchmarkDetail } from './bindings/BenchmarkDetail'
+export type BenchmarkDetail = GenBenchmarkDetail
+import type { IngestStatus as GenIngestStatus } from './bindings/IngestStatus'
+export type IngestStatus = GenIngestStatus
+import type { SyncReportDto as GenSyncReport } from './bindings/SyncReportDto'
+export type SyncReport = GenSyncReport
+import type { WeeklyReportDto as GenWeeklyReport } from './bindings/WeeklyReportDto'
+export type WeeklyReport = GenWeeklyReport
+import type { ImprovementRowDto as GenImprovementRow } from './bindings/ImprovementRowDto'
+export type ImprovementRow = GenImprovementRow
+import type { RankChangeDto as GenRankChange } from './bindings/RankChangeDto'
+export type RankChange = GenRankChange
+import type { LevelStepDto as GenLevelStep } from './bindings/LevelStepDto'
+export type LevelStep = GenLevelStep
+import type { DashboardFamiliesDto as GenDashboardFamilies } from './bindings/DashboardFamiliesDto'
+export type DashboardFamilies = GenDashboardFamilies
+import type { FamilyRowDto as GenFamilyRow } from './bindings/FamilyRowDto'
+export type FamilyRow = GenFamilyRow
+import type { FamilyDiffDto as GenFamilyDiff } from './bindings/FamilyDiffDto'
+export type FamilyDiff = GenFamilyDiff
+import type { AppSettings as GenAppSettings } from './bindings/AppSettings'
+export type AppSettings = GenAppSettings
 
 export function resolveProfile(identifier: string): Promise<PlayerProfile> {
   return invoke('resolve_profile', { identifier })
@@ -170,27 +84,6 @@ export function rankChanges(): Promise<RankChange[]> {
   return invoke('rank_changes')
 }
 
-export interface GrindTarget {
-  scenario: string
-  currentScore: number
-  targetScore: number
-  delta: number
-  rungsCrossed: number
-  cv: number | null
-  plateaued: boolean
-}
-
-export interface GrindNext {
-  currentRank: string
-  nextRank: string
-  complete: boolean
-  targets: GrindTarget[]
-  /** Step-by-step plan when no single scenario can flip the rank. */
-  plan: GrindTarget[]
-}
-
-export interface GrindChipDto { benchmark_id: number; runs_to_next: number; plateaued: boolean }
-
 export function grindOverview(): Promise<GrindChipDto[]> {
   return invoke('grind_overview')
 }
@@ -203,47 +96,9 @@ export function exportSeriesCsv(): Promise<string> {
   return invoke('export_series_csv')
 }
 
-export interface ImprovementRow {
-  scenario: string
-  benchmark_id: number
-  delta: number
-  trend: number
-  pb_this_week: boolean
-}
-
-export interface RankChange {
-  benchmark_id: number
-  benchmark: string
-  from: string
-  to: string
-}
-
-export interface LevelStep {
-  name: string
-  threshold: number
-}
-
-export interface WeeklyReport {
-  since: string
-  days_played: number
-  plays: number
-  scenarios_played: number
-  pb_events: number
-  current_streak: number
-  xp: number
-  level_name: string
-  level: number
-  level_progress_pct: number
-  level_steps: LevelStep[]
-  plays_per_day: number[]
-  improvements: ImprovementRow[]
-  rank_changes: RankChange[]
-}
-
 export function weeklyReport(): Promise<WeeklyReport> {
   return invoke('weekly_report')
 }
-
 
 export function exportBackup(): Promise<string> {
   return invoke('export_backup')
@@ -261,7 +116,6 @@ export function ingestStatus(): Promise<IngestStatus> {
   return invoke('ingest_status')
 }
 
-/** Re-scan the local KovaaK's stats CSVs (no network sync). */
 export function refreshLocal(): Promise<IngestStatus> {
   return invoke('refresh_local')
 }
@@ -276,27 +130,6 @@ export function setSettings(settings: AppSettings): Promise<void> {
 
 export function toggleFavorite(benchmarkId: number): Promise<boolean> {
   return invoke('toggle_favorite', { benchmarkId })
-}
-
-export interface FamilyDiff {
-  difficulty_name: string
-  kovaaks_id: number
-  current_rank: number
-  current_tier: string
-  tier_names: string[]
-  series: [string, string][]
-  benchmark_progress: number
-}
-
-export interface FamilyRow {
-  benchmark_name: string
-  color: string
-  categories: string[]
-  difficulties: FamilyDiff[]
-}
-
-export interface DashboardFamilies {
-  families: FamilyRow[]
 }
 
 export function dashboardRollup(): Promise<DashboardFamilies> {

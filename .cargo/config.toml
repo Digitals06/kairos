@@ -1,0 +1,4 @@
+# ts-rs binding exports (see crates/kovaaks-tauri/src-tauri/src/lib.rs DTO mirrors)
+[env]
+TS_RS_EXPORT_DIR = { value = "crates/kovaaks-tauri/ui/src/lib/bindings", relative = true }
+TS_RS_LARGE_INT = "number"

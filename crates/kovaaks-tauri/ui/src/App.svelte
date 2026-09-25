@@ -29,11 +29,11 @@ import { listen } from '@tauri-apps/api/event'
   import Coach from './lib/Coach.svelte'
   import Weekly from './lib/Weekly.svelte'
     import { humanError } from './lib/errors'
+  import type { ThemeChoice } from './lib/nav.svelte'
+  import { nav, themeState, applyTheme, openDetail, closeDetail, openAnalytics, closeAnalytics, showOverview, showSetup } from './lib/nav.svelte'
 
   // --- app flow state --------------------------------------------------------
-  type Screen = 'loading' | 'setup' | 'overview'
-  let screen = $state<Screen>('loading')
-
+    
   let profile = $state<PlayerProfile | null>(null)
   let cards = $state<BenchmarkCard[]>([])
   let searchQuery = $state('')
@@ -47,27 +47,15 @@ import { listen } from '@tauri-apps/api/event'
     toastTimer = setTimeout(() => (toast = null), 5000)
   }
 
-  // --- theme engine (Kairos identity: marble/basalt) -------------------------
-  type ThemeName = 'marble' | 'basalt' | 'system'
-  let theme = $state<ThemeName>('system')
-  let resolvedTheme = $state<'marble' | 'basalt'>('basalt')
-
-  const themeMedia = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: light)') : null
-
-  function currentSystemTheme(): 'marble' | 'basalt' {
-    return themeMedia?.matches ? 'marble' : 'basalt'
-  }
-
-  function applyTheme() {
-    resolvedTheme = theme === 'system' ? currentSystemTheme() : theme
-    document.documentElement.dataset.theme = resolvedTheme
-    try { localStorage.setItem('kairos-theme', theme) } catch {}
-  }
-
+  // --- theme engine (Kairos identity: marble/basalt) — owned by lib/nav -----
   $effect(() => {
-    try { theme = (localStorage.getItem('kairos-theme') as ThemeName) ?? 'system' } catch { theme = 'system' }
+    try {
+      themeState.choice =
+        (localStorage.getItem('kairos-theme') as ThemeChoice) ?? 'system'
+    } catch {
+      themeState.choice = 'system'
+    }
     applyTheme()
-    themeMedia?.addEventListener('change', () => { if (theme === 'system') applyTheme() })
   })
 
   // --- frameless window controls (custom titlebar) ---------------------------
@@ -302,14 +290,14 @@ import { listen } from '@tauri-apps/api/event'
       profile = await getProfile()
     } catch (err) {
       showToast(String(err))
-      screen = 'setup'
+      showSetup()
       return
     }
     if (!profile) {
-      screen = 'setup'
+      showSetup()
       return
     }
-    screen = 'overview'
+    showOverview()
     refreshLastSynced()
     loadOverview()
     // Auto-sync on launch: smart-sync keeps it cheap when nothing changed
@@ -322,16 +310,14 @@ import { listen } from '@tauri-apps/api/event'
 
   function onConnected(p: PlayerProfile) {
     profile = p
-    screen = 'overview'
+    showOverview()
     refreshLastSynced()
     loadOverview()
   }
 
   // --- detail drill-down (client-side state, no router lib) -------------------
-  let selectedBenchmarkId = $state<number | null>(null)
-  // Scenario analytics view (all scenarios of one benchmark on one tablet).
-  let analyticsBenchmarkId = $state<number | null>(null)
-
+    // Scenario analytics view (all scenarios of one benchmark on one tablet).
+  
   // --- search filter + favorites ----------------------------------------------
   // Benchmark-type filter (evxl-style tabs): empty selection = show all.
   const ALL_TYPES = [
@@ -381,27 +367,19 @@ import { listen } from '@tauri-apps/api/event'
     }
   }
 
-  function openDetail(id: number) {
-    selectedBenchmarkId = id
-  }
-
-  function closeDetail() {
-    selectedBenchmarkId = null
-  }
-
-  function closeAnalytics() {
-    analyticsBenchmarkId = null
+  function closeAnalyticsAndReload() {
+    closeAnalytics()
     loadOverview()
   }
 </script>
 
 <svelte:window onclick={onWindowClick} />
 
-{#if screen === 'loading'}
+{#if nav.screen === 'loading'}
   <div class="boot">
     <h1 class="boot-logo display">ΚΑΙΡΟΣ</h1>
   </div>
-{:else if screen === 'setup'}
+{:else if nav.screen === 'setup'}
   <Setup onconnected={onConnected} />
 {:else if profile}
   <div class="app">
@@ -465,8 +443,8 @@ import { listen } from '@tauri-apps/api/event'
               {#each ['marble', 'system', 'basalt'] as it (it)}
                 <button
                   class="theme-opt"
-                  class:active={theme === it}
-                  onclick={() => { theme = it as ThemeName; applyTheme() }}
+                  class:active={themeState.choice === it}
+                  onclick={() => { themeState.choice = it as ThemeName; applyTheme() }}
                 >
                   {it === 'marble' ? 'Marble' : it === 'basalt' ? 'Basalt' : 'System'}
                 </button>
@@ -485,7 +463,7 @@ import { listen } from '@tauri-apps/api/event'
       </header>
 
     <main>
-      {#if selectedBenchmarkId === null}
+      {#if nav.selectedBenchmarkId === null}
         <header class="pediment display">
           <span class="roof" aria-hidden="true"></span>
           <span class="cornice" aria-hidden="true"></span>
@@ -495,13 +473,13 @@ import { listen } from '@tauri-apps/api/event'
         </header>
 
       {/if}
-      {#if analyticsBenchmarkId !== null}
-        <Analytics benchmarkId={analyticsBenchmarkId} onback={closeAnalytics} />
-      {:else if selectedBenchmarkId !== null}
+      {#if nav.analyticsBenchmarkId !== null}
+        <Analytics benchmarkId={nav.analyticsBenchmarkId} onback={closeAnalyticsAndReload} />
+      {:else if nav.selectedBenchmarkId !== null}
         <Detail
-          benchmarkId={selectedBenchmarkId}
+          benchmarkId={nav.selectedBenchmarkId}
           onback={closeDetail}
-          onanalytics={() => (analyticsBenchmarkId = selectedBenchmarkId)}
+          onanalytics={() => openAnalytics(nav.selectedBenchmarkId)}
         />
       {:else}
         <Weekly shared={weekly} />

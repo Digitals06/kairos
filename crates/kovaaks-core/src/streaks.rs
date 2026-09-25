@@ -6,7 +6,6 @@
 //! deterministic milestones so the number stays explainable: +10 XP for every
 //! new personal best in a tracked scenario's merged series.
 
-use crate::metrics;
 use crate::store::Store;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -78,36 +77,28 @@ pub fn streak_summary(store: &Store, steam_id: &str) -> crate::Result<StreakSumm
     let day_xp = (days.len().min(10_000)) as u64 * 25;
 
     // XP-lite: +10 XP for every running-high in each tracked scenario series.
+    // One bulk series pass (kovaaks-core::series) instead of per-scenario
+    // history + plays queries — same semantics, one SQL round trip per input.
     let mut xp: u64 = 0;
     let bids: Vec<i64> = store
         .benchmarks_playing_rows(steam_id)?
         .into_iter()
         .map(|(bid, _, _)| bid)
         .collect();
-    for bid in bids {
-        let history = store.history(steam_id, bid)?;
-        let Some(latest) = history.last() else {
-            continue;
-        };
-        let mut seen: std::collections::HashSet<String> = Default::default();
-        for row in &latest.scenarios {
-            if !seen.insert(row.scenario.clone()) {
-                continue;
-            }
-            let series = metrics::scenario_series_combined(store, steam_id, bid, &row.scenario)?;
-            // The FIRST score on a scenario is a baseline, not an achievement —
-            // otherwise playing thousands of never-touched scenarios prints XP.
-            // A PB only counts when it beats an existing high.
-            let mut high: Option<f64> = None;
-            for (_, score) in &series {
-                match high {
-                    None => high = Some(*score),
-                    Some(h) if *score > h => {
-                        xp += 10;
-                        high = Some(*score);
-                    }
-                    _ => {}
+    let series_map = crate::series::series_map(store, steam_id, &bids)?;
+    for series in series_map.values() {
+        // The FIRST score on a scenario is a baseline, not an achievement —
+        // otherwise playing thousands of never-touched scenarios prints XP.
+        // A PB only counts when it beats an existing high.
+        let mut high: Option<f64> = None;
+        for (_, score) in series {
+            match high {
+                None => high = Some(*score),
+                Some(h) if *score > h => {
+                    xp += 10;
+                    high = Some(*score);
                 }
+                _ => {}
             }
         }
     }

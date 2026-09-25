@@ -29,3 +29,4 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 arboard = "3.6.1"
+ts-rs = { version = "12.0.1", features = ["serde-compat", "chrono-impl", "serde-json-impl"] }

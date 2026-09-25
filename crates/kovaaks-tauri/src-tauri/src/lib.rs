@@ -9,6 +9,7 @@ use std::{collections::BTreeMap, path::PathBuf, time::Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use ts_rs::TS;
 
 use kovaaks_core::{
     csv_ingest, metrics_for_benchmark, metrics_for_scenario_combined,
@@ -44,7 +45,8 @@ const SYNC_MAX_AGE_HOURS: u64 = 2;
 // here once crashed every card render with `undefined.toLocaleString`).
 // REGRESSION: dto_wire_format_is_snake_case guards this.
 // ---------------------------------------------------------------------------
-
+#[derive(TS)]
+#[ts(export)]
 /// One benchmark row on the overview grid.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -83,7 +85,8 @@ pub struct BenchmarkCard {
     /// these inside the card. Populated when difficulty_count > 1.
     pub variants: Vec<BenchmarkVariant>,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// One difficulty of a folded family card.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -102,7 +105,8 @@ pub struct BenchmarkVariant {
     /// True when the difficulty's grind engine reports a plateaued state.
     pub plateaued: bool,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// Phase-2 grind chip payload: the slow grind-engine summary for one
 /// difficulty, computed after the overview grid has painted (see
 /// `grind_overview`).
@@ -113,7 +117,8 @@ pub struct GrindChipDto {
     pub runs_to_next: u32,
     pub plateaued: bool,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// One scenario row in the benchmark detail view.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -127,7 +132,8 @@ pub struct ScenarioRank {
     /// This scenario's tier thresholds (display units), ascending.
     pub rank_maxes: Vec<f64>,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// Wire DTO for the grind-next panel.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,9 +151,9 @@ pub struct GrindTargetDto {
     #[serde(default)]
     pub plateaued: bool,
 }
-
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct GrindNextDto {
     pub current_rank: String,
     pub next_rank: String,
@@ -162,13 +168,15 @@ pub struct GrindNextDto {
 /// Where a chart series' points came from — wire form of
 /// [`kovaaks_core::metrics::ScenarioSeriesSource`]. Serialized lowercase so
 /// the frontend contract is unchanged ("snapshot" | "local").
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum ScenarioHistorySource {
     Snapshot,
     Local,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// One scenario's score history across snapshots (per-scenario trends).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -183,7 +191,8 @@ pub struct ScenarioHistorySeries {
     /// Plateau/CV summary for the whole series (see kovaaks consistency).
     pub plateau: PlateauInfo,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// Plateau state for a scenario series.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -194,7 +203,8 @@ pub struct PlateauInfo {
     pub cv: f64,
     pub best: f64,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// One (time, score) point of a scenario's history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -205,7 +215,8 @@ pub struct ScenarioHistoryPoint {
     /// chart); false for a synced snapshot entry.
     pub from_play: bool,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// One category row in the benchmark detail view.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -214,7 +225,8 @@ pub struct CategoryCard {
     pub progress: i64,
     pub rank_tier: Option<RankTier>,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// One snapshot-history point.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -222,7 +234,8 @@ pub struct SnapshotPoint {
     pub captured_at: String,
     pub benchmark_progress: i64,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// One CSV play point.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -232,7 +245,8 @@ pub struct PlayPoint {
     pub played_at: String,
     pub score: f64,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// Full detail for one benchmark: card + snapshot history + CSV plays +
 /// scenario tiers + per-category progress from the newest snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,7 +267,8 @@ pub struct BenchmarkDetail {
     /// selected in the chart picker.
     pub scenario_metrics: std::collections::BTreeMap<String, kovaaks_core::Metrics>,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// Counters from the last CSV ingest scan + last sync time.
 ///
 /// `last_synced_at` is an additive extension of the planned shape; the
@@ -266,7 +281,8 @@ pub struct IngestStatus {
     pub csv_inserted: u64,
     pub last_synced_at: Option<String>,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// Wire mirror of `kovaaks_core::SyncReport` (core types stay serde-free
 /// of UI concerns; core's struct does not derive Serialize).
 #[derive(Debug, Clone, Serialize)]
@@ -286,7 +302,8 @@ impl From<SyncReport> for SyncReportDto {
         }
     }
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// Wire mirror of `kovaaks_core::weekly::WeeklyReport`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -307,7 +324,8 @@ pub struct WeeklyReportDto {
     pub improvements: Vec<ImprovementRowDto>,
     pub rank_changes: Vec<RankChangeDto>,
 }
-
+#[derive(TS)]
+#[ts(export)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ImprovementRowDto {
@@ -317,7 +335,8 @@ pub struct ImprovementRowDto {
     pub trend: i8,
     pub pb_this_week: bool,
 }
-
+#[derive(TS)]
+#[ts(export)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct RankChangeDto {
@@ -326,7 +345,8 @@ pub struct RankChangeDto {
     pub from: String,
     pub to: String,
 }
-
+#[derive(TS)]
+#[ts(export)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct LevelStepDto {
@@ -378,14 +398,16 @@ impl From<kovaaks_core::weekly::WeeklyReport> for WeeklyReportDto {
         }
     }
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// Wire mirror of `kovaaks_core::dashboard::FamilyRow` rollup.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct DashboardFamiliesDto {
     pub families: Vec<FamilyRowDto>,
 }
-
+#[derive(TS)]
+#[ts(export)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct FamilyRowDto {
@@ -394,7 +416,8 @@ pub struct FamilyRowDto {
     pub categories: Vec<String>,
     pub difficulties: Vec<FamilyDiffDto>,
 }
-
+#[derive(TS)]
+#[ts(export)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct FamilyDiffDto {
@@ -406,7 +429,8 @@ pub struct FamilyDiffDto {
     pub series: Vec<(String, String)>,
     pub benchmark_progress: i64,
 }
-
+#[derive(TS)]
+#[ts(export)]
 /// App settings (persisted as a JSON blob in the store's meta table).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case", default)]
@@ -950,107 +974,107 @@ pub mod commands {
                     cards.push(card);
                 }
             }
-            // Family fold (v0.2): one card per benchmark family, same layout.
-            // The shown rank/metrics are those of the played difficulty with
-            // the deepest tier in its own ladder; the card keeps the winner's
-            // kovaaks id so click-through opens that detail page.
-            eprintln!("[perf] build_cards: {:?}", __instant.elapsed());
-            let mut counts: std::collections::HashMap<String, u32> = Default::default();
-            for c in &cards {
-                *counts.entry(c.benchmark_name.clone()).or_insert(0) += 1;
+            // Family fold (v0.2): one card per family. The FOLD RULE (hardest
+            // ranked difficulty wins, tier depth breaks ties, unranked never
+            // beats ranked) lives in kovaaks-core::overview — this block only
+            // derives per-row registry metadata and copies the folded output
+            // back onto the DTO.
+            let fold_rows: Vec<kovaaks_core::overview::FoldRow> = cards
+                .iter()
+                .map(|c| kovaaks_core::overview::FoldRow {
+                    benchmark_id: c.benchmark_id,
+                    family_name: c.benchmark_name.clone(),
+                    difficulty_name: c.difficulty_name.clone(),
+                    rank_name: c.rank.as_ref().map(|t| t.name.clone()),
+                    is_favorite: c.is_favorite,
+                })
+                .collect();
+            let fold_meta: Vec<kovaaks_core::overview::FamilyMeta> = cards
+                .iter()
+                .map(|c| {
+                    let Some((def, diff)) = state.registry.by_id(c.benchmark_id as u64) else {
+                        return kovaaks_core::overview::FamilyMeta::default();
+                    };
+                    let order = def
+                        .difficulties
+                        .iter()
+                        .position(|d| d.kovaaks_benchmark_id == c.benchmark_id as u64)
+                        .unwrap_or(0) as isize;
+                    let depth = c
+                        .rank
+                        .as_ref()
+                        .and_then(|t| {
+                            diff.rank_colors
+                                .iter()
+                                .position(|col| col.name.eq_ignore_ascii_case(&t.name))
+                        })
+                        .map(|idx| {
+                            if diff.rank_colors.is_empty() {
+                                0.0
+                            } else {
+                                idx as f64 / diff.rank_colors.len() as f64
+                            }
+                        })
+                        .unwrap_or(0.0);
+                    let tier_names: Vec<String> = diff
+                        .rank_colors
+                        .iter()
+                        .map(|r| r.name.to_string())
+                        .collect();
+                    kovaaks_core::overview::FamilyMeta {
+                        order,
+                        tier_depth: depth,
+                        tier_names,
+                    }
+                })
+                .collect();
+            let folded_fams = kovaaks_core::overview::fold_families(fold_rows, fold_meta);
+            let mut by_id: std::collections::HashMap<i64, BenchmarkCard> = Default::default();
+            for c in cards {
+                by_id.insert(c.benchmark_id, c);
             }
             // Family "best rank": the HARDEST difficulty (registry difficulty
             // order) the player has a rank in; ladder depth fraction breaks
-            // ties. Difficulty order is evxl's canonical difficulty ranking —
-            // its ladders are not one global scale, so a maxxed easy tier must
-            // not hide a harder difficulty's lower tier.
-            let tier_strength = |card: &BenchmarkCard| -> (isize, f64) {
-                let Some((def, diff)) = state.registry.by_id(card.benchmark_id as u64) else {
-                    return (-1, 0.0);
-                };
-                // Unranked difficulty (no scores yet) never beats a ranked
-                // easier difficulty — the card then shows the highest rank
-                // achieved in a previous difficulty.
-                if card.rank.is_none() {
-                    return (-1, 0.0);
-                }
-                let order = def
-                    .difficulties
-                    .iter()
-                    .position(|d| d.kovaaks_benchmark_id == card.benchmark_id as u64)
-                    .unwrap_or(0) as isize;
-                let depth = diff
-                    .rank_colors
-                    .iter()
-                    .position(|c| {
-                        card.rank
-                            .as_ref()
-                            .map(|t| t.name.eq_ignore_ascii_case(&c.name))
-                            .unwrap_or(false)
-                    })
-                    .map(|idx| {
-                        if diff.rank_colors.is_empty() {
-                            0.0
-                        } else {
-                            idx as f64 / diff.rank_colors.len() as f64
-                        }
-                    })
-                    .unwrap_or(0.0);
-                (order, depth)
-            };
+            // ties (rule owned by core::overview).
             let mut folded: Vec<BenchmarkCard> = Vec::new();
-            cards.sort_by(|a, b| a.benchmark_name.cmp(&b.benchmark_name));
-            for chunk in cards.chunk_by(|a, b| a.benchmark_name == b.benchmark_name) {
-                let mut members: Vec<&BenchmarkCard> = chunk.iter().collect();
-                members.sort_by(|a, b| {
-                    let (ga, fa) = tier_strength(a);
-                    let (gb, fb) = tier_strength(b);
-                    gb.cmp(&ga)
-                        .then(fb.partial_cmp(&fa).unwrap_or(std::cmp::Ordering::Equal))
-                });
-                let mut best = members[0].clone();
-                best.difficulty_count = counts
-                    .get(&best.benchmark_name.clone())
-                    .copied()
-                    .unwrap_or(1);
-                best.variants = members
+            for fam in folded_fams {
+                let Some(best) = by_id.get(&fam.kept_benchmark_id) else {
+                    continue;
+                };
+                let mut best = best.clone();
+                best.difficulty_count = fam.difficulty_count;
+                best.variants = fam
+                    .variants
                     .iter()
-                    .map(|c| {
+                    .map(|v| {
                         let (tier_names, current_rank) = state
                             .registry
-                            .by_id(c.benchmark_id as u64)
+                            .by_id(v.benchmark_id as u64)
                             .map(|(_, diff)| {
                                 let names: Vec<String> = diff
                                     .rank_colors
                                     .iter()
                                     .map(|r| r.name.to_string())
                                     .collect();
-                                let idx = c
-                                    .rank
-                                    .as_ref()
+                                let idx = by_id
+                                    .get(&v.benchmark_id)
+                                    .and_then(|c| c.rank.as_ref())
                                     .and_then(|t| names.iter().position(|n| n == &t.name))
                                     .map(|i| i as i64)
                                     .unwrap_or(-1);
                                 (names, idx)
                             })
                             .unwrap_or_default();
-                        // Grind chip data: filled in the second phase
-                        // (`grind_overview`) AFTER first paint — the grind
-                        // engine's per-scenario binary searches over ~250
-                        // difficulties cost several seconds here and were
-                        // THE app's launch bottleneck; the grid must not wait
-                        // for them. Phase 1 paints the structure instantly,
-                        // the chips ride in a beat later (cards flash-update
-                        // only the affected rows).
-                        let (runs_to_next, plateaued) = (0u32, false);
+                        // Grind chip data: filled in phase 2 (grind_overview) after
+                        // first paint — see series module notes.
                         BenchmarkVariant {
-                            benchmark_id: c.benchmark_id,
-                            difficulty_name: c.difficulty_name.clone(),
-                            rank: c.rank.clone(),
+                            benchmark_id: v.benchmark_id,
+                            difficulty_name: v.difficulty_name.clone(),
+                            rank: by_id.get(&v.benchmark_id).and_then(|c| c.rank.clone()),
                             tier_names,
                             current_rank,
-                            runs_to_next,
-                            plateaued,
+                            runs_to_next: 0,
+                            plateaued: false,
                         }
                     })
                     .collect();
@@ -1462,7 +1486,6 @@ pub mod commands {
     }
 
     /// Persist app settings (stats dir override, sync interval).
-
     /// Phase 2 of the overview: grind chips for every played difficulty. The
     /// grind engine binary-searches per scenario — seconds of work that the
     /// first paint must not queue behind; the UI calls this after render and

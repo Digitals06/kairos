@@ -85,29 +85,14 @@ pub fn weekly_report(
     // Improvements + PB events share ONE series pass per (benchmark, scenario).
     // Bulk loads: every play (854 rows) arrives in ONE query; per-bid history
     // is loaded once and reused for the series + the rank-change pass below.
-    let all_plays: std::collections::HashMap<String, Vec<(chrono::DateTime<chrono::Utc>, f64)>> = {
-        let mut map: std::collections::HashMap<String, Vec<(chrono::DateTime<chrono::Utc>, f64)>> =
-            Default::default();
-        for rec in store.all_plays(steam_id)? {
-            map.entry(rec.scenario.clone())
-                .or_default()
-                .push((rec.played_at, rec.score));
-        }
-        map
-    };
-    eprintln!("[perf] weekly: bulk plays {:?}", __t.elapsed());
-    let mut pb_events: u32 = 0;
-
-    // Improvements: across all benchmarks snapshotted in the reporting
-    // week (or earlier — prev-week pairs still need a current series).
+    // Improvements + PB events share ONE bulk series pass over every
+    // benchmark snapshotted in the reporting week (or earlier — prev-week
+    // pairs still need a current series). The merged-series semantics live
+    // in kovaaks-core::series (the single dedup owner).
     let bids: Vec<i64> = store.snapshot_benchmark_ids(steam_id, since)?;
     let mut rows: Vec<ImprovementRow> = Vec::new();
-    if bids.is_empty() {
-        eprintln!(
-            "[perf] weekly: no snapshotted bids, skipped loops {:?}",
-            __t.elapsed()
-        );
-    }
+    let mut pb_events: u32 = 0;
+    let series_map = crate::series::series_map(store, steam_id, &bids)?;
     let mut histories: std::collections::HashMap<i64, Vec<crate::store::StoredSnapshot>> =
         Default::default();
     for bid in bids.clone() {
@@ -121,34 +106,12 @@ pub fn weekly_report(
             if !seen.insert(row.scenario.clone()) {
                 continue;
             }
-            let snapshots: Vec<(chrono::DateTime<chrono::Utc>, f64)> = history
-                .iter()
-                .filter_map(|snap| {
-                    snap.scenarios
-                        .iter()
-                        .find(|r| r.scenario == row.scenario)
-                        .map(|r| (snap.captured_at, r.score as f64))
-                })
-                .collect();
-            let plays = all_plays
-                .get(&row.scenario)
-                .map(|v| v.as_slice())
-                .unwrap_or(&[]);
-            let series = {
-                let mut merged: Vec<(chrono::DateTime<chrono::Utc>, f64)> = plays.to_vec();
-                let play_scores: std::collections::HashSet<i64> =
-                    plays.iter().map(|(_, s)| s.round() as i64).collect();
-                for (at, sc) in metrics::improving_only(&snapshots) {
-                    if !play_scores.contains(&(sc.round() as i64)) {
-                        merged.push((at, sc));
-                    }
-                }
-                merged.sort_by_key(|(t, _)| *t);
-                merged
+            let Some(series) = series_map.get(&(bid, row.scenario.clone())) else {
+                continue;
             };
-            let week = metrics::compute_window(&series, now, chrono::Duration::days(7));
+            let week = metrics::compute_window(series, now, chrono::Duration::days(7));
             let prev = metrics::compute_window(
-                &series,
+                series,
                 now - chrono::Duration::days(7),
                 chrono::Duration::days(7),
             );
@@ -168,7 +131,7 @@ pub fn weekly_report(
                 .map(|(_, s)| *s)
                 .fold(0.0_f64, f64::max);
             let mut inweek_pb = false;
-            for (ts, s) in &series {
+            for (ts, s) in series.iter() {
                 if *ts >= since && *s > pre_best && *s > 0.0 {
                     inweek_pb = true;
                     break;

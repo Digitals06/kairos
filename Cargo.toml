@@ -8,6 +8,7 @@ edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
+ts-rs = { version = "12", features = ["serde-compat", "chrono-impl", "serde-json-impl"] }
 kovaaks-core = { path = "crates/kovaaks-core" }
 tokio = { version = "1", features = ["full"] }
 # reqwest 0.13 renamed `rustls-tls` to `rustls`; 0.12 is pinned because the
