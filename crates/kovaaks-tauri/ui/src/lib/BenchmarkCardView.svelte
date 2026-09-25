@@ -93,7 +93,7 @@
             {:else if v.plateaued}
               <span class="chip-plateau">plateaued</span>
             {:else if (v.runs_to_next ?? 0) === 0 && v.rank}
-              <span class="chip-run">complete</span>
+              <span class="diff-state">complete</span>
             {/if}
           </span>
           {#if v.tier_names?.length}
@@ -221,6 +221,13 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .diff-state {
+    font-family: var(--font-serif);
+    font-size: 11px;
+    font-style: italic;
+    color: var(--faint);
   }
 
   .chip-run { animation: chipIn 0.2s ease both;

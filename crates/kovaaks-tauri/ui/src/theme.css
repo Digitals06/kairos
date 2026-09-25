@@ -19,8 +19,15 @@
   --font-serif: 'Garamond', Georgia, 'Times New Roman', serif;
   --mono: 'JBMono', ui-monospace, Consolas, monospace;
   --sans: var(--font-body, system-ui);
-  --radius: 3px;
-  --radius-lg: 6px;
+  /* Astryx-informed scales (from @astryxdesign/theme-stone):
+     duration ladder + radius scale + inset selection ring */
+  --radius: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-full: 9999px;
+  --duration-fast: 125ms;
+  --duration-medium: 300ms;
+  --duration-slow: 700ms;
+  --shadow-inset-selected: inset 0 0 0 2px;
   /* meander terracotta rule (height x 10px) */
   --meander: linear-gradient(var(--accent), var(--accent)) 0 0 / 100% 2px no-repeat,
     repeating-linear-gradient(90deg, transparent 0 4px, color-mix(in srgb, var(--accent) 70%, transparent) 4px 6px,
@@ -79,7 +86,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-serif);
-  font-size: 15px;
+  font-size: 1rem;
   line-height: 1.5;
   overflow-x: hidden;
 }
@@ -93,6 +100,12 @@ html[data-theme='marble'] body::after {
 html[data-theme='marble'] { --grain: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="140" height="140"%3E%3Cfilter id="n"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="2"/%3E%3CfeColorMatrix values="0 0 0 0 0.3 0 0 0 0 0.26 0 0 0 0 0.2 0 0 0 0.05 0"/%3E%3C/filter%3E%3Crect width="140" height="140" filter="url(%23n)"/%3E%3C/svg%3E'); }
 
 #app { min-height: 100vh; }
+
+/* UI scales with window size: root font drives rem-based sizes */
+html {
+  font-size: clamp(12.5px, 0.42vw + 9.4px, 17px);
+}
+body { font-size: 0.95rem; }
 
 h1, h2, h3 {
   margin: 0;

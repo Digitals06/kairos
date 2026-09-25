@@ -430,14 +430,14 @@ import { listen } from '@tauri-apps/api/event'
                 {exportingCsv ? 'Exporting…' : 'Export CSV…'}
               </button>
             <div class="theme-row" role="radiogroup" aria-label="Theme">
-              <span class="theme-label">Thème</span>
+              <span class="theme-label">Theme</span>
               {#each ['marble', 'system', 'basalt'] as it (it)}
                 <button
                   class="theme-opt"
                   class:active={theme === it}
                   onclick={() => { theme = it as ThemeName; applyTheme() }}
                 >
-                  {it === 'marble' ? 'Marbre' : it === 'basalt' ? 'Basalte' : 'Système'}
+                  {it === 'marble' ? 'Marble' : it === 'basalt' ? 'Basalt' : 'System'}
                 </button>
               {/each}
             </div>
