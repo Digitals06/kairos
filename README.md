@@ -8,11 +8,11 @@ If Kairos helps your grind, consider supporting development:
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q2S1237A82)
 
-![Kairos family benchmark grid](docs/screenshots/app-grid-v020.png)
+![Kairos family benchmark grid — marble/basalt temple identity](docs/screenshots/app-grid-v030.png)
 
-![Kairos family card expanded showing difficulty rung bars](docs/screenshots/app-family-v020.png)
+![Kairos family card expanded showing difficulty rung bars](docs/screenshots/app-family-v030.png)
 
-![Kairos weekly report strip with plays, streak, XP level and rank changes](docs/screenshots/app-weekly-v020.png)
+![Kairos weekly plaque with torch day strip, Twelve Steps frieze and rank inscription](docs/screenshots/app-weekly-v030.png)
 
 ## Features
 
@@ -36,11 +36,11 @@ If Kairos helps your grind, consider supporting development:
 - **Consistency & plateau tags** — grind targets show **spread** (how steady your recent runs are, 0% = identical scores) and flag scenarios stalled without a new personal best, so you can swap a stalled grind for something still climbing.
 - **Private by design** — no accounts, no telemetry; only public APIs, and live API tests skip unless you opt in.
 
-![Kairos Avasive S2 Easier detail header and stats](docs/screenshots/app-detail-top-v020.png)
+![Kairos Avasive S2 Easier detail header and stats](docs/screenshots/app-detail-top-v030.png)
 
-![Kairos score history chart with PB progression and consistency chips](docs/screenshots/app-detail-chart-v020.png)
+![Kairos score history chart with PB progression and consistency chips](docs/screenshots/app-detail-chart-v030.png)
 
-![Kairos what-to-grind-next panel with per-scenario targets and spread](docs/screenshots/app-grind-v020.png)
+![Kairos what-to-grind-next panel with per-scenario targets and spread](docs/screenshots/app-grind-v030.png)
 
 ## How it works
 
