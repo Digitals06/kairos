@@ -471,9 +471,8 @@ fn next_rank_from_ladder(
     ladder: &[i64],
     difficulty: &Difficulty,
 ) -> (Option<String>, Option<i64>) {
-    match ladder.iter().find(|&&t| t > progress) {
-        Some(&threshold) => {
-            let idx = ladder.iter().position(|&t| t == threshold).unwrap_or(0);
+    match ladder.iter().enumerate().find(|&(_, &t)| t > progress) {
+        Some((idx, &threshold)) => {
             let name = difficulty.rank_colors.get(idx).map(|t| t.name.clone());
             (name, Some(threshold - progress))
         }
@@ -767,7 +766,6 @@ pub mod commands {
         let latest = history.last();
         let metrics = metrics_for_benchmark(&state.store, steam_id, benchmark_id)?;
         let progress = latest.map(|s| s.benchmark_progress).unwrap_or(0);
-        let _overall_rank = latest.map(|s| s.overall_rank).unwrap_or(0).max(0) as u32;
         // v0.2 rank engine: recompute the rank the way evxl does. Stored
         // snapshots and the engine both work in display units — no rescaling.
         // A snapshot with zero scored scenarios must NOT produce a tier.

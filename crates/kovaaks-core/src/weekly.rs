@@ -143,7 +143,7 @@ pub fn weekly_report(
         }
     }
     rows = deduped;
-    rows.sort_by(|a, b| b.delta.partial_cmp(&a.delta).unwrap());
+    rows.sort_by(|a, b| b.delta.total_cmp(&a.delta));
     // Keep improving first, then regression rows.
     let improving: Vec<ImprovementRow> = rows
         .iter()

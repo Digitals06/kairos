@@ -204,9 +204,21 @@
 
     let high = -Infinity
     const highPts = trend.map((p) => ({ x: p.x, y: (high = Math.max(high, p.y)) }))
-    const rolling = trend.map((p) => {
-      const win = trend.filter((q) => q.x > p.x - DAY_MS && q.x <= p.x)
-      return { x: p.x, y: win.reduce((s, q) => s + q.y, 0) / win.length }
+    // Sliding window (O(n)): trend is sorted, so two pointers track the
+    // [p.x - DAY_MS, p.x] window without re-scanning the array per point.
+    let left = 0
+    let right = 0
+    let sum = 0
+    const rolling = trend.map((p, i) => {
+      while (right < trend.length && trend[right].x <= p.x) {
+        sum += trend[right].y
+        right++
+      }
+      while (left < right && trend[left].x <= p.x - DAY_MS) {
+        sum -= trend[left].y
+        left++
+      }
+      return { x: p.x, y: right > left ? sum / (right - left) : 0 }
     })
     // Loop-invariant: sorted trend ⇒ first/last points bound the span.
     const span = trend.length > 1 ? trend[trend.length - 1].x - trend[0].x : 0

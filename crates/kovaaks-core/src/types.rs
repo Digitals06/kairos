@@ -7,6 +7,17 @@
 
 use serde::{Deserialize, Serialize};
 
+/// KovaaK's CSVs are numeric; a malformed write could still produce NaN/inf.
+/// Reject non-finite floats at the deserialization boundary (0.0 fallback) so
+/// no stored score can poison sorting math downstream.
+fn finite_or_zero(v: f64) -> f64 {
+    if v.is_finite() {
+        v
+    } else {
+        0.0
+    }
+}
+
 /// Serde helper: the webapp-backend emits explicit `null` for rank/id/threshold
 /// fields on never-played scenarios (e.g. `"leaderboard_rank": null` with
 /// `"score": 0`). Decode those as `T::default()` (0 / empty vec) instead of
@@ -42,9 +53,13 @@ pub(crate) mod flex_f64 {
         }
         match Option::<Num>::deserialize(d)? {
             None => Ok(0.0),
-            Some(Num::F(v)) => Ok(v),
+            Some(Num::F(v)) => Ok(super::finite_or_zero(v)),
             Some(Num::I(v)) => Ok(v as f64),
-            Some(Num::S(s)) => s.trim().parse::<f64>().map_err(serde::de::Error::custom),
+            Some(Num::S(s)) => s
+                .trim()
+                .parse::<f64>()
+                .map(super::finite_or_zero)
+                .map_err(serde::de::Error::custom),
         }
     }
 
@@ -62,9 +77,13 @@ pub(crate) mod flex_f64 {
         }
         fn one(n: Num) -> Result<f64, String> {
             match n {
-                Num::F(v) => Ok(v),
+                Num::F(v) => Ok(super::finite_or_zero(v)),
                 Num::I(v) => Ok(v as f64),
-                Num::S(s) => s.trim().parse::<f64>().map_err(|e| format!("{e}")),
+                Num::S(s) => s
+                    .trim()
+                    .parse::<f64>()
+                    .map(super::finite_or_zero)
+                    .map_err(|e| format!("{e}")),
             }
         }
         match Option::<Vec<Num>>::deserialize(d)? {
@@ -131,7 +150,6 @@ pub struct BenchmarkProgress {
     #[serde(rename = "categories", deserialize_with = "ordered_map::deserialize")]
     pub categories: Vec<(String, CategoryProgress)>,
 }
-
 impl BenchmarkProgress {
     /// Normalize the API's mixed units into in-game display units.
     ///

@@ -151,21 +151,8 @@
       radial-gradient(220% 90% at calc(100% - var(--vx, 50%)) calc(100% - var(--vy, 30%)), transparent 58%, color-mix(in srgb, #a5988a 34%, transparent) 80%, transparent 97%),
       repeating-linear-gradient(var(--va, 15deg), transparent 0 10px, color-mix(in srgb, #8a7f6d 12%, transparent) 10px 11.5px, transparent 11.5px 24px);
   }
-
-  /* deterministic marble veining, unique per tablet (seeded by benchmark id) */
-  .card::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    border-radius: inherit;
-    opacity: 0.5;
-    mix-blend-mode: multiply;
-    background-image:
-      radial-gradient(140% 60% at var(--vx, 50%) var(--vy, 40%), transparent 55%, color-mix(in srgb, #7d715c 26%, transparent) 78%, transparent 96%),
-      radial-gradient(220% 90% at calc(100% - var(--vx, 50%)) calc(100% - var(--vy, 30%)), transparent 60%, color-mix(in srgb, #a5988a 30%, transparent) 80%, transparent 97%),
-      repeating-linear-gradient(var(--va, 15deg), transparent 0 11px, color-mix(in srgb, #8a7f6d 9%, transparent) 11px 12px, transparent 12px 26px);
-  }
+/* deterministic marble veining, unique per tablet (seeded by benchmark id) */
+  
 
   .card:hover {
     transform: translateY(-2px);

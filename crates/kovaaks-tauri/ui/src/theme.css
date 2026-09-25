@@ -27,6 +27,9 @@
   --duration-fast: 125ms;
   --duration-medium: 300ms;
   --duration-slow: 700ms;
+  /* open-props easing curves (MIT) — cherry-picked, sheet not shipped */
+  --ease-out-soft: cubic-bezier(.25, 0, .3, 1);
+  --ease-in-out-stone: cubic-bezier(.7, 0, .3, 1);
   --shadow-inset-selected: inset 0 0 0 2px;
   /* meander terracotta rule (height x 10px) */
   --meander: linear-gradient(var(--accent), var(--accent)) 0 0 / 100% 2px no-repeat,
