@@ -1377,8 +1377,7 @@ pub mod commands {
         let store = state.store.clone();
         let report = tauri::async_runtime::spawn_blocking(move || {
             let __t = std::time::Instant::now();
-            let r = kovaaks_core::weekly::weekly_report(&store, &steam_id, chrono::Utc::now());
-            r
+            kovaaks_core::weekly::weekly_report(&store, &steam_id, chrono::Utc::now())
         })
         .await
         .map_err(|e| format!("weekly join error: {e}"))?
