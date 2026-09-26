@@ -79,7 +79,6 @@ pub fn weekly_report(
         store.plays_scenarios(steam_id)?.len() as u32
     };
 
-
     // Improvements + PB events share ONE series pass per (benchmark, scenario).
     // Bulk loads: every play (854 rows) arrives in ONE query; per-bid history
     // is loaded once and reused for the series + the rank-change pass below.
