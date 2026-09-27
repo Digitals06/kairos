@@ -103,7 +103,12 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
   scenarios to grind for the selected family (no game overlay, app polling
   only) — small, lands so the identity is proven on a newer screen too
 
-## v0.3.1+ — QoL candidates (pre-0.4.0, unscoped — pick & bundle)
+## v0.3.1 — bug & UI fixes
+
+Triage pass over v0.3.0: user-reported bugs and UI polish from real
+usage. Scope is open — fix what surfaces rather than planning ahead.
+
+## v0.3.2+ — QoL candidates (pre-0.4.0, unscoped — pick & bundle)
 
 - [ ] Copy-to-clipboard on detail scores (click a score → copy)
 - [ ] Remember expanded families across sessions (localStorage)
@@ -111,26 +116,13 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 - [ ] Sort memory (weakest/strongest persists)
 - [ ] Keyboard navigation in the stoa (↑/↓/Enter/Esc)
 - [ ] Favorites inline tick instead of full reorder jump
-- [ ] Grind "GO" button (deep-launch KovaaK's like evxl) — taste of v0.4.0 coach
+- [ ] Grind "GO" button (deep-launch KovaaK's like evxl) — taste of the
+  play-session workflows
 
-
-- [ ] Complex-widget candidates (v0.4.0+): prefer ZERO-dep Svelte 5 libs for
-  stateful widgets — mukade-ui (28 widget comps: Table/Input/Select/Toggle/
-  Progress/Alert/Spider; scoped <style>, --mukade-* token-driven, NO Tailwind —
-  remap tokens to marble/basalt for e.g. the 0.5.0 local-bench forms). Also
-  viable: svader (runes renderer, 465★) for specific needs. Avoid Tailwind-
-  coupled kits (svelte-5-ui-lib, sv5ui, shadcn-svelte) — they'd re-import the
-  grey-box problem Astryx conventions helped us avoid. open-props easing/shadow
-  tokens: cherry-pick MIT curves by hand (done in theme.css), don't ship the
-  29KB sheet.
-  ⚖ VERDICT after a live trial (2026-09-17): tailwind v4 + @tailwindcss/vite
-  wire up in ~5 min but our hand-carved theme.css (svg data-URI grain,
-  color-mix chains) breaks the lightningcss minifier Tailwind v4 forces in,
-  and the grey-palette override tax lands on every component we'd pull.
-  Cost/benefit says NO for themed surfaces; only reconsider if a 0.4.0+
-  feature (reconcile dialogs, tray menus) demands complex a11y primitives,
-  and then prefer UNSTYLED primitives (bits-ui-style) styled by our own
-  tokens over grey-box class libraries.
+Complex widgets (v0.4.0+): prefer zero-dep Svelte 5 libs for stateful widgets;
+mukade-ui is token-driven and Tailwind-free, remap its tokens to marble/basalt.
+Avoid Tailwind-coupled kits — they re-import the grey-box problem. open-props
+easing/shadow tokens stay cherry-picked by hand.
 
 ## v0.4.0 — play-session workflows
 
