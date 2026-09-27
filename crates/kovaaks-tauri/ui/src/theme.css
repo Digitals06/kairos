@@ -126,6 +126,13 @@ a { color: var(--aegean); text-decoration: none; }
 
 button { font-family: inherit; font-size: inherit; color: inherit; background: none; border: none; cursor: pointer; }
 input { font-family: inherit; font-size: inherit; }
+/* Native <select> popups: WebView2 ignores color-scheme for the OS-drawn
+   popup, but does honor option background/color — keep the list themed. */
+select option,
+select optgroup {
+  background: var(--panel);
+  color: var(--text);
+}
 
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .display { font-family: var(--font-display); }
