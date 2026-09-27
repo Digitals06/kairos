@@ -58,6 +58,7 @@
   --glow-accent: 0 1px 0 rgba(42, 36, 29, 0.5) inset, 0 6px 14px -10px rgba(42, 36, 29, 0.5);
   --glow-accent-2: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
   --hair-shadow: 0 1px 0 rgba(255, 252, 244, 0.8) inset;
+  color-scheme: light;   /* native <select> popups render themed */
 }
 
 /* ── BASALT — night temple, torchlight gold ── */
@@ -81,6 +82,7 @@ html[data-theme='basalt'] {
   --glow-accent: 0 1px 0 rgba(255, 232, 190, 0.06) inset, 0 6px 16px -10px rgba(0, 0, 0, 0.8);
   --glow-accent-2: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
   --hair-shadow: 0 1px 0 rgba(255, 236, 200, 0.05) inset;
+  color-scheme: dark;   /* native <select> popups render themed */
 }
 
 * { box-sizing: border-box; }
@@ -540,6 +542,9 @@ html[data-theme='basalt'] .panel { box-shadow: var(--hair-shadow), 0 2px 10px rg
 
 
 /* --- grind-next panel (Detail) --- */
+.grind-panel {
+  padding: 16px 18px;
+}
 .grind-panel h3 {
   margin: 0 0 8px;
   font-size: 14px;

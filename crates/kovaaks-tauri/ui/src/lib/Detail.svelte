@@ -302,7 +302,7 @@
           },
         },
         plugins: {
-          legend: { labels: { color: 'var(--text)', boxWidth: 12 } },
+          legend: { labels: { color: GREY, boxWidth: 12 } },
           tooltip: {
             callbacks: {
               title: (items) =>
