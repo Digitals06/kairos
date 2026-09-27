@@ -146,81 +146,55 @@ fn combined_plan(
         if prev_rank >= next_index {
             break;
         }
-        // Best step this round. Two candidates per scenario:
-        //   1. cheapest single-scenario rank flip (bisected minimal score)
-        //   2. cheapest next ladder rung (prep, when nothing flips)
-        // Ordering is (delta, then rank): "shortest path" means least total
-        // skill effort, NOT fewest scenarios — cheap rung steps on several
-        // scenarios beat one scenario pushed near its ladder top.
-        let mut best: Option<(u32, i64, String, i64, i64, bool)> = None; // (rank, delta, name, cur, tgt, flip)
+        // Best step this round: rung-based only. Each scenario with headroom
+        // contributes its next ladder rung; a rung that would MAX the scenario
+        // (reaches the final rung) is deferred — it only applies when no
+        // non-maxing rung remains anywhere. Probing showed maxing five
+        // scenarios is avoidable on real Voltaic ladders: earning the rank
+        // through broad, small rung steps across many scenarios is the
+        // "shortest path in skill" the panel promises.
+        let mut best: Option<(bool, i64, String, i64, i64)> = None; // (maxes, delta, name, cur, tgt)
         for (name, cur, cap) in &live {
             if cur >= cap {
                 continue;
             }
-            let (mut lo, mut hi) = (*cur, *cap);
-            set_scenario_score(&mut probe, name, *cap as f64);
-            let top_rank = compute_rank(&probe, benchmark, difficulty).rank;
-            set_scenario_score(&mut probe, name, *cur as f64);
-            if top_rank > prev_rank {
-                while lo < hi {
-                    let mid = lo + (hi - lo) / 2;
-                    set_scenario_score(&mut probe, name, mid as f64);
-                    let r = compute_rank(&probe, benchmark, difficulty).rank;
-                    set_scenario_score(&mut probe, name, *cur as f64);
-                    if r >= top_rank {
-                        hi = mid;
-                    } else {
-                        lo = mid + 1;
-                    }
-                }
-                let delta = lo - *cur;
-                let cand = (top_rank, delta, name.clone(), *cur, lo, true);
-                let replace = match &best {
-                    None => true,
-                    Some((_, bd, _, _, _, f)) => !*f || delta < *bd,
-                };
-                if replace {
-                    best = Some(cand);
-                }
+            let rungs = base
+                .categories
+                .iter()
+                .find_map(|(_, c)| c.scenarios.iter().find(|(n, _)| n == name))
+                .map(|(_, e)| e.rank_maxes.clone())
+                .unwrap_or_default();
+            let next_rung = rungs
+                .iter()
+                .copied()
+                .map(|m| m as i64)
+                .find(|m| *m > *cur)
+                .unwrap_or(*cap)
+                .min(*cap);
+            if next_rung <= *cur {
+                continue;
             }
-            // Prep candidate: next ladder rung, only when no flip is on the
-            // table this round (a flip candidate always wins ordering).
-            if top_rank <= prev_rank && best.as_ref().is_none_or(|b| !b.5) {
-                let rungs = base
-                    .categories
-                    .iter()
-                    .find_map(|(_, c)| c.scenarios.iter().find(|(n, _)| n == name))
-                    .map(|(_, e)| e.rank_maxes.clone())
-                    .unwrap_or_default();
-                let next_rung = rungs
-                    .iter()
-                    .copied()
-                    .map(|m| m as i64)
-                    .find(|m| *m > *cur)
-                    .unwrap_or(*cap)
-                    .min(*cap);
-                if next_rung > *cur {
-                    let delta = next_rung - *cur;
-                    let cand = (prev_rank, delta, name.clone(), *cur, next_rung, false);
-                    let replace = match &best {
-                        None => true,
-                        Some((_, bd, _, _, _, f)) => !*f && delta < *bd,
-                    };
-                    if replace {
-                        best = Some(cand);
-                    }
-                }
+            let maxes = next_rung >= *cap;
+            let delta = next_rung - *cur;
+            let cand = (maxes, delta, name.clone(), *cur, next_rung);
+            let replace = match &best {
+                None => true,
+                Some((bm, bd, _, _, _)) => (maxes, delta) < (*bm, *bd),
+            };
+            if replace {
+                best = Some(cand);
             }
         }
         match best {
-            Some((new_rank, _, name, cur, tgt, _)) => {
+            Some((_, _, name, cur, tgt)) => {
                 set_scenario_score(&mut probe, &name, tgt as f64);
+                let new_rank = compute_rank(&probe, benchmark, difficulty).rank;
                 plan.push(GrindTarget {
                     scenario: name.clone(),
                     current_score: cur,
                     target_score: tgt,
                     delta: tgt - cur,
-                    rungs_crossed: 0,
+                    rungs_crossed: 1,
                 });
                 if let Some(e) = live.iter_mut().find(|(n, _, _)| *n == name) {
                     e.1 = tgt;
@@ -229,7 +203,7 @@ fn combined_plan(
                     prev_rank = new_rank;
                 }
             }
-            None => break, // everything maxed, still stuck: no honest plan
+            None => break, // every ladder exhausted, rank still unflipped: no honest plan
         }
     }
     if prev_rank >= next_index {
