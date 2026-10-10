@@ -524,8 +524,11 @@ pub fn next_targets(
     // Complete ladders have no next tier: nothing to search. (The overview
     // fold calls this per difficulty row; a full scenario sweep with binary
     // searches per scenario — ~30 engine evals each — is the single biggest
-    // launch-cost item, all wasted when nothing can rank up.)
-    if current.complete {
+    // launch-cost item, all wasted when nothing can rank up.) Engine rank at
+    // the ladder's last tier counts too: avg-family floors (aimbeast and
+    // friends) can saturate the top tier while `complete` stays false, and
+    // the panel must not advertise "Ruby_3 -> Ruby_3".
+    if current.complete || current.rank >= ladder_len {
         return GrindResult {
             current_rank: current.name,
             next_rank: next_name,
@@ -1034,6 +1037,52 @@ mod tests {
             // No plan step targets an already-qualified scenario above tier 3.
         } else if false {
         }
+    }
+
+    /// Avg-family floors can saturate the ladder's last tier while `complete`
+    /// stays false — the panel must not advertise "Ruby_3 -> Ruby_3": the
+    /// at-top state returns the empty complete shape with next == current.
+    #[test]
+    fn at_ladder_top_is_not_advertised_as_next() {
+        let difficulty = Difficulty {
+            name: "Intermediate".into(),
+            kovaaks_benchmark_id: 2875,
+            sharecode: String::new(),
+            rank_colors: ["P1", "P2", "P3", "D1", "D2", "D3", "R1", "R2", "R3"]
+                .iter()
+                .map(|n| crate::types::RankTier {
+                    name: n.to_string(),
+                    color: "#000".into(),
+                })
+                .collect(),
+            categories: Vec::new(),
+            scenario_selection: None,
+        };
+        let bench = crate::types::BenchmarkDef {
+            name: "Aimbeast Ground T".into(),
+            abbreviation: "AG".into(),
+            color: "#000".into(),
+            rank_calculation: "aimbeast-partial".into(),
+            spreadsheet_url: String::new(),
+            difficulties: vec![difficulty.clone()],
+            hidden: false,
+        };
+        let ladder = [
+            100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0,
+        ];
+        let mut base = progress_from(&[("a", 950.0, &ladder), ("b", 960.0, &ladder)]);
+        // aimbeast engines read the scenario's OWN tier: pin both at the top.
+        for (_, cat) in &mut base.categories {
+            for (_, e) in &mut cat.scenarios {
+                e.scenario_rank = 9;
+            }
+        }
+        let result = next_targets(&base, &bench, &bench.difficulties[0]);
+        assert!(
+            result.targets.is_empty() && result.plan.is_empty(),
+            "at-top must return the complete panel shape, not a plan"
+        );
+        assert_eq!(result.next_rank_index, 10, "no further tier");
     }
 
     /// The planner class dispatch maps engines to the right planner.
