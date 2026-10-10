@@ -55,7 +55,7 @@ If Kairos helps your grind, consider supporting development:
 - **One-click sync** — a quick pass for your benchmarks; "Check everything at launch" refreshes every benchmark from the leaderboard when you want a deep pass. If the server throttles, Kairos waits and retries politely on its own. **Refresh Local** re-scans the stats folder without touching the network.
 - **Private by design** — no accounts, no telemetry; only public APIs, and live API tests skip unless you opt in.
 
-![Kairos what-to-grind-next panel with per-scenario targets and spread](docs/screenshots/app-grind-v030.png)
+![Kairos what-to-grind-next panel: a step-by-step plan spreading small rung steps across scenarios, each with a launch button](docs/screenshots/app-grind-v032.png)
 
 ## How it works
 
