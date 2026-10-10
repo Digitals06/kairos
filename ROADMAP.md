@@ -108,7 +108,23 @@ player. No onboarding flows, no multi-user support, no telemetry — ever.
 Triage pass over v0.3.0: user-reported bugs and UI polish from real
 usage. Scope is open — fix what surfaces rather than planning ahead.
 
-## v0.3.2+ — QoL candidates (pre-0.4.0, unscoped — pick & bundle)
+## v0.3.2 — per-method grind plans
+
+- [x] Per-method grind planner: count-qualified engines (dojo, one-per-subcat
+  REVENGE) plan only the scenarios that still need to qualify — and repair the
+  tier floor first; harmonic/energy, avg, and floor families all keep the
+  spread plan (cheapest rung across scenarios, maxing deferred)
+- [x] Grind "GO" button: launch the suggested scenario in KovaaK's straight
+  from the plan row (steam deep-link, official scheme)
+- [x] Frameless window: titlebar dragging permission restored (was blocked by
+  a missing window capability — resizing worked, dragging didn't)
+- [x] At-ladder-top benchmarks no longer advertise "Tier -> Tier" as next
+- [x] New app icon: chiseled temple reticle in marble and torchlight gold,
+  retired the old neon one
+- [x] Grind panel spacing matches the other panels; chart legend readable on
+  dark themes; select popups follow the marble/basalt theme
+
+## QoL candidates (pre-0.4.0, unscoped — pick & bundle)
 
 - [ ] Copy-to-clipboard on detail scores (click a score → copy)
 - [ ] Remember expanded families across sessions (localStorage)
@@ -116,8 +132,6 @@ usage. Scope is open — fix what surfaces rather than planning ahead.
 - [ ] Sort memory (weakest/strongest persists)
 - [ ] Keyboard navigation in the stoa (↑/↓/Enter/Esc)
 - [ ] Favorites inline tick instead of full reorder jump
-- [ ] Grind "GO" button (deep-launch KovaaK's like evxl) — taste of the
-  play-session workflows
 
 Complex widgets (v0.4.0+): prefer zero-dep Svelte 5 libs for stateful widgets;
 mukade-ui is token-driven and Tailwind-free, remap its tokens to marble/basalt.
