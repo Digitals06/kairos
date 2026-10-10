@@ -1,6 +1,6 @@
 <script lang="ts">
   import Chart from 'chart.js/auto'
-  import { getBenchmarkDetail, grindNext, type BenchmarkDetail, type GrindNext } from '../lib/api'
+  import { getBenchmarkDetail, grindNext, launchScenario, type BenchmarkDetail, type GrindNext } from '../lib/api'
   import RankBadge from './RankBadge.svelte'
 
   let {
@@ -382,6 +382,7 @@
                     {/if}
                   </span>
                 </span>
+                <button class="grind-go btn-small" title="Launch this scenario in KovaaK's" onclick={() => launchScenario(t.scenario)}>GO</button>
               </li>
             {/each}
             {#if grind.plan.length > 8}
@@ -409,6 +410,7 @@
                     {/if}
                   </span>
                 </span>
+                <button class="grind-go btn-small" title="Launch this scenario in KovaaK's" onclick={() => launchScenario(t.scenario)}>GO</button>
               </li>
             {/each}
             {#if grind.targets.length > 5}

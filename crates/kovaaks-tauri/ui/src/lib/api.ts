@@ -92,6 +92,10 @@ export function grindNext(benchmarkId: number): Promise<GrindNext | null> {
   return invoke('grind_next', { benchmarkId })
 }
 
+export function launchScenario(scenario: string): Promise<void> {
+  return invoke('launch_scenario', { scenario })
+}
+
 export function exportSeriesCsv(): Promise<string> {
   return invoke('export_series_csv')
 }

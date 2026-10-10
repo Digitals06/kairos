@@ -549,6 +549,22 @@ html[data-theme='basalt'] .panel { box-shadow: var(--hair-shadow), 0 2px 10px rg
 
 
 /* --- grind-next panel (Detail) --- */
+.grind-go {
+  margin-left: 12px;
+  flex: none;
+  padding: 2px 10px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
+}
+.grind-go:hover {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
 .grind-panel {
   padding: 16px 18px;
 }

@@ -643,6 +643,15 @@ fn ingest_status_from(store: &Store) -> IngestStatus {
     }
 }
 
+/// Steam runs KovaaK's via the deep-link scheme documented in KovaaK's 3.0.0
+/// (jump-to-scenario, spaces percent-encoded).
+fn kovaaks_scenario_uri(scenario: &str) -> String {
+    format!(
+        "steam://run/824270/?action=jump-to-scenario;name={}",
+        scenario.replace(' ', "%20")
+    )
+}
+
 pub mod commands {
     use super::*;
 
@@ -1482,6 +1491,31 @@ pub mod commands {
         }
     }
 
+    /// Deep-launch a scenario in KovaaK's: KovaaK's registers the
+    /// `steam://run/824270/?action=jump-to-scenario;name=<name>` scheme with
+    /// spaces percent-encoded (official deep-linking doc, patch 3.0.0).
+    /// The relay through `cmd /C start` is the OS route for opening a URL
+    /// from a desktop app.
+    #[tauri::command]
+    pub fn launch_scenario(scenario: String) -> Result<(), String> {
+        let uri = kovaaks_scenario_uri(&scenario);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", &uri])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .spawn()
+                .map_err(|e| format!("failed to open KovaaK's link: {e}"))?;
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = uri;
+            Err("scenario launch is Windows-only".into())
+        }
+    }
+
     /// Persist app settings (stats dir override, sync interval).
     /// Phase 2 of the overview: grind chips for every played difficulty. The
     /// grind engine binary-searches per scenario — seconds of work that the
@@ -1652,6 +1686,7 @@ pub fn run() {
             commands::get_settings,
             commands::set_settings,
             commands::grind_overview,
+            commands::launch_scenario,
             commands::toggle_favorite,
             commands::copy_report_image,
         ])
@@ -1857,5 +1892,19 @@ mod tests {
         let (name, delta) = next_rank_from_ladder(0, &[], &difficulty);
         assert_eq!(name, None);
         assert_eq!(delta, None);
+    }
+
+    /// The deep-launch URI must match KovaaK's official scheme exactly:
+    /// steam app id 824270, jump-to-scenario, spaces as %20.
+    #[test]
+    fn scenario_uri_matches_kovaaks_deeplink_scheme() {
+        assert_eq!(
+            kovaaks_scenario_uri("VT Pasu Advanced S5"),
+            "steam://run/824270/?action=jump-to-scenario;name=VT%20Pasu%20Advanced%20S5"
+        );
+        assert_eq!(
+            kovaaks_scenario_uri("Gravity Strafes a+"),
+            "steam://run/824270/?action=jump-to-scenario;name=Gravity%20Strafes%20a+"
+        );
     }
 }
