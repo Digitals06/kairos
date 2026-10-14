@@ -11,4 +11,12 @@ stats_dir: string,
 /**
  * Background sync interval in hours (0 = only manual sync).
  */
-sync_interval_hours: number, };
+sync_interval_hours: number, 
+/**
+ * Closing the window keeps Kairos in the tray (session-workflow mode).
+ */
+close_to_tray: boolean, 
+/**
+ * The tray offers a one-click KovaaK's launch (deep-link, no param).
+ */
+launch_with_kovaaks: boolean, };

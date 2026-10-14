@@ -189,6 +189,8 @@ import { listen } from '@tauri-apps/api/event'
 
   // --- settings dropdown -----------------------------------------------------
   let settingsOpen = $state(false)
+  let closeToTray = $state(true)
+  let launchWithKovaaks = $state(true)
   let deepScan = $state(false)
   // `deep` is a per-call flag on sync_now, not persisted server-side; map the
   // toggle onto the sync interval (0h = deep mode) so it survives restarts.
@@ -197,6 +199,12 @@ import { listen } from '@tauri-apps/api/event'
 
   async function toggleSettings() {
     settingsOpen = !settingsOpen
+    if (settingsOpen) {
+      void getSettings().then((s) => {
+        closeToTray = s.close_to_tray
+        launchWithKovaaks = s.launch_with_kovaaks
+      })
+    }
     if (settingsOpen && deepScanDirty) {
       try {
         const s = await getSettings()
@@ -422,6 +430,32 @@ import { listen } from '@tauri-apps/api/event'
                   type="checkbox"
                   checked={deepScan}
                   onchange={(e) => applyDeepScan(e.currentTarget.checked)}
+                />
+              </label>
+              <label class="row">
+                <span>Keep running in the tray<br /><small>Closing the window keeps Kairos fresh in the background while KovaaK's runs; the tray icon restores it. Uncheck to exit like a normal window.</small></span>
+                <input
+                  type="checkbox"
+                  checked={closeToTray}
+                  onchange={async (e) => {
+                    const on = e.currentTarget.checked
+                    closeToTray = on
+                    const s: AppSettings = await getSettings()
+                    await setSettings({ ...s, close_to_tray: on })
+                  }}
+                />
+              </label>
+              <label class="row">
+                <span>Launch KovaaK's from the tray<br /><small>Adds a "Launch KovaaK's" item to the tray menu, one click into the game.</small></span>
+                <input
+                  type="checkbox"
+                  checked={launchWithKovaaks}
+                  onchange={async (e) => {
+                    const on = e.currentTarget.checked
+                    launchWithKovaaks = on
+                    const s: AppSettings = await getSettings()
+                    await setSettings({ ...s, launch_with_kovaaks: on })
+                  }}
                 />
               </label>
               <button class="btn" onclick={() => doExportBackup()} disabled={exporting}>

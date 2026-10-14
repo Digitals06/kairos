@@ -439,6 +439,10 @@ pub struct AppSettings {
     pub stats_dir: String,
     /// Background sync interval in hours (0 = only manual sync).
     pub sync_interval_hours: u64,
+    /// Closing the window keeps Kairos in the tray (session-workflow mode).
+    pub close_to_tray: bool,
+    /// The tray offers a one-click KovaaK's launch (deep-link, no param).
+    pub launch_with_kovaaks: bool,
 }
 
 impl Default for AppSettings {
@@ -446,6 +450,8 @@ impl Default for AppSettings {
         Self {
             stats_dir: String::new(),
             sync_interval_hours: 6,
+            close_to_tray: true,
+            launch_with_kovaaks: true,
         }
     }
 }
@@ -655,6 +661,12 @@ fn kovaaks_scenario_uri(scenario: &str) -> String {
 /// Playlists deep-link the same way (KovaaK's 3.0.0 patch notes).
 fn kovaaks_playlist_uri(sharecode: &str) -> String {
     format!("steam://run/824270/?action=jump-to-playlist;sharecode={sharecode}")
+}
+
+/// Plain "run the game" link for the tray's Launch KovaaK's item (no
+/// action parameter: KovaaK's lands on its main screen).
+fn kovaaks_open_uri() -> String {
+    "steam://run/824270/".to_string()
 }
 
 pub mod commands {
@@ -1673,6 +1685,60 @@ pub fn run() {
             // First-run CSV scan in the background (tolerates a missing
             // KovaaK's install; no-ops until a profile is connected).
             tauri::async_runtime::spawn_blocking(move || run_csv_scan(&scan_store));
+            // Tray: session-workflow anchor. The menu is built per-launch so
+            // the KovaaK's item honors the setting read at startup; Show
+            // restores and focuses the main window.
+            {
+                use tauri::menu::{MenuBuilder, MenuItemBuilder};
+                use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+                let settings = app.state::<AppState>().load_settings();
+                let show = MenuItemBuilder::new("Show Kairos").build(app)?;
+                let mut menu = MenuBuilder::new(app).item(&show);
+                if settings.launch_with_kovaaks {
+                    let launch = MenuItemBuilder::new("Launch KovaaK's").build(app)?;
+                    menu = menu.item(&launch);
+                }
+                let quit = MenuItemBuilder::new("Quit").build(app)?;
+                let menu = menu.separator().item(&quit).build()?;
+                TrayIconBuilder::with_id("kairos")
+                    .icon(app.default_window_icon().expect("window icon").clone())
+                    .tooltip("Kairos")
+                    .menu(&menu)
+                    .on_menu_event(|app, event| match event.id().as_ref() {
+                        "Show Kairos" => {
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.unminimize();
+                                let _ = w.set_focus();
+                            }
+                        }
+                        "Launch KovaaK's" => {
+                            use std::os::windows::process::CommandExt;
+                            let url = kovaaks_open_uri();
+                            let _ = std::process::Command::new("cmd")
+                                .args(["/C", "start", "", &url])
+                                .creation_flags(0x08000000)
+                                .spawn();
+                        }
+                        "Quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        }
+                    })
+                    .build(app)?;
+            }
             // Live CSV watcher: emits local-plays-updated when new plays land.
             let state = app.state::<AppState>().inner().clone();
             watcher::spawn(app.handle().clone(), state);
@@ -1699,6 +1765,18 @@ pub fn run() {
             registry,
             evxl: EvxlClient::new().expect("evxl http client"),
             weekly_cache: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        })
+        // Close-to-tray: the X hides the window instead of exiting so the
+        // CSV watcher keeps the sheet fresh while KovaaK's runs. Quit
+        // explicitly through the tray menu.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let close_to_tray = window.state::<AppState>().load_settings().close_to_tray;
+                if close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::resolve_profile,
@@ -1947,5 +2025,11 @@ mod tests {
             kovaaks_playlist_uri("KovaaKsQuestingSunsetorangeSmg"),
             "steam://run/824270/?action=jump-to-playlist;sharecode=KovaaKsQuestingSunsetorangeSmg"
         );
+    }
+
+    /// The tray's plain launch item opens the game without an action param.
+    #[test]
+    fn kovaaks_open_uri_is_the_plain_run_link() {
+        assert_eq!(kovaaks_open_uri(), "steam://run/824270/");
     }
 }
