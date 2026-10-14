@@ -126,10 +126,10 @@ usage. Scope is open — fix what surfaces rather than planning ahead.
 
 ## QoL candidates (pre-0.4.0, unscoped — pick & bundle)
 
-- [ ] Copy-to-clipboard on detail scores (click a score → copy)
-- [ ] Remember expanded families across sessions (localStorage)
+- [x] Copy-to-clipboard on detail scores (click a score → copy)
+- [x] Remember expanded families across sessions (localStorage)
 - [ ] Weak-spot footer strip in detail (next scenario + gap, always visible)
-- [ ] Sort memory (weakest/strongest persists)
+- [x] Sort memory (weakest/strongest persists)
 - [ ] Keyboard navigation in the stoa (↑/↓/Enter/Esc)
 - [ ] Favorites inline tick instead of full reorder jump
 
@@ -144,9 +144,9 @@ easing/shadow tokens stay cherry-picked by hand.
   auto-launch optional
 - [ ] Reconcile view: API snapshot vs local CSV discrepancy report, per-card
   mismatch chip (hidden when in sync)
-- [ ] Playlists & launch: launch a scenario in KovaaK's from the app (same
-  deep-link style evxl uses), plus benchmark playlist sharecodes / playlist
-  launching like scenarios
+- [x] Playlists & launch: scenario GO buttons (grind plan rows) + a
+  "Launch in KovaaK's" button per benchmark detail — both use the official
+  steam deep links (jump-to-scenario / jump-to-playlist, app id 824270)
 
 ## v0.5.0 — custom benches & community
 
