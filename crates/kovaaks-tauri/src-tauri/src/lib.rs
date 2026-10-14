@@ -652,6 +652,11 @@ fn kovaaks_scenario_uri(scenario: &str) -> String {
     )
 }
 
+/// Playlists deep-link the same way (KovaaK's 3.0.0 patch notes).
+fn kovaaks_playlist_uri(sharecode: &str) -> String {
+    format!("steam://run/824270/?action=jump-to-playlist;sharecode={sharecode}")
+}
+
 pub mod commands {
     use super::*;
 
@@ -1516,6 +1521,32 @@ pub mod commands {
         }
     }
 
+    /// Deep-launch a difficulty's shared scenario set in KovaaK's: the
+    /// difficulty's sharecode goes through the official jump-to-playlist
+    /// deep link (KovaaK's 3.0.0: playlists share that way).
+    #[tauri::command]
+    pub fn launch_benchmark(state: State<'_, AppState>, benchmark_id: i64) -> Result<(), String> {
+        let Some((_bench, difficulty)) = state.inner().registry.by_id(benchmark_id as u64) else {
+            return Err(format!("unknown benchmark id {benchmark_id}"));
+        };
+        let uri = kovaaks_playlist_uri(&difficulty.sharecode);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", &uri])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .spawn()
+                .map_err(|e| format!("failed to open KovaaK's link: {e}"))?;
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = uri;
+            Err("scenario launch is Windows-only".into())
+        }
+    }
+
     /// Persist app settings (stats dir override, sync interval).
     /// Phase 2 of the overview: grind chips for every played difficulty. The
     /// grind engine binary-searches per scenario — seconds of work that the
@@ -1687,6 +1718,7 @@ pub fn run() {
             commands::set_settings,
             commands::grind_overview,
             commands::launch_scenario,
+            commands::launch_benchmark,
             commands::toggle_favorite,
             commands::copy_report_image,
         ])
@@ -1905,6 +1937,15 @@ mod tests {
         assert_eq!(
             kovaaks_scenario_uri("Gravity Strafes a+"),
             "steam://run/824270/?action=jump-to-scenario;name=Gravity%20Strafes%20a+"
+        );
+    }
+
+    /// The benchmark launcher uses the official playlist deep link.
+    #[test]
+    fn playlist_uri_matches_kovaaks_deeplink_scheme() {
+        assert_eq!(
+            kovaaks_playlist_uri("KovaaKsQuestingSunsetorangeSmg"),
+            "steam://run/824270/?action=jump-to-playlist;sharecode=KovaaKsQuestingSunsetorangeSmg"
         );
     }
 }

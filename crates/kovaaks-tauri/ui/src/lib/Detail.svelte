@@ -1,6 +1,6 @@
 <script lang="ts">
   import Chart from 'chart.js/auto'
-  import { getBenchmarkDetail, grindNext, launchScenario, type BenchmarkDetail, type GrindNext } from '../lib/api'
+  import { getBenchmarkDetail, grindNext, launchBenchmark, launchScenario, type BenchmarkDetail, type GrindNext } from '../lib/api'
   import RankBadge from './RankBadge.svelte'
 
   let {
@@ -361,6 +361,7 @@
         <span class="detail-difficulty">{detail.card.difficulty_name}</span>
       </div>
       <div class="head-actions">
+        <button class="btn btn-small" title="Open this difficulty's shared scenario set in KovaaK's" onclick={() => detail && launchBenchmark(detail.card.benchmark_id)}>Launch in KovaaK's</button>
         {#if onanalytics}
           <button class="btn btn-small" onclick={onanalytics}>All scenarios</button>
         {/if}

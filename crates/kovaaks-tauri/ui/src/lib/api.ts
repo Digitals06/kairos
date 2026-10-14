@@ -96,6 +96,12 @@ export function launchScenario(scenario: string): Promise<void> {
   return invoke('launch_scenario', { scenario })
 }
 
+// Launch the whole difficulty (its shared scenario set) in KovaaK's — one
+// click starts the session's full benchmark pass.
+export function launchBenchmark(benchmarkId: number): Promise<void> {
+  return invoke('launch_benchmark', { benchmarkId })
+}
+
 export function exportSeriesCsv(): Promise<string> {
   return invoke('export_series_csv')
 }
