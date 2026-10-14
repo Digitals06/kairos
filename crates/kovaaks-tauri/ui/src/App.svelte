@@ -372,13 +372,22 @@ import { listen } from '@tauri-apps/api/event'
     })
   })
 
+  let orderPending = $state(false)
+  let orderTimer = $state<number | undefined>(undefined)
   async function toggleFavoriteLocal(benchmarkId: number) {
     try {
       const nowFavorite = await toggleFavorite(benchmarkId)
       const card = cards.find((c) => c.benchmark_id === benchmarkId)
       if (card) card.is_favorite = nowFavorite
-      // Re-sort locally to match the backend ordering (favorites on top).
-      cards = sortCards(cards)
+      // Inline tick: the star flips in place; the favorites-first reorder
+      // waits for the settle timer (or the chip click) so a quick
+      // un-favourite does not yank the sheet mid-click.
+      orderPending = true
+      clearTimeout(orderTimer)
+      orderTimer = setTimeout(() => {
+        cards = sortCards(cards)
+        orderPending = false
+      }, 2500) as unknown as number
     } catch (err) {
       showToast(humanError(err))
     }
@@ -416,6 +425,17 @@ import { listen } from '@tauri-apps/api/event'
         <span class="last-synced num" class:stale={isStale}>
           {fmtLastSynced()}{#if isStale}<span class="stale-badge">STALE</span>{/if}
         </span>
+        {#if orderPending}
+          <button
+            class="btn btn-small"
+            title="Favorites reordered on next refresh — click to apply now"
+            onclick={() => {
+              clearTimeout(orderTimer)
+              cards = sortCards(cards)
+              orderPending = false
+            }}
+          >Order updated ✓</button>
+        {/if}
         <button class="btn btn-accent" onclick={() => doSync(deepScan)} disabled={syncing}>
           {#if syncing}
             <span class="spinner" aria-hidden="true"></span>
