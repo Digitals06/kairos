@@ -139,7 +139,8 @@ usage. Scope is open — fix what surfaces rather than planning ahead.
   steam deep links (jump-to-scenario / jump-to-playlist, app id 824270)
 - [x] Weak-spot footer strip in detail: sticky bar with the next scenario,
   its gap and a GO button
-- [ ] Keyboard navigation in the stoa (↑/↓/Enter/Esc)
+- [x] Keyboard navigation in the stoa: ↓/↑ walk the card order, Enter
+  expands/opens (same semantics as clicking), Esc backs out of detail/analytics
 - [x] Favorites inline tick: the star flips in place; the reorder settles
   after a short delay or on clicking the "Order updated" chip
 
