@@ -576,11 +576,19 @@
                 {@const top = thresholdFor(s.rank_maxes, s.rank_maxes.length - 1)}
                 <tr>
                   <td class="scenario-col">
-                    <button
-                      class="scenario-name"
-                      title="Click to copy scenario name"
-                      onclick={() => copyName(s.scenario)}
-                    >{s.scenario}</button>
+                    <span class="scenario-line">
+                      <button
+                        class="scenario-name"
+                        title="Click to copy scenario name"
+                        onclick={() => copyName(s.scenario)}
+                      >{s.scenario}</button>
+                      <button
+                        class="scenario-launch"
+                        title="Launch this scenario in KovaaK's"
+                        aria-label={`Launch ${s.scenario}`}
+                        onclick={() => launchScenario(s.scenario)}
+                      >▶</button>
+                    </span>
                   </td>
                   <td class="score-col num">
                     {#if s.score > 0}

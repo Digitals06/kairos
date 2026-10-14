@@ -461,6 +461,35 @@ html[data-theme='basalt'] .panel { box-shadow: var(--hair-shadow), 0 2px 10px rg
   color: var(--accent-2);
 }
 
+/* ── scenario row: name + inline launch glyph ── */
+.scenario-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.scenario-line .scenario-name {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.scenario-launch {
+  flex: none;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--faint, var(--muted));
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s, color 0.15s;
+}
+.scenario-launch:hover {
+  opacity: 1;
+  color: var(--accent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
 .score-pair {
   background: none;
   border: none;
