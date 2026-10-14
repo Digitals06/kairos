@@ -124,12 +124,19 @@ usage. Scope is open — fix what surfaces rather than planning ahead.
 - [x] Grind panel spacing matches the other panels; chart legend readable on
   dark themes; select popups follow the marble/basalt theme
 
-## QoL candidates (pre-0.4.0, unscoped — pick & bundle)
+## v0.4.0 — play-session workflows
 
-- [x] Copy-to-clipboard on detail scores (click a score → copy)
-- [x] Remember expanded families across sessions (localStorage)
+- [ ] Tray mode: background watcher keeps the app fresh while KovaaK's runs;
+  auto-launch optional
+- [ ] Post-session summary toast: when the CSV watcher sees the last play gap
+  close (KovaaK's shut down), surface "This session: N PBs, best improvement …"
+  from the local plays delta since the session start marker
+- [ ] Reconcile view: API snapshot vs local CSV discrepancy report, per-card
+  mismatch chip (hidden when in sync)
+- [x] Playlists & launch: scenario GO buttons (grind plan rows) + a
+  "Launch in KovaaK's" button per benchmark detail — both use the official
+  steam deep links (jump-to-scenario / jump-to-playlist, app id 824270)
 - [ ] Weak-spot footer strip in detail (next scenario + gap, always visible)
-- [x] Sort memory (weakest/strongest persists)
 - [ ] Keyboard navigation in the stoa (↑/↓/Enter/Esc)
 - [ ] Favorites inline tick instead of full reorder jump
 
@@ -137,16 +144,6 @@ Complex widgets (v0.4.0+): prefer zero-dep Svelte 5 libs for stateful widgets;
 mukade-ui is token-driven and Tailwind-free, remap its tokens to marble/basalt.
 Avoid Tailwind-coupled kits — they re-import the grey-box problem. open-props
 easing/shadow tokens stay cherry-picked by hand.
-
-## v0.4.0 — play-session workflows
-
-- [ ] Tray mode: background watcher keeps the app fresh while KovaaK's runs;
-  auto-launch optional
-- [ ] Reconcile view: API snapshot vs local CSV discrepancy report, per-card
-  mismatch chip (hidden when in sync)
-- [x] Playlists & launch: scenario GO buttons (grind plan rows) + a
-  "Launch in KovaaK's" button per benchmark detail — both use the official
-  steam deep links (jump-to-scenario / jump-to-playlist, app id 824270)
 
 ## v0.5.0 — custom benches & community
 
