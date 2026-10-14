@@ -1481,6 +1481,98 @@ pub mod commands {
         Ok(state.load_settings())
     }
 
+    /// Reconcile a benchmark's latest API snapshot against the local CSV
+    /// plays since that snapshot was taken. Read-only, no network: the
+    /// "discrepancy" is exactly the new unreported activity — plays newer
+    /// than the snapshot that may hold PBs KovaaK's web hasn't ranked yet.
+    #[derive(TS)]
+    #[ts(export)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub struct ReconcileDto {
+        /// RFC3339 timestamp of the newest API snapshot for the benchmark.
+        pub last_synced_at: Option<String>,
+        /// True when local plays exist newer than the snapshot.
+        pub has_pending: bool,
+        /// Local plays newer than the snapshot (newest first).
+        pub plays_since: Vec<ReconcilePlayDto>,
+    }
+
+    #[derive(TS)]
+    #[ts(export)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub struct ReconcilePlayDto {
+        pub scenario: String,
+        pub played_at: String,
+        pub score: f64,
+        /// How much this play beats the player's previous best on that
+        /// scenario, when positive (a live PB estimate).
+        pub beats_previous_best: Option<f64>,
+    }
+
+    #[tauri::command]
+    pub fn reconcile(
+        state: State<'_, AppState>,
+        benchmark_id: i64,
+    ) -> Result<ReconcileDto, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        let history = state
+            .store
+            .history(&steam_id, benchmark_id)
+            .map_err(|e| e.to_string())?;
+        let last_synced_at = history.last().map(|s| s.captured_at.to_rfc3339());
+        let since = history.last().map(|s| s.captured_at);
+        let mut plays_since: Vec<ReconcilePlayDto> = Vec::new();
+        if let Some(since_ts) = since {
+            // The benchmark's scenarios come from the newest snapshot rows.
+            let scenario_names = history
+                .last()
+                .map(|s| {
+                    s.scenarios
+                        .iter()
+                        .map(|row| row.scenario.clone())
+                        .collect::<std::collections::BTreeSet<String>>()
+                })
+                .unwrap_or_default();
+            for scenario in &scenario_names {
+                let hist = state
+                    .store
+                    .plays_history(&steam_id, scenario)
+                    .map_err(|e| e.to_string())?;
+                let prior_best = hist
+                    .iter()
+                    .take_while(|h| h.played_at <= since_ts)
+                    .map(|h| h.score)
+                    .fold(-1.0f64, f64::max);
+                // Best local play newer than the snapshot, per scenario.
+                if let Some(play) = hist
+                    .iter()
+                    .skip_while(|h| h.played_at <= since_ts)
+                    .max_by(|a, b| a.played_at.cmp(&b.played_at))
+                {
+                    let beats = (play.score - prior_best.max(0.0)).max(0.0);
+                    plays_since.push(ReconcilePlayDto {
+                        scenario: play.scenario.clone(),
+                        played_at: play.played_at.to_rfc3339(),
+                        score: play.score,
+                        beats_previous_best: if beats > 0.0 { Some(beats) } else { None },
+                    });
+                }
+            }
+        }
+        plays_since.sort_by(|a, b| b.played_at.cmp(&a.played_at));
+        Ok(ReconcileDto {
+            last_synced_at,
+            has_pending: !plays_since.is_empty(),
+            plays_since,
+        })
+    }
+
     /// Toggle a benchmark's favorite pin. Returns the new state (true = pinned).
     #[tauri::command]
     pub fn toggle_favorite(state: State<'_, AppState>, benchmark_id: i64) -> Result<bool, String> {
@@ -1797,6 +1889,7 @@ pub fn run() {
             commands::grind_overview,
             commands::launch_scenario,
             commands::launch_benchmark,
+            commands::reconcile,
             commands::toggle_favorite,
             commands::copy_report_image,
         ])

@@ -96,6 +96,8 @@ export function launchScenario(scenario: string): Promise<void> {
   return invoke('launch_scenario', { scenario })
 }
 
+import type { ReconcileDto } from './bindings/ReconcileDto'
+
 // Launch the whole difficulty (its shared scenario set) in KovaaK's — one
 // click starts the session's full benchmark pass.
 export function launchBenchmark(benchmarkId: number): Promise<void> {
@@ -144,4 +146,7 @@ export function toggleFavorite(benchmarkId: number): Promise<boolean> {
 
 export function dashboardRollup(): Promise<DashboardFamilies> {
   return invoke('dashboard_rollup')
+}
+export function reconcile(benchmarkId: number): Promise<ReconcileDto> {
+  return invoke('reconcile', { benchmarkId })
 }

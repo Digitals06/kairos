@@ -1,6 +1,8 @@
 <script lang="ts">
   import Chart from 'chart.js/auto'
-  import { getBenchmarkDetail, grindNext, launchBenchmark, launchScenario, type BenchmarkDetail, type GrindNext } from '../lib/api'
+  import { getBenchmarkDetail, grindNext, launchBenchmark, launchScenario, reconcile, type BenchmarkDetail, type GrindNext } from '../lib/api'
+  // DTO type mirrors live in the generated bindings directory.
+  import type { ReconcileDto } from './bindings/ReconcileDto'
   import RankBadge from './RankBadge.svelte'
 
   let {
@@ -186,6 +188,9 @@
 
   let lineCanvas: HTMLCanvasElement | undefined = $state()
   let grind = $state<GrindNext | null>(null)
+  // Reconcile chip: local plays newer than the last API snapshot (unranked
+  // activity). Hidden while the snapshot is current.
+  let pending = $state<ReconcileDto | null>(null)
 
   // "What to grind next": engine-computed per-scenario targets for this benchmark.
   $effect(() => {
@@ -197,6 +202,11 @@
     grindNext(id)
       .then((g) => (grind = g))
       .catch(() => (grind = null))
+    // Reconcile chip: local plays newer than the last API snapshot (unranked
+    // activity). Hidden while the snapshot is current.
+    reconcile(id)
+      .then((r) => (pending = r))
+      .catch(() => (pending = null))
   })
   let lineChart: Chart | undefined
 
@@ -361,6 +371,14 @@
         <span class="detail-difficulty">{detail.card.difficulty_name}</span>
       </div>
       <div class="head-actions">
+        {#if pending?.has_pending}
+          <span
+            class="chip hot"
+            title="Local plays newer than the last leaderboard sync — Sync Now to rank them"
+          >
+            {pending!.plays_since.length} unranked play{pending!.plays_since.length === 1 ? '' : 's'}
+          </span>
+        {/if}
         <button class="btn btn-small" title="Open this difficulty's shared scenario set in KovaaK's" onclick={() => detail && launchBenchmark(detail.card.benchmark_id)}>Launch in KovaaK's</button>
         {#if onanalytics}
           <button class="btn btn-small" onclick={onanalytics}>All scenarios</button>
