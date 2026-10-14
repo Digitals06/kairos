@@ -656,6 +656,16 @@
       {/if}
     </section>
   {/if}
+
+  {#if grind && !grind.complete && (grind.targets.length > 0 || grind.plan.length > 0)}
+    {@const nextTarget = grind.targets.length > 0 ? grind.targets[0] : grind.plan[0]}
+    <footer class="weakspot panel">
+      <span class="weak-get">Next up</span>
+      <span class="weak-name">{nextTarget.scenario}</span>
+      <span class="num weak-gap">+{nextTarget.delta.toLocaleString()} → {grind.nextRank}</span>
+      <button class="grind-go" title="Launch this scenario in KovaaK's" onclick={() => launchScenario(nextTarget.scenario)}>GO</button>
+    </footer>
+  {/if}
 </div>
 
 <style>
@@ -663,5 +673,33 @@
     display: flex;
     align-items: center;
     gap: 10px;
+  }
+
+  .weakspot {
+    position: sticky;
+    bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    margin-top: 14px;
+    z-index: 5;
+  }
+  .weakspot .weak-get {
+    font-family: var(--font-display);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .weakspot .weak-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .weakspot .weak-gap {
+    margin-left: auto;
+    color: var(--accent);
   }
 </style>
