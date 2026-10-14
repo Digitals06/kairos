@@ -669,6 +669,22 @@ fn kovaaks_open_uri() -> String {
     "steam://run/824270/".to_string()
 }
 
+/// Open a URL through the OS shell (Windows: hidden cmd relay).
+fn open_url(url: &str) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+}
+
 pub mod commands {
     use super::*;
 
@@ -1608,21 +1624,8 @@ pub mod commands {
     #[tauri::command]
     pub fn launch_scenario(scenario: String) -> Result<(), String> {
         let uri = kovaaks_scenario_uri(&scenario);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            std::process::Command::new("cmd")
-                .args(["/C", "start", "", &uri])
-                .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                .spawn()
-                .map_err(|e| format!("failed to open KovaaK's link: {e}"))?;
-            Ok(())
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = uri;
-            Err("scenario launch is Windows-only".into())
-        }
+        open_url(&uri);
+        Ok(())
     }
 
     /// Deep-launch a difficulty's shared scenario set in KovaaK's: the
@@ -1634,21 +1637,8 @@ pub mod commands {
             return Err(format!("unknown benchmark id {benchmark_id}"));
         };
         let uri = kovaaks_playlist_uri(&difficulty.sharecode);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            std::process::Command::new("cmd")
-                .args(["/C", "start", "", &uri])
-                .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                .spawn()
-                .map_err(|e| format!("failed to open KovaaK's link: {e}"))?;
-            Ok(())
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = uri;
-            Err("scenario launch is Windows-only".into())
-        }
+        open_url(&uri);
+        Ok(())
     }
 
     /// Persist app settings (stats dir override, sync interval).
@@ -1805,12 +1795,7 @@ pub fn run() {
                             }
                         }
                         "Launch KovaaK's" => {
-                            use std::os::windows::process::CommandExt;
-                            let url = kovaaks_open_uri();
-                            let _ = std::process::Command::new("cmd")
-                                .args(["/C", "start", "", &url])
-                                .creation_flags(0x08000000)
-                                .spawn();
+                            open_url(&kovaaks_open_uri());
                         }
                         "Quit" => app.exit(0),
                         _ => {}
