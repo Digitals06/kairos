@@ -22,7 +22,33 @@
     ontogglefavorite?: () => void
   } = $props()
 
-  let expanded = $state(false)
+  // Expanded families persist across sessions: a player grinding one family
+  // keeps their sheet open after a restart.
+  const EXPANDED_KEY = 'kairos-expanded-families'
+  function readExpanded(): number[] {
+    try {
+      const v = JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? '[]')
+      return Array.isArray(v) ? v.filter((x: unknown) => typeof x === 'number') : []
+    } catch {
+      return []
+    }
+  }
+
+  // `card` is fixed per component instance ({#each ... (card.benchmark_id)}):
+  // the initializer below intentionally reads the mount-time value.
+  function expandedNow(): boolean {
+    return readExpanded().includes(card.benchmark_id)
+  }
+  let expanded = $state(expandedNow())
+
+  $effect(() => {
+    const set = readExpanded()
+    const has = set.includes(card.benchmark_id)
+    if (has !== expanded) {
+      const next = expanded ? [...set, card.benchmark_id] : set.filter((x) => x !== card.benchmark_id)
+      localStorage.setItem(EXPANDED_KEY, JSON.stringify(next))
+    }
+  })
 
   function onFavClick(e: MouseEvent) {
     e.stopPropagation()

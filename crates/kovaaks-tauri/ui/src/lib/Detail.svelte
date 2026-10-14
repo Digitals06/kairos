@@ -49,7 +49,17 @@
   const scenarios = $derived(detail?.scenario_ranks ?? [])
   // 'document' = API order (evxl); 'weakest' = rank tier ascending, tiebroken
   // by the score gap to the scenario's next tier (closest-to-flip first).
-  let scenSort: 'document' | 'weakest' | 'strongest' = $state('document')
+  // Sort memory: the deep-page order persists across sessions per player
+  // preference ("weakest first" is the common grind ordering).
+  const SORT_KEY = 'kairos-scen-sort'
+  const savedSort = localStorage.getItem(SORT_KEY)
+  let scenSort: 'document' | 'weakest' | 'strongest' = $state(
+    savedSort === 'weakest' || savedSort === 'strongest' ? savedSort : 'document',
+  )
+
+  $effect(() => {
+    localStorage.setItem(SORT_KEY, scenSort)
+  })
   const sortedScenarios = $derived.by(() => {
     const list = [...(detail?.scenario_ranks ?? [])]
     if (scenSort === 'document') return list
@@ -131,6 +141,16 @@
   async function copyName(name: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(name)
+    } catch {
+      /* clipboard unavailable in some webviews; non-fatal */
+    }
+  }
+
+  // Score cells click-copy the raw score (no locale separators): the number
+  // a player pastes into KovaaK's-focused tools or spreadsheet trackers.
+  async function copyScore(score: number): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(String(score))
     } catch {
       /* clipboard unavailable in some webviews; non-fatal */
     }
@@ -563,13 +583,17 @@
                   </td>
                   <td class="score-col num">
                     {#if s.score > 0}
-                      <span class="score-pair">
+                      <button
+                        class="score-pair"
+                        title="Click to copy the raw score"
+                        onclick={() => copyScore(s.score)}
+                      >
                         <span class="score-value">{s.score.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                         {#if top !== null}
                           <span class="slash">&nbsp;/&nbsp;</span>
                           <span class="num muted">{top.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                         {/if}
-                      </span>
+                      </button>
                     {:else}
                       <span class="muted">—</span>
                     {/if}
