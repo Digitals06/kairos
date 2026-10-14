@@ -509,6 +509,31 @@ impl Store {
         Ok(n == 1)
     }
 
+    /// Most recent plays for a player, newest first, across scenarios.
+    pub fn latest_plays(&self, steam_id: &str, limit: usize) -> Result<Vec<PlayRecord>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare(
+            "SELECT scenario, played_at, score, hit_count, avg_fps
+             FROM plays WHERE steam_id = ?1
+             ORDER BY played_at DESC, id DESC LIMIT ?2",
+        )?;
+        let rows = stmt
+            .query_map(params![steam_id, limit as i64], |row| {
+                let played: String = row.get(1)?;
+                let played_at = parse_rfc3339_column(1, &played)?;
+                Ok(PlayRecord {
+                    scenario: row.get(0)?,
+                    played_at,
+                    score: row.get(2)?,
+                    hit_count: row.get::<_, i64>(3)? as u64,
+                    avg_fps: row.get(4)?,
+                    source: crate::types::PlaySource::Csv,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// All plays of one scenario for a player, ascending played_at.
     pub fn plays_history(&self, steam_id: &str, scenario: &str) -> Result<Vec<PlayRecord>> {
         let conn = self.lock();

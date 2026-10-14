@@ -75,10 +75,27 @@ import { listen } from '@tauri-apps/api/event'
   // view without any click. Strictly local; ranks still change on Sync Now.
   $effect(() => {
     let unlisten: (() => void) | undefined
-    listen<{ seen: number; inserted: number }>('local-plays-updated', (e) => {
+    listen<{
+      seen: number
+      inserted: number
+      session?: { plays: number; pbs: number; best_delta: number | null; best_scenario: string }
+    }>('local-plays-updated', (e) => {
       if (e.payload.inserted > 0) {
         loadOverview()
         refreshLastSynced()
+      }
+      // Post-session summary: the watcher flags a >20 min idle gap, the toast
+      // reports what the just-finished session earned. PBs only; a session
+      // with none says so plainly.
+      const s = e.payload.session
+      if (s && s.plays > 0) {
+        let msg: string
+        if (s.pbs > 0 && s.best_delta !== null) {
+          msg = `Session done: ${s.pbs} PB${s.pbs === 1 ? '' : 's'} across ${s.plays} play${s.plays === 1 ? '' : 's'}, best +${Math.round(s.best_delta)} (${s.best_scenario})`
+        } else {
+          msg = `Session done: ${s.plays} play${s.plays === 1 ? '' : 's'}, no PBs this time`
+        }
+        setTimeout(() => showToast(msg), 1200)
       }
     }).then((fn) => (unlisten = fn))
     return () => unlisten?.()
