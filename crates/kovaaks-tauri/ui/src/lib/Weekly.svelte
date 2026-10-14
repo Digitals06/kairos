@@ -68,7 +68,6 @@
     }))
   })
 
-  const scoredMin = $derived(report ? Math.max(1, Math.ceil(report.scored_seconds / 60)) : 0)
 </script>
 
 <section class="weekly">
@@ -92,7 +91,6 @@
 
     <p class="sub">
       <b class="num">{report.plays}</b> scored runs ·
-      <b class="num">{scoredMin}</b> scored-min ·
       streak <b class="num">{report.current_streak}</b> ·
       presently at <b>{report.level_name}</b> ({report.level_progress_pct}%)
       <button class="mini" onclick={refresh} disabled={refreshing} aria-label="refresh week">
