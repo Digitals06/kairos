@@ -249,6 +249,51 @@ import { listen } from '@tauri-apps/api/event'
     }
   }
 
+  // Stoa keyboard navigation: arrows walk the card order (the grid's DOM
+  // order), Enter expands/or opens via the card's own header semantics, Esc
+  // backs out of the detail, f toggles the favorite. Only active on the stoa
+  // screen and when a text field isn't focused.
+  function stoaCards(): HTMLElement[] {
+    return Array.from(document.querySelectorAll('.grid article > header[role="button"]'))
+  }
+
+  function onWindowKey(e: KeyboardEvent) {
+    const target = e.target as HTMLElement
+    if (target && /input|textarea|select/i.test(target.tagName)) return
+    if (settingsOpen) return
+    if (nav.selectedBenchmarkId !== null || nav.analyticsBenchmarkId !== null) {
+      if (e.key === 'Escape') {
+        if (nav.analyticsBenchmarkId !== null) closeAnalyticsAndReload()
+        else closeDetail()
+      }
+      return
+    }
+    const cards = stoaCards()
+    if (cards.length === 0) return
+    const focused = document.activeElement as HTMLElement | null
+    const currentIndex =
+      focused && focused.matches('article > header[role="button"]')
+        ? cards.indexOf(focused.closest('header[role="button"]') as HTMLElement)
+        : focused?.closest('article')?.querySelector('header[role="button"]')
+          ? cards.indexOf(focused.closest('article')!.parentElement!.querySelector('header') as HTMLElement)
+          : -1
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const step = e.key === 'ArrowDown' ? 1 : -1
+      const next = currentIndex === -1 ? (step === 1 ? 0 : cards.length - 1) : Math.min(cards.length - 1, Math.max(0, currentIndex + step))
+      cards[next]?.focus()
+      cards[next]?.scrollIntoView({ block: 'nearest' })
+    } else if (e.key === 'Enter' && currentIndex >= 0) {
+      // The header's own click handler (expand or open) handles it; the
+      // keyboard activation on role=button already fires click for Enter.
+    } else if (e.key === 'f' && currentIndex >= 0) {
+      const articleEl = cards[currentIndex].closest('article')
+      // The favourite button is the first .fav-btn in the card.
+      const fav = articleEl?.querySelector('button.fav-btn') as HTMLButtonElement | null
+      fav?.click()
+    }
+  }
+
   // --- data loading ----------------------------------------------------------
 
   // Card order: favorited benchmarks pinned on top, then alphabetical.
@@ -399,7 +444,7 @@ import { listen } from '@tauri-apps/api/event'
   }
 </script>
 
-<svelte:window onclick={onWindowClick} />
+<svelte:window onclick={onWindowClick} onkeydown={onWindowKey} />
 
 {#if nav.screen === 'loading'}
   <div class="boot">
