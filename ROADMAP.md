@@ -126,19 +126,22 @@ usage. Scope is open — fix what surfaces rather than planning ahead.
 
 ## v0.4.0 — play-session workflows
 
-- [ ] Tray mode: background watcher keeps the app fresh while KovaaK's runs;
-  auto-launch optional
-- [ ] Post-session summary toast: when the CSV watcher sees the last play gap
-  close (KovaaK's shut down), surface "This session: N PBs, best improvement …"
-  from the local plays delta since the session start marker
-- [ ] Reconcile view: API snapshot vs local CSV discrepancy report, per-card
-  mismatch chip (hidden when in sync)
+- [x] Tray mode: closing the window keeps Kairos running in the tray (the
+  CSV watcher stays live); tray menu with Show / Launch KovaaK's / Quit and
+  settings toggles for both
+- [x] Post-session summary toast: a >20 min play gap closes the session; the
+  toast reports plays and PBs (with the best gain and scenario) from local
+  CSV data only
+- [x] Reconcile chip: the detail header surfaces local plays newer than the
+  last leaderboard snapshot ("N unranked plays"), hidden when current
 - [x] Playlists & launch: scenario GO buttons (grind plan rows) + a
   "Launch in KovaaK's" button per benchmark detail — both use the official
   steam deep links (jump-to-scenario / jump-to-playlist, app id 824270)
-- [ ] Weak-spot footer strip in detail (next scenario + gap, always visible)
+- [x] Weak-spot footer strip in detail: sticky bar with the next scenario,
+  its gap and a GO button
 - [ ] Keyboard navigation in the stoa (↑/↓/Enter/Esc)
-- [ ] Favorites inline tick instead of full reorder jump
+- [x] Favorites inline tick: the star flips in place; the reorder settles
+  after a short delay or on clicking the "Order updated" chip
 
 Complex widgets (v0.4.0+): prefer zero-dep Svelte 5 libs for stateful widgets;
 mukade-ui is token-driven and Tailwind-free, remap its tokens to marble/basalt.
