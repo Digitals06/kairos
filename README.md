@@ -12,21 +12,24 @@ If Kairos helps your grind, consider supporting development:
 
 ![Kairos overview — benchmark grid in the basalt theme with the weekly plaque and grind coach](docs/screenshots/app-grid-v030.png)
 
-## What's new in v0.3.0 — the temple identity
+## What's new in v0.4.0 — play sessions
 
-- **Marble & basalt themes with an OS-follow option** — per-theme chart palettes, frameless window with engraved window glyphs, carved scrollbars, and a UI that scales with the window.
-- **Weekly plaque** — plays-per-day torch strip, a Twelve-Steps level frieze, rank inscriptions and scored-min in one "This week" element.
-- **Analytics** — per-benchmark scenario analysis with score history charts and 30-day improvement.
-- **Grind coach** — pick a family, get the shortest path to your next tier.
-- **Two-phase launch** — the grid paints in under 2s; grind chips stream in after, so the app opens instantly.
-- **Plain-English UX** — "spread" instead of CV%, human labels throughout.
+- **Lives in the tray** — closing the window keeps Kairos running (and watching your KovaaK's stats); the tray icon restores it, and Launch KovaaK's is one menu click away.
+- **Post-session recap** — when a grind session ends (a twenty-minute quiet gap), a toast sums it up: plays and personal bests, straight from local data.
+- **Launch from anywhere** — every grind step and scenario row has a GO button that opens that exact scenario in KovaaK's; each benchmark page has a Launch in KovaaK's button.
+- **Weak-spot strip** — the next scenario to grind and its gap stay pinned at the bottom of a benchmark page.
+- **Keyboard-first stoa** — arrows walk the benchmark cards, Enter opens, Esc backs out, f toggles favorites.
+- **Reconcile** — the benchmark page says "N unranked plays" when your local runs are newer than the last leaderboard sync, so you know when to Sync Now.
+- All of the temple identity stays: the grind coach that plans per benchmark's rank method (v0.3.2), marble & basalt themes, weekly plaque, analytics, two-phase launch under 2s.
+
+
 
 ## Features
 
 ### The grind
 
 - **Grind coach** — pick a benchmark family and the coach works out what to play: **▶ N runs to next tier** is the count of scenarios that must improve to flip the rank (0 means maxed), **plateaued** means mid-progress but no new PB in 3+ days, **complete** when every scenario sits at its top rung. Choose a difficulty and the coach plans the grind for it.
-- **What to grind next** — on each benchmark's page: the cheapest per-scenario scores that push you to the next rank tier, probed against the local rank engine so they're exact for every method family. Targets are capped at each scenario's ladder top, so they're always actually achievable; when no single scenario can carry you up, the panel produces a numbered step-by-step plan (each step within its scenario's ladder) that reaches the next tier together.
+- **What to grind next** — on each benchmark's page: the cheapest per-scenario scores that push you to the next rank tier, probed against the local rank engine so they're exact for every method family. Targets are capped at each scenario's ladder top, so they're always actually achievable, and every row carries a GO button that opens the scenario in KovaaK's; when no single scenario can carry you up, the panel produces a numbered step-by-step plan (each step within its scenario's ladder) that reaches the next tier together.
 - **Consistency & plateau tags** — grind targets show **spread** (how steady your recent runs are, 0% = identical scores) and flag scenarios stalled without a new personal best, so you can swap a stalled grind for something still climbing.
 
 ![Kairos family card expanded showing difficulty rung bars, grind chips and rank seals](docs/screenshots/app-family-v030.png)
@@ -41,7 +44,7 @@ If Kairos helps your grind, consider supporting development:
 
 ![Kairos weekly plaque with torch day strip, Twelve Steps frieze and rank inscription](docs/screenshots/app-weekly-v030.png)
 
-- **Weekly plaque** — actual alive-time per run (scored-min, `hit_count / avg_fps` summed over your week's local plays, labeled honestly never guessed), plays-per-day, current level along the Twelve Steps, and rank changes — in a single plaque.
+- **Weekly plaque** — plays-per-day torch strip, current level along the Twelve Steps, and rank inscriptions — in a single element.
 - **Per-scenario detail** — score history chart (your local plays + sync snapshots, deduplicated so the same run never counts twice), running high, 7-day average, avg/high scores, and 30-day improvement %. Snapshots that don't set a new high are ignored, so stale syncs never pollute charts or averages. Scenario tables cycle **weakest → strongest → order** so the closest-to-flip grind heads the list.
 
 ![Kairos score history chart with PB progression and consistency chips](docs/screenshots/app-detail-chart-v030.png)
@@ -50,12 +53,16 @@ If Kairos helps your grind, consider supporting development:
 
 - **Benchmark type filter** — 12 tabs mirroring evxl's own grouping (Mixed, Tracking, Static, Clicking, Ground, Precise, Smooth, Micro, Dynamic, Reactive, Evasive, Switching), multi-select, combined with the name search. Tag assignments match evxl's live filter, so the Static tab shows only genuinely static benchmarks, Ground catches ground-tracking specialists, and everything unspecialized sits under Mixed.
 - **Search + favorites** — filter the grid by name, pin benchmarks to the top. Pins survive restarts.
+- **Tray mode** — closing the window keeps Kairos in the tray so the stats watcher stays live; restore it from the tray menu, or launch KovaaK's straight from there.
+- **Keyboard-first** — arrows walk the benchmark cards, Enter opens, Esc backs out, f toggles favorites.
 - **Theme picker** — Marble (light), Basalt (dark), or follow the OS. Charts re-palette on the flip.
 - **Backup export** — one click in the settings menu writes your entire history as a JSON file in Documents.
 - **One-click sync** — a quick pass for your benchmarks; "Check everything at launch" refreshes every benchmark from the leaderboard when you want a deep pass. If the server throttles, Kairos waits and retries politely on its own. **Refresh Local** re-scans the stats folder without touching the network.
 - **Private by design** — no accounts, no telemetry; only public APIs, and live API tests skip unless you opt in.
 
-![Kairos what-to-grind-next panel: a step-by-step plan spreading small rung steps across scenarios, each with a launch button](docs/screenshots/app-grind-v032.png)
+![Kairos what-to-grind-next panel: a step-by-step plan with GO buttons per scenario](docs/screenshots/app-grind-v040.png)
+
+![Kairos weak-spot strip: the next scenario, its gap and a GO button, pinned at the bottom of the page](docs/screenshots/app-weakspot-v040.png)
 
 ## How it works
 
@@ -146,7 +153,7 @@ The architecture is documented for contributors: domain glossary in [CONTEXT.md]
 
 ## Roadmap
 
-Planned features and quality-of-life work live in [ROADMAP.md](ROADMAP.md) — v0.3.1 QoL candidates are picked, workflows (tray, reconcile, playlists & launch) are next at v0.4.0.
+Planned features live in [ROADMAP.md](ROADMAP.md) — next up at v0.5.0: user-defined benchmarks (import or in-app builder), a Discord share card, and opt-in global leaderboards.
 
 ## Layout
 
