@@ -98,6 +98,10 @@ export function launchScenario(scenario: string): Promise<void> {
 
 import type { ReconcileDto } from './bindings/ReconcileDto'
 import type { CustomBenchDto as GenCustomBench } from './bindings/CustomBenchDto'
+import type { ExportBenchDto as GenExportBench } from './bindings/ExportBenchDto'
+export type ExportBench = GenExportBench
+import type { ImportBenchDto as GenImportBench } from './bindings/ImportBenchDto'
+export type ImportBench = GenImportBench
 export type CustomBench = GenCustomBench
 import type { CustomScenarioDto as GenCustomScenario } from './bindings/CustomScenarioDto'
 export type CustomScenario = GenCustomScenario
@@ -174,4 +178,19 @@ export function deleteCustomBench(benchmarkId: number): Promise<void> {
 
 export function knownScenarios(): Promise<ScenarioChoice[]> {
   return invoke('known_scenarios')
+}
+
+/** Shareable JSON for one custom bench (also written to Documents). */
+export function exportCustomBench(benchmarkId: number): Promise<ExportBench> {
+  return invoke('export_custom_bench', { benchmarkId })
+}
+
+/** Import a custom bench from exported JSON; returns the saved bench + warnings. */
+export function importCustomBench(json: string): Promise<ImportBench> {
+  return invoke('import_custom_bench', { json })
+}
+
+/** Write a composed PNG (from a canvas) to Pictures/Kairos; returns the path. */
+export function saveReportPng(bytes: Uint8Array): Promise<string> {
+  return invoke('save_report_png', { bytes })
 }

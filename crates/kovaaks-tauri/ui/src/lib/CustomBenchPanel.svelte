@@ -11,6 +11,8 @@
   import {
     customBenches,
     deleteCustomBench,
+    exportCustomBench,
+    importCustomBench,
     knownScenarios,
     saveCustomBench,
     type CustomBench,
@@ -45,6 +47,10 @@
   let rows = $state<Row[]>([])
   let activeSubcat = $state(DEFAULT_SUBCATEGORY)
   let newSubcat = $state('')
+  // Import/export box: holds a bench file as text so it can be copied out or
+  // pasted in without a file dialog.
+  let transfer = $state('')
+  let transferNote = $state<string | null>(null)
 
   const tierNames = $derived(
     tiersText
@@ -254,6 +260,36 @@
     })
   }
 
+  async function exportBench(bench: CustomBench) {
+    try {
+      const out = await exportCustomBench(bench.benchmark_id)
+      transfer = out.json
+      transferNote = `Saved to ${out.path}`
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  async function importBench() {
+    if (busy || transfer.trim().length === 0) return
+    busy = true
+    error = null
+    transferNote = null
+    try {
+      const result = await importCustomBench(transfer)
+      transferNote =
+        result.warnings.length > 0
+          ? `Imported "${result.bench.name}" — dropped ${result.warnings.length}: ${result.warnings.join('; ')}`
+          : `Imported "${result.bench.name}".`
+      await load()
+      onsaved()
+    } catch (e) {
+      error = String(e)
+    } finally {
+      busy = false
+    }
+  }
+
   async function save() {
     if (!formValid || busy) return
     busy = true
@@ -348,6 +384,7 @@
               </div>
               <div class="bench-item-actions">
                 <button class="btn btn-small" onclick={() => edit(bench)}>Edit</button>
+                <button class="btn btn-small" onclick={() => exportBench(bench)}>Export</button>
                 <button class="btn btn-small danger" onclick={() => remove(bench)}>Delete</button>
               </div>
             </div>
@@ -551,6 +588,31 @@
           </datalist>
         {/if}
 
+        <details class="transfer" open={transfer.length > 0}>
+          <summary>Import / export a bench file</summary>
+          <textarea
+            class="transfer-box"
+            bind:value={transfer}
+            placeholder={'Paste an exported bench JSON here…\n\nExport any bench on the left to fill this box.'}
+            rows="5"
+          ></textarea>
+          <div class="transfer-actions">
+            <button
+              class="btn btn-small"
+              disabled={busy || transfer.trim().length === 0}
+              onclick={importBench}>Import from this text</button
+            >
+            <button
+              class="btn btn-small"
+              disabled={transfer.length === 0}
+              onclick={() => navigator.clipboard.writeText(transfer)}
+              >Copy JSON</button
+            >
+            {#if transferNote}
+              <span class="muted small">{transferNote}</span>
+            {/if}
+          </div>
+        </details>
       </section>
     </div>
 
@@ -812,6 +874,33 @@
     display: block;
     font-size: 11px;
     color: var(--accent-2);
+  }
+  .transfer summary {
+    cursor: pointer;
+    font-family: var(--font-display);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .transfer-box {
+    width: 100%;
+    margin-top: 6px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    resize: vertical;
+  }
+  .transfer-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 6px;
   }
   .bench-foot {
     display: flex;

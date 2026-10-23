@@ -151,11 +151,13 @@ easing/shadow tokens stay cherry-picked by hand.
 
 ## v0.5.0 — custom benches & community
 
-- [ ] Local bench support: user-defined benchmarks from .json or built in-app
-  (typable scenario picker backed by the KovaaK's public API), custom rank
-  names + thresholds; ranks computed with the same engine
-- [ ] Discord share card: composed PNG export (benchmark table, weekly strip +
-  level bar)
+- [x] Custom benches: authored in-app (scenario picker over your own history),
+  grouped into subcategories, author-supplied thresholds and tier names, three
+  rank rules (full subcategory, top N per subcategory, global energy) scored by
+  the shared engine; JSON import/export for sharing a bench as a file
+- [x] Discord share card: composed 1200×630 card (weekly plaque, level bar,
+  plays-per-day strip, benchmark table, top movers) — copy to clipboard or save
+  as PNG
 - [ ] Opt-in global leaderboards: per-scenario global ranks/percentiles, cached
   hard, off by default — local-only rank engine untouched
 

@@ -175,6 +175,28 @@ pub struct CustomBenchDto {
 #[ts(export)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
+/// Result of exporting a custom bench: the shareable JSON plus the file the
+/// backend dropped in Documents.
+pub struct ExportBenchDto {
+    pub path: String,
+    pub json: String,
+}
+
+#[derive(TS)]
+#[ts(export)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+/// Result of importing a custom bench: the saved bench plus any scenario that
+/// had to be dropped (unknown to this player, or missing thresholds).
+pub struct ImportBenchDto {
+    pub bench: CustomBenchDto,
+    pub warnings: Vec<String>,
+}
+
+#[derive(TS)]
+#[ts(export)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
 /// One row of the scenario picker.
 pub struct ScenarioChoiceDto {
     pub scenario: String,
@@ -2197,6 +2219,166 @@ pub mod commands {
         })
     }
 
+    /// Wire shape of an exported custom bench file. Versioned so a future
+    /// change can migrate instead of guessing.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub struct CustomBenchFile {
+        pub kairos_custom_bench: u32,
+        pub bench: CustomBenchDto,
+    }
+
+    /// Export one custom bench as a shareable JSON string (no personal data:
+    /// scores are local and are not included).
+    #[tauri::command]
+    pub fn export_custom_bench(
+        state: State<'_, AppState>,
+        benchmark_id: i64,
+    ) -> Result<ExportBenchDto, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        let rowid = row_id(benchmark_id).ok_or_else(|| "not a custom benchmark".to_string())?;
+        let row = state
+            .store
+            .custom_benches(&steam_id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|r| r.id == rowid)
+            .ok_or_else(|| format!("unknown custom benchmark {benchmark_id}"))?;
+        let mut dto = custom_dto(&state, &steam_id, &row)?;
+        // The file is a template: ids and live scores stay local.
+        dto.benchmark_id = 0;
+        for scenario in &mut dto.scenarios {
+            scenario.score = 0.0;
+            scenario.tier = 0;
+            scenario.tier_name = None;
+            scenario.next_threshold = None;
+            scenario.delta = None;
+        }
+        dto.rank_index = 0;
+        dto.complete = false;
+        dto.energy = 0.0;
+        dto.rank = None;
+        dto.next_rank_name = None;
+        dto.subcategories.clear();
+        let file = CustomBenchFile {
+            kairos_custom_bench: 1,
+            bench: dto,
+        };
+        let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
+
+        // Also drop a copy in Documents so the bench can be shared as a file.
+        let home =
+            std::env::var("USERPROFILE").map_err(|_| "no user profile directory".to_string())?;
+        let safe: String = row
+            .name
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '-' })
+            .collect();
+        let path = std::path::PathBuf::from(home)
+            .join("Documents")
+            .join(format!("kairos-bench-{safe}.json"));
+        std::fs::write(&path, &json).map_err(|e| e.to_string())?;
+
+        Ok(ExportBenchDto {
+            path: path.display().to_string(),
+            json,
+        })
+    }
+
+    /// Import a custom bench from an exported JSON string. Unknown scenarios or
+    /// scenarios missing thresholds are dropped with a warning; everything else
+    /// is kept so a shared bench still lands.
+    #[tauri::command]
+    pub fn import_custom_bench(
+        state: State<'_, AppState>,
+        json: String,
+    ) -> Result<ImportBenchDto, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        let value: serde_json::Value =
+            serde_json::from_str(&json).map_err(|e| format!("not valid JSON: {e}"))?;
+        let bench_value = value.get("bench").cloned().unwrap_or_else(|| value.clone());
+        let mut dto: CustomBenchDto = serde_json::from_value(bench_value)
+            .map_err(|e| format!("not a custom bench file: {e}"))?;
+        dto.benchmark_id = 0;
+
+        let known: std::collections::HashSet<String> = state
+            .store
+            .known_scenarios(&steam_id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        let mut warnings: Vec<String> = Vec::new();
+        let mut kept: Vec<CustomScenarioDto> = Vec::new();
+        for scenario in dto.scenarios.drain(..) {
+            if !known.contains(&scenario.scenario) {
+                warnings.push(format!(
+                    "\"{}\" is not in your history yet — add it after you play it.",
+                    scenario.scenario.trim()
+                ));
+                continue;
+            }
+            if scenario.thresholds.len() != dto.tier_names.len() {
+                warnings.push(format!(
+                    "\"{}\" has {} thresholds for {} tiers.",
+                    scenario.scenario.trim(),
+                    scenario.thresholds.len(),
+                    dto.tier_names.len()
+                ));
+                continue;
+            }
+            kept.push(scenario);
+        }
+        dto.scenarios = kept;
+        if dto.scenarios.is_empty() {
+            return Err("nothing to import: none of those scenarios are in your history".into());
+        }
+        if dto.rule == "top_n" && dto.top_n == 0 {
+            dto.top_n = 1;
+        }
+
+        let row = custom_row(&dto)?;
+        let rowid = state
+            .store
+            .create_custom_bench(&steam_id, &row)
+            .map_err(|e| e.to_string())?;
+        let saved = state
+            .store
+            .custom_benches(&steam_id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|r| r.id == rowid)
+            .ok_or_else(|| "imported bench vanished".to_string())?;
+        Ok(ImportBenchDto {
+            bench: custom_dto(&state, &steam_id, &saved)?,
+            warnings,
+        })
+    }
+
+    /// Save a composed report image (PNG bytes from the webview canvas) to
+    /// Pictures/Kairos and return the path.
+    #[tauri::command]
+    pub fn save_report_png(bytes: Vec<u8>) -> Result<String, String> {
+        let home =
+            std::env::var("USERPROFILE").map_err(|_| "no user profile directory".to_string())?;
+        let dir = std::path::PathBuf::from(home)
+            .join("Pictures")
+            .join("Kairos");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let path = dir.join(format!("kairos-card-{stamp}.png"));
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(path.display().to_string())
+    }
+
     #[tauri::command]
     pub fn set_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
         let json = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
@@ -2362,6 +2544,9 @@ pub fn run() {
             commands::save_custom_bench,
             commands::delete_custom_bench,
             commands::known_scenarios,
+            commands::export_custom_bench,
+            commands::import_custom_bench,
+            commands::save_report_png,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

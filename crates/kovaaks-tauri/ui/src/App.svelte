@@ -29,6 +29,7 @@ import { listen } from '@tauri-apps/api/event'
   import Coach from './lib/Coach.svelte'
   import Weekly from './lib/Weekly.svelte'
   import CustomBenchPanel from './lib/CustomBenchPanel.svelte'
+  import ShareCard from './lib/ShareCard.svelte'
     import { humanError } from './lib/errors'
   import type { ThemeChoice } from './lib/nav.svelte'
   import { nav, themeState, applyTheme, loadTheme, openDetail, closeDetail, openAnalytics, closeAnalytics, showOverview, showSetup } from './lib/nav.svelte'
@@ -40,6 +41,8 @@ import { listen } from '@tauri-apps/api/event'
   let searchQuery = $state('')
   /// Custom bench builder modal (v0.5.0).
   let customOpen = $state(false)
+  /// Share card modal (v0.5.0).
+  let shareOpen = $state(false)
   let loadingOverview = $state(false)
   let toast = $state<string | null>(null)
   let toastTimer: ReturnType<typeof setTimeout> | undefined
@@ -398,6 +401,7 @@ import { listen } from '@tauri-apps/api/event'
     'Reactive',
     'Evasive',
     'Switching',
+    'Custom',
   ] as const
   let activeTypes = $state<string[]>([])
 
@@ -598,6 +602,9 @@ import { listen } from '@tauri-apps/api/event'
         {#if customOpen}
           <CustomBenchPanel onclose={() => (customOpen = false)} onsaved={() => loadOverview()} />
         {/if}
+        {#if shareOpen}
+          <ShareCard weekly={weekly} {cards} onclose={() => (shareOpen = false)} />
+        {/if}
         <div class="search-row">
           <input
             class="search-input"
@@ -606,6 +613,7 @@ import { listen } from '@tauri-apps/api/event'
             bind:value={searchQuery}
           />
           <button class="btn btn-small" onclick={() => (customOpen = true)}>+ Custom bench</button>
+          <button class="btn btn-small" title="Compose a card to paste into Discord" onclick={() => (shareOpen = true)}>Share card</button>
           {#if searchQuery || activeTypes.length > 0}
             <button
               class="btn btn-small"
