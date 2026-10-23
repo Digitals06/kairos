@@ -14,7 +14,7 @@ use ts_rs::TS;
 use kovaaks_core::{
     csv_ingest, metrics_for_benchmark, metrics_for_scenario_combined,
     rankdiff::RankChange,
-    store::StoredSnapshot,
+    store::{CustomBenchRow, StoredSnapshot},
     types::{Difficulty, RankTier},
     EvxlClient, KovaaksClient, Registry, Store, SyncEngine, SyncReport,
 };
@@ -84,6 +84,76 @@ pub struct BenchmarkCard {
     /// All played difficulties of the family, best-first; the UI unrolls
     /// these inside the card. Populated when difficulty_count > 1.
     pub variants: Vec<BenchmarkVariant>,
+}
+
+#[derive(TS)]
+#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+/// One scenario row of a user-defined benchmark, with its author-supplied
+/// thresholds and the player's resolved state.
+pub struct CustomScenarioDto {
+    pub scenario: String,
+    pub category: String,
+    /// Ascending thresholds, exactly `tier_names.len()` of them.
+    pub thresholds: Vec<f64>,
+    /// Best known score (snapshot or local play); 0 when never played.
+    #[serde(default)]
+    pub score: f64,
+    /// 0 = below the first threshold, `n` = tier `n` reached.
+    #[serde(default)]
+    pub tier: u32,
+    #[serde(default)]
+    pub tier_name: Option<String>,
+    #[serde(default)]
+    pub next_threshold: Option<f64>,
+    #[serde(default)]
+    pub delta: Option<f64>,
+}
+
+#[derive(TS)]
+#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+/// A user-defined benchmark: the wire shape both the builder and the read
+/// commands use. `benchmark_id` is 0 for a new bench and negative for saved
+/// ones (custom ids live in the negative space, away from KovaaK's ids).
+pub struct CustomBenchDto {
+    pub benchmark_id: i64,
+    pub name: String,
+    pub abbreviation: String,
+    pub color: String,
+    /// `"all"` (every scenario counts) or `"top_n"`.
+    pub mode: String,
+    #[serde(default)]
+    pub top_n: u32,
+    /// Tier names, worst → best (1–12).
+    pub tier_names: Vec<String>,
+    pub scenarios: Vec<CustomScenarioDto>,
+    /// Read-only, filled on read: bench rank index (0 = unranked).
+    #[serde(default)]
+    pub rank_index: u32,
+    #[serde(default)]
+    pub complete: bool,
+    /// Read-only tier reached, for the card badge.
+    #[serde(default)]
+    pub rank: Option<RankTier>,
+    /// Read-only name of the next tier, when one exists.
+    #[serde(default)]
+    pub next_rank_name: Option<String>,
+}
+
+#[derive(TS)]
+#[ts(export)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+/// One row of the scenario picker.
+pub struct ScenarioChoiceDto {
+    pub scenario: String,
+    /// Author category from the newest snapshot ("" for play-only scenarios).
+    pub category: String,
+    /// Best known score, `None` when never played.
+    pub score: Option<f64>,
 }
 #[derive(TS)]
 #[ts(export)]
@@ -1122,6 +1192,15 @@ pub mod commands {
                     .collect();
                 folded.push(best);
             }
+            // Custom benchmarks (v0.5.0) live outside the registry fold: each is
+            // its own family with one card, scored from the player's own data.
+            for row in state
+                .store
+                .custom_benches(&steam_id)
+                .map_err(|e| e.to_string())?
+            {
+                folded.push(build_custom_card(&state, &steam_id, &row, &favorite_ids)?);
+            }
             // Favorites pinned on top (pin order), then alphabetical.
             folded.sort_by(|a, b| {
                 b.is_favorite
@@ -1132,6 +1211,111 @@ pub mod commands {
         })
         .await
         .map_err(|e| format!("overview join error: {e}"))?
+    }
+
+    /// Detail for a user-defined benchmark. No snapshot history exists, so the
+    /// chart is built from local plays; tiers/thresholds come from the author's
+    /// ladder (via `custom::rank_custom`).
+    fn custom_detail(
+        state: &AppState,
+        steam_id: &str,
+        benchmark_row: i64,
+    ) -> Result<BenchmarkDetail, String> {
+        let rows = state
+            .store
+            .custom_benches(steam_id)
+            .map_err(|e| e.to_string())?;
+        let row = rows
+            .into_iter()
+            .find(|r| r.id == benchmark_row)
+            .ok_or_else(|| format!("unknown custom benchmark {benchmark_row}"))?;
+        let dto = custom_dto(state, steam_id, &row)?;
+        let card = build_custom_card(
+            state,
+            steam_id,
+            &row,
+            &state
+                .store
+                .favorites(steam_id)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .collect(),
+        )?;
+
+        let rank_tiers: Vec<RankTier> = dto
+            .tier_names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| RankTier {
+                name: name.clone(),
+                color: kovaaks_core::custom::TIER_PALETTE
+                    .get(i)
+                    .copied()
+                    .unwrap_or(kovaaks_core::custom::TIER_PALETTE[0])
+                    .to_string(),
+            })
+            .collect();
+
+        let mut plays: Vec<PlayPoint> = Vec::new();
+        let mut metrics: BTreeMap<String, kovaaks_core::Metrics> = BTreeMap::new();
+        for scenario_dto in &dto.scenarios {
+            let history = state
+                .store
+                .plays_history(steam_id, &scenario_dto.scenario)
+                .map_err(|e| e.to_string())?;
+            for rec in &history {
+                plays.push(PlayPoint {
+                    scenario: rec.scenario.clone(),
+                    played_at: rec.played_at.to_rfc3339(),
+                    score: rec.score,
+                });
+            }
+            if !history.is_empty() {
+                let m = kovaaks_core::metrics_for_scenario_plays(
+                    &state.store,
+                    steam_id,
+                    &scenario_dto.scenario,
+                )
+                .map_err(|e| e.to_string())?;
+                metrics.insert(scenario_dto.scenario.clone(), m);
+            }
+        }
+        plays.sort_by(|a, b| a.played_at.cmp(&b.played_at));
+
+        let scenario_ranks: Vec<ScenarioRank> = dto
+            .scenarios
+            .iter()
+            .map(|s| ScenarioRank {
+                scenario: s.scenario.clone(),
+                score: s.score.round() as i64,
+                leaderboard_rank: 0,
+                tier: s.tier_name.as_ref().map(|name| RankTier {
+                    name: name.clone(),
+                    color: kovaaks_core::custom::TIER_PALETTE
+                        .get(s.tier as usize - 1)
+                        .copied()
+                        .unwrap_or(kovaaks_core::custom::TIER_PALETTE[0])
+                        .to_string(),
+                }),
+                scenario_rank: s.tier as i64,
+                rank_maxes: s.thresholds.clone(),
+            })
+            .collect();
+
+        Ok(BenchmarkDetail {
+            card,
+            snapshot_history: Vec::new(),
+            plays,
+            scenario_ranks,
+            categories: vec![CategoryCard {
+                name: "Custom".to_string(),
+                progress: 0,
+                rank_tier: dto.rank.clone(),
+            }],
+            scenario_history: Vec::new(),
+            rank_tiers,
+            scenario_metrics: metrics,
+        })
     }
 
     /// Full detail for one benchmark: card + snapshot history + CSV plays +
@@ -1148,6 +1332,9 @@ pub mod commands {
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| "no profile connected".to_string())?
                 .steam_id;
+            if let Some(benchmark_row) = row_id(benchmark_id) {
+                return custom_detail(&state, &steam_id, benchmark_row);
+            }
             let card = build_card(
                 &state,
                 &steam_id,
@@ -1716,6 +1903,255 @@ pub mod commands {
         .map_err(|e| format!("grind_overview join error: {e}"))?
     }
 
+    // ---------------------------------------------------------------------
+    // Custom benchmarks (v0.5.0)
+    // ---------------------------------------------------------------------
+
+    /// App-facing id of a custom benchmark row (always negative).
+    fn app_id(rowid: i64) -> i64 {
+        -rowid
+    }
+
+    /// Rowid behind an app-facing id, if it is a custom bench id.
+    fn row_id(benchmark_id: i64) -> Option<i64> {
+        (benchmark_id < 0).then_some(-benchmark_id)
+    }
+
+    /// Resolve a stored row into the wire DTO, scoring it against the player's
+    /// current data (snapshots + local plays).
+    fn custom_dto(
+        state: &AppState,
+        steam_id: &str,
+        row: &CustomBenchRow,
+    ) -> Result<CustomBenchDto, String> {
+        let names: Vec<String> = row.scenarios.iter().map(|(s, _, _)| s.clone()).collect();
+        let scores = state
+            .store
+            .scenario_scores_by_name(steam_id, &names)
+            .map_err(|e| e.to_string())?;
+        let ranked = kovaaks_core::custom::rank_custom(row, &scores).map_err(|e| e.to_string())?;
+        let tier_of = |tier: u32| -> Option<RankTier> {
+            if tier == 0 {
+                return None;
+            }
+            row.tier_names.get(tier as usize - 1).map(|name| RankTier {
+                name: name.clone(),
+                color: kovaaks_core::custom::TIER_PALETTE
+                    .get(tier as usize - 1)
+                    .copied()
+                    .unwrap_or(kovaaks_core::custom::TIER_PALETTE[0])
+                    .to_string(),
+            })
+        };
+        let scenarios = ranked
+            .scenarios
+            .iter()
+            .zip(row.scenarios.iter())
+            .map(
+                |(state_row, (_scenario, category, thresholds))| CustomScenarioDto {
+                    scenario: state_row.scenario.clone(),
+                    category: category.clone(),
+                    thresholds: thresholds.clone(),
+                    score: state_row.score,
+                    tier: state_row.tier,
+                    tier_name: tier_of(state_row.tier).map(|t| t.name),
+                    next_threshold: state_row.next_threshold,
+                    delta: state_row.delta,
+                },
+            )
+            .collect::<Vec<_>>();
+        Ok(CustomBenchDto {
+            benchmark_id: app_id(row.id),
+            name: row.name.clone(),
+            abbreviation: row.abbreviation.clone(),
+            color: row.color.clone(),
+            mode: row.mode.clone(),
+            top_n: row.top_n,
+            tier_names: row.tier_names.clone(),
+            rank_index: ranked.rank,
+            complete: ranked.complete,
+            rank: tier_of(ranked.rank),
+            next_rank_name: row.tier_names.get(ranked.rank as usize).cloned(),
+            scenarios,
+        })
+    }
+
+    /// Validate a wire DTO and convert it into a store row.
+    fn custom_row(dto: &CustomBenchDto) -> Result<CustomBenchRow, String> {
+        let row = CustomBenchRow {
+            id: row_id(dto.benchmark_id).unwrap_or(0),
+            name: dto.name.trim().to_string(),
+            abbreviation: dto.abbreviation.trim().to_string(),
+            color: dto.color.clone(),
+            mode: dto.mode.clone(),
+            top_n: dto.top_n,
+            tier_names: dto.tier_names.clone(),
+            scenarios: dto
+                .scenarios
+                .iter()
+                .map(|s| {
+                    // Scenario names are matched against KovaaK's data
+                    // verbatim — real names can carry a trailing space, so
+                    // never trim here (validation only checks emptiness).
+                    (
+                        s.scenario.clone(),
+                        s.category.clone(),
+                        s.thresholds.clone(),
+                    )
+                })
+                .collect(),
+        };
+        kovaaks_core::custom::validate(&row).map_err(|e| e.to_string())?;
+        Ok(row)
+    }
+
+    /// Every custom benchmark of the connected player, scored.
+    #[tauri::command]
+    pub fn custom_benches(state: State<'_, AppState>) -> Result<Vec<CustomBenchDto>, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        let rows = state
+            .store
+            .custom_benches(&steam_id)
+            .map_err(|e| e.to_string())?;
+        rows.iter()
+            .map(|row| custom_dto(&state, &steam_id, row))
+            .collect()
+    }
+
+    /// Create (`benchmark_id == 0`) or update (`benchmark_id < 0`) a custom
+    /// benchmark, returning the saved, scored bench.
+    #[tauri::command]
+    pub fn save_custom_bench(
+        state: State<'_, AppState>,
+        bench: CustomBenchDto,
+    ) -> Result<CustomBenchDto, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        let mut row = custom_row(&bench)?;
+        if row.id == 0 {
+            let rowid = state
+                .store
+                .create_custom_bench(&steam_id, &row)
+                .map_err(|e| e.to_string())?;
+            row.id = rowid;
+        } else if !state
+            .store
+            .update_custom_bench(&steam_id, &row)
+            .map_err(|e| e.to_string())?
+        {
+            return Err(format!("unknown custom benchmark {}", bench.benchmark_id));
+        }
+        custom_dto(&state, &steam_id, &row)
+    }
+
+    /// Delete a custom benchmark (its favorites go with it).
+    #[tauri::command]
+    pub fn delete_custom_bench(
+        state: State<'_, AppState>,
+        benchmark_id: i64,
+    ) -> Result<(), String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        let rowid = row_id(benchmark_id).ok_or_else(|| "not a custom benchmark".to_string())?;
+        state
+            .store
+            .delete_custom_bench(&steam_id, rowid)
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Scenarios the player can add to a custom bench, with their current best
+    /// score (snapshots + local plays) so the picker can show something useful.
+    #[tauri::command]
+    pub fn known_scenarios(state: State<'_, AppState>) -> Result<Vec<ScenarioChoiceDto>, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        let known = state
+            .store
+            .known_scenarios(&steam_id)
+            .map_err(|e| e.to_string())?;
+        let names: Vec<String> = known.iter().map(|(n, _)| n.clone()).collect();
+        let scores = state
+            .store
+            .scenario_scores_by_name(&steam_id, &names)
+            .map_err(|e| e.to_string())?;
+        Ok(known
+            .into_iter()
+            .map(|(scenario, category)| ScenarioChoiceDto {
+                score: scores.get(&scenario).copied(),
+                scenario,
+                category,
+            })
+            .collect())
+    }
+
+    /// Build the overview card for one custom benchmark (no snapshots: a custom
+    /// bench's history is its own scenario tables, not the API's).
+    fn build_custom_card(
+        state: &AppState,
+        steam_id: &str,
+        row: &CustomBenchRow,
+        favorite_ids: &std::collections::HashSet<i64>,
+    ) -> Result<BenchmarkCard, String> {
+        let dto = custom_dto(state, steam_id, row)?;
+        let scored: Vec<f64> = dto
+            .scenarios
+            .iter()
+            .map(|s| s.score)
+            .filter(|s| *s > 0.0)
+            .collect();
+        let avg = if scored.is_empty() {
+            0.0
+        } else {
+            scored.iter().sum::<f64>() / scored.len() as f64
+        };
+        let high = scored.iter().copied().fold(0.0f64, f64::max);
+        let id = app_id(row.id);
+        Ok(BenchmarkCard {
+            benchmark_id: id,
+            benchmark_name: dto.name.clone(),
+            abbreviation: dto.abbreviation.clone(),
+            difficulty_name: "Custom".to_string(),
+            rank: dto.rank.clone(),
+            benchmark_progress: 0,
+            next_rank_name: dto.next_rank_name.clone(),
+            next_rank_delta: dto
+                .scenarios
+                .iter()
+                .filter_map(|s| s.delta)
+                .filter(|d| *d > 0.0)
+                .fold(None, |acc: Option<f64>, d| {
+                    Some(acc.map_or(d, |a| a.min(d)))
+                })
+                .map(|d| d.round() as i64),
+            avg_score: avg,
+            high_score: high,
+            avg_improvement_pct: None,
+            high_improvement_pct: None,
+            samples: scored.len(),
+            last_synced: None,
+            is_favorite: favorite_ids.contains(&id),
+            snapshot_history: Vec::new(),
+            benchmark_types: vec!["Custom".to_string()],
+            pure_type: None,
+            difficulty_count: 1,
+            variants: Vec::new(),
+        })
+    }
+
     #[tauri::command]
     pub fn set_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
         let json = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
@@ -1877,6 +2313,10 @@ pub fn run() {
             commands::reconcile,
             commands::toggle_favorite,
             commands::copy_report_image,
+            commands::custom_benches,
+            commands::save_custom_bench,
+            commands::delete_custom_bench,
+            commands::known_scenarios,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

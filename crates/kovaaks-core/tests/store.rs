@@ -121,7 +121,7 @@ fn open_creates_schema_v1_and_reopen_preserves_data() {
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert_eq!(
-        version, 4,
+        version, 5,
         "migration must set user_version to current schema"
     );
     for table in [

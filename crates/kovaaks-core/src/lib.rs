@@ -7,6 +7,7 @@
 pub mod bench_type;
 pub mod consistency;
 pub mod csv_ingest;
+pub mod custom;
 pub mod dashboard;
 pub mod error;
 pub mod grind;

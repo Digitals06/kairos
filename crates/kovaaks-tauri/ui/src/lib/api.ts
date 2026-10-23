@@ -97,6 +97,12 @@ export function launchScenario(scenario: string): Promise<void> {
 }
 
 import type { ReconcileDto } from './bindings/ReconcileDto'
+import type { CustomBenchDto as GenCustomBench } from './bindings/CustomBenchDto'
+export type CustomBench = GenCustomBench
+import type { CustomScenarioDto as GenCustomScenario } from './bindings/CustomScenarioDto'
+export type CustomScenario = GenCustomScenario
+import type { ScenarioChoiceDto as GenScenarioChoice } from './bindings/ScenarioChoiceDto'
+export type ScenarioChoice = GenScenarioChoice
 
 // Launch the whole difficulty (its shared scenario set) in KovaaK's — one
 // click starts the session's full benchmark pass.
@@ -149,4 +155,23 @@ export function dashboardRollup(): Promise<DashboardFamilies> {
 }
 export function reconcile(benchmarkId: number): Promise<ReconcileDto> {
   return invoke('reconcile', { benchmarkId })
+}
+
+// --- custom benchmarks (v0.5.0) --------------------------------------------
+
+export function customBenches(): Promise<CustomBench[]> {
+  return invoke('custom_benches')
+}
+
+/** Create (`benchmark_id === 0`) or update (`benchmark_id < 0`) a bench. */
+export function saveCustomBench(bench: CustomBench): Promise<CustomBench> {
+  return invoke('save_custom_bench', { bench })
+}
+
+export function deleteCustomBench(benchmarkId: number): Promise<void> {
+  return invoke('delete_custom_bench', { benchmarkId })
+}
+
+export function knownScenarios(): Promise<ScenarioChoice[]> {
+  return invoke('known_scenarios')
 }

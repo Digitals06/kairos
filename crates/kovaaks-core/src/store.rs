@@ -17,7 +17,7 @@ use crate::error::Result;
 use crate::types::{BenchmarkProgress, PlayRecord, PlayerProfile};
 
 /// Schema version this build writes; `PRAGMA user_version` gates migrations.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// Result of [`Store::record_snapshot`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +61,30 @@ pub struct StoredSnapshot {
     pub overall_rank: i64,
     /// Scenario rows ordered by (category, scenario).
     pub scenarios: Vec<StoredScenario>,
+}
+
+/// One user-defined benchmark (v0.5.0). Stored rows carry a positive `id`;
+/// the app exposes `benchmark_id = -id` so custom benches can never collide
+/// with KovaaK's benchmark ids in favorites, detail routing or the grind panel.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CustomBenchRow {
+    /// Store rowid (positive).
+    pub id: i64,
+    /// Bench name shown on the card.
+    pub name: String,
+    /// Short tag (2–3 chars, e.g. "D5").
+    pub abbreviation: String,
+    /// Card accent hex color.
+    pub color: String,
+    /// `"all"` (every scenario must reach the tier) or `"top_n"`.
+    pub mode: String,
+    /// How many scenarios must reach a tier in `top_n` mode (0 in `all` mode).
+    pub top_n: u32,
+    /// Tier names, worst → best. Each scenario carries exactly this many
+    /// thresholds.
+    pub tier_names: Vec<String>,
+    /// `(scenario, category, ascending thresholds)` in author order.
+    pub scenarios: Vec<(String, String, Vec<f64>)>,
 }
 
 /// The SQLite store. Cheap to clone; every method takes `&self` (the rusqlite
@@ -255,6 +279,35 @@ impl Store {
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (steam_id, benchmark_id)
                  );",
+            )?;
+        }
+        if version < 5 {
+            // v5: user-defined benchmarks (v0.5.0). User data, never a cache —
+            // thresholds are author-supplied, so nothing here is re-fetchable.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS custom_benchmarks (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    steam_id      TEXT NOT NULL,
+                    name          TEXT NOT NULL,
+                    abbreviation  TEXT NOT NULL DEFAULT 'CS',
+                    color         TEXT NOT NULL DEFAULT '#b08d57',
+                    mode          TEXT NOT NULL DEFAULT 'all',
+                    top_n         INTEGER NOT NULL DEFAULT 0,
+                    tier_names    TEXT NOT NULL,
+                    created_at    TEXT NOT NULL,
+                    updated_at    TEXT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS custom_bench_scenarios (
+                    benchmark_row INTEGER NOT NULL
+                        REFERENCES custom_benchmarks(id) ON DELETE CASCADE,
+                    position      INTEGER NOT NULL,
+                    scenario      TEXT NOT NULL,
+                    category      TEXT NOT NULL DEFAULT 'Custom',
+                    thresholds    TEXT NOT NULL,
+                    PRIMARY KEY (benchmark_row, scenario)
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_custom_benches_player
+                    ON custom_benchmarks(steam_id);",
             )?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -603,6 +656,257 @@ impl Store {
         Ok(n > 0)
     }
 
+    // ----- custom benchmarks (v0.5.0) -------------------------------------
+
+    /// Every custom benchmark of one player, oldest first, with their
+    /// scenarios in author order.
+    pub fn custom_benches(&self, steam_id: &str) -> Result<Vec<CustomBenchRow>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, abbreviation, color, mode, top_n, tier_names
+             FROM custom_benchmarks WHERE steam_id = ?1 ORDER BY id",
+        )?;
+        let heads = stmt
+            .query_map(params![steam_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)? as u32,
+                    row.get::<_, String>(6)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut out = Vec::with_capacity(heads.len());
+        for (id, name, abbreviation, color, mode, top_n, tier_names) in heads {
+            out.push(CustomBenchRow {
+                id,
+                name,
+                abbreviation,
+                color,
+                mode,
+                top_n,
+                tier_names: serde_json::from_str(&tier_names)?,
+                scenarios: self.custom_bench_scenarios(&conn, id)?,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Scenarios of one custom bench, author order.
+    fn custom_bench_scenarios(
+        &self,
+        conn: &Connection,
+        benchmark_row: i64,
+    ) -> Result<Vec<(String, String, Vec<f64>)>> {
+        let mut stmt = conn.prepare(
+            "SELECT scenario, category, thresholds FROM custom_bench_scenarios
+             WHERE benchmark_row = ?1 ORDER BY position",
+        )?;
+        let rows = stmt
+            .query_map(params![benchmark_row], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(|(scenario, category, thresholds)| {
+                let parsed: Vec<f64> = serde_json::from_str(&thresholds)?;
+                Ok((scenario, category, parsed))
+            })
+            .collect()
+    }
+
+    /// Create a custom benchmark and return its rowid. Validation lives in
+    /// `custom::validate`; this only persists what it is handed.
+    pub fn create_custom_bench(&self, steam_id: &str, bench: &CustomBenchRow) -> Result<i64> {
+        let conn = self.lock();
+        let now = Utc::now().to_rfc3339();
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO custom_benchmarks
+                (steam_id, name, abbreviation, color, mode, top_n, tier_names, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+            params![
+                steam_id,
+                bench.name,
+                bench.abbreviation,
+                bench.color,
+                bench.mode,
+                bench.top_n as i64,
+                serde_json::to_string(&bench.tier_names)?,
+                now
+            ],
+        )?;
+        let rowid = tx.last_insert_rowid();
+        self.write_custom_scenarios(&tx, rowid, bench)?;
+        tx.commit()?;
+        Ok(rowid)
+    }
+
+    /// Replace a custom benchmark's fields and scenario list. Returns whether
+    /// the row belongs to this player (unknown ids are a no-op).
+    pub fn update_custom_bench(&self, steam_id: &str, bench: &CustomBenchRow) -> Result<bool> {
+        let conn = self.lock();
+        let tx = conn.unchecked_transaction()?;
+        let n = tx.execute(
+            "UPDATE custom_benchmarks SET
+                name = ?3, abbreviation = ?4, color = ?5, mode = ?6,
+                top_n = ?7, tier_names = ?8, updated_at = ?9
+             WHERE id = ?1 AND steam_id = ?2",
+            params![
+                bench.id,
+                steam_id,
+                bench.name,
+                bench.abbreviation,
+                bench.color,
+                bench.mode,
+                bench.top_n as i64,
+                serde_json::to_string(&bench.tier_names)?,
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        if n == 1 {
+            tx.execute(
+                "DELETE FROM custom_bench_scenarios WHERE benchmark_row = ?1",
+                params![bench.id],
+            )?;
+            self.write_custom_scenarios(&tx, bench.id, bench)?;
+        }
+        tx.commit()?;
+        Ok(n == 1)
+    }
+
+    /// Delete a custom benchmark plus every row that keyed on its app-facing
+    /// id (`-rowid`): favorites and the played-benchmark marker. Returns
+    /// whether the bench existed.
+    pub fn delete_custom_bench(&self, steam_id: &str, benchmark_row: i64) -> Result<bool> {
+        let conn = self.lock();
+        let tx = conn.unchecked_transaction()?;
+        let n = tx.execute(
+            "DELETE FROM custom_benchmarks WHERE id = ?1 AND steam_id = ?2",
+            params![benchmark_row, steam_id],
+        )?;
+        let app_id = -benchmark_row;
+        tx.execute(
+            "DELETE FROM favorites WHERE steam_id = ?1 AND benchmark_id = ?2",
+            params![steam_id, app_id],
+        )?;
+        tx.execute(
+            "DELETE FROM benchmarks_playing WHERE steam_id = ?1 AND benchmark_id = ?2",
+            params![steam_id, app_id],
+        )?;
+        tx.commit()?;
+        Ok(n == 1)
+    }
+
+    fn write_custom_scenarios(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        benchmark_row: i64,
+        bench: &CustomBenchRow,
+    ) -> Result<()> {
+        for (position, (scenario, category, thresholds)) in bench.scenarios.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO custom_bench_scenarios
+                    (benchmark_row, position, scenario, category, thresholds)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    benchmark_row,
+                    position as i64,
+                    scenario,
+                    category,
+                    serde_json::to_string(thresholds)?
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Best score per requested scenario: server snapshots and local CSV plays
+    /// merged with `max`. Scenarios with no data are absent from the map.
+    pub fn scenario_scores_by_name(
+        &self,
+        steam_id: &str,
+        names: &[String],
+    ) -> Result<std::collections::HashMap<String, f64>> {
+        let conn = self.lock();
+        let mut out: std::collections::HashMap<String, f64> = Default::default();
+        let mut stmt = conn.prepare(
+            "SELECT ss.scenario, MAX(ss.score)
+             FROM scenario_scores ss
+             JOIN snapshots s ON s.id = ss.snapshot_id
+             WHERE s.steam_id = ?1
+             GROUP BY ss.scenario",
+        )?;
+        let rows = stmt
+            .query_map(params![steam_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for (scenario, score) in rows {
+            if names.iter().any(|n| n == &scenario) {
+                out.insert(scenario, score);
+            }
+        }
+        let mut stmt = conn.prepare(
+            "SELECT scenario, MAX(score) FROM plays WHERE steam_id = ?1 GROUP BY scenario",
+        )?;
+        let rows = stmt
+            .query_map(params![steam_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for (scenario, score) in rows {
+            if !names.iter().any(|n| n == &scenario) {
+                continue;
+            }
+            let entry = out.entry(scenario).or_insert(score);
+            if score > *entry {
+                *entry = score;
+            }
+        }
+        Ok(out)
+    }
+
+    /// Every scenario the player can build a custom bench from: distinct names
+    /// from snapshots and local plays. Snapshot names carry the category the
+    /// benchmark author used; play-only names get an empty category.
+    pub fn known_scenarios(&self, steam_id: &str) -> Result<Vec<(String, String)>> {
+        let conn = self.lock();
+        let mut seen: std::collections::BTreeMap<String, String> = Default::default();
+        let mut stmt = conn.prepare(
+            "SELECT ss.scenario, ss.category
+             FROM scenario_scores ss
+             JOIN snapshots s ON s.id = ss.snapshot_id
+             WHERE s.steam_id = ?1
+             GROUP BY ss.scenario
+             ORDER BY MAX(s.captured_at) DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![steam_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for (scenario, category) in rows {
+            seen.entry(scenario).or_insert(category);
+        }
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT scenario FROM plays WHERE steam_id = ?1 ORDER BY scenario")?;
+        let rows = stmt
+            .query_map(params![steam_id], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for scenario in rows {
+            seen.entry(scenario).or_default();
+        }
+        Ok(seen.into_iter().collect())
+    }
+
     /// Full-backup export: every table as generic JSON rows (column names
     /// round-trip verbatim, so the dump documents the schema too).
     pub fn export_all(&self) -> Result<serde_json::Value> {
@@ -614,6 +918,8 @@ impl Store {
             "plays",
             "favorites",
             "benchmarks_playing",
+            "custom_benchmarks",
+            "custom_bench_scenarios",
             "meta",
         ];
         let mut out = serde_json::Map::new();

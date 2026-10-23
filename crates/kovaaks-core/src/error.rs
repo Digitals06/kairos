@@ -40,6 +40,12 @@ pub enum Error {
     #[error("benchmark not found in registry: {0}")]
     BenchmarkNotFound(String),
 
+    /// A user-defined benchmark was rejected by validation (bad thresholds,
+    /// mismatched tier counts, unknown mode, ...). The message is written for
+    /// the user, not for a log.
+    #[error("{0}")]
+    InvalidBenchmark(String),
+
     /// SQLite storage failure.
     #[error("storage error: {0}")]
     Store(#[from] rusqlite::Error),
