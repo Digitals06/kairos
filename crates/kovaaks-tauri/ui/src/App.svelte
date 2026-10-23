@@ -214,6 +214,7 @@ import { listen } from '@tauri-apps/api/event'
   let settingsOpen = $state(false)
   let closeToTray = $state(true)
   let launchWithKovaaks = $state(true)
+  let showGlobalPercentiles = $state(false)
   let deepScan = $state(false)
   // `deep` is a per-call flag on sync_now, not persisted server-side; map the
   // toggle onto the sync interval (0h = deep mode) so it survives restarts.
@@ -226,6 +227,7 @@ import { listen } from '@tauri-apps/api/event'
       void getSettings().then((s) => {
         closeToTray = s.close_to_tray
         launchWithKovaaks = s.launch_with_kovaaks
+        showGlobalPercentiles = s.show_global_percentiles
       })
     }
     if (settingsOpen && deepScanDirty) {
@@ -544,6 +546,19 @@ import { listen } from '@tauri-apps/api/event'
                     launchWithKovaaks = on
                     const s: AppSettings = await getSettings()
                     await setSettings({ ...s, launch_with_kovaaks: on })
+                  }}
+                />
+              </label>
+              <label class="row">
+                <span>Show global percentiles<br /><small>Adds your public leaderboard position to a scenario when you open its chart. This is the only feature that asks KovaaK's about anyone but you; board sizes are cached for a day.</small></span>
+                <input
+                  type="checkbox"
+                  checked={showGlobalPercentiles}
+                  onchange={async (e) => {
+                    const on = e.currentTarget.checked
+                    showGlobalPercentiles = on
+                    const s: AppSettings = await getSettings()
+                    await setSettings({ ...s, show_global_percentiles: on })
                   }}
                 />
               </label>

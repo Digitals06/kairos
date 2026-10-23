@@ -175,6 +175,20 @@ pub struct CustomBenchDto {
 #[ts(export)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
+/// A scenario's position on its public global board.
+pub struct ScenarioGlobalDto {
+    /// 1-based leaderboard position (0 = never on the board).
+    pub rank: i64,
+    /// Entries on the board (the percentile denominator).
+    pub total: u64,
+    /// `100 * rank / total` — smaller is better.
+    pub percentile: f64,
+}
+
+#[derive(TS)]
+#[ts(export)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
 /// Result of exporting a custom bench: the shareable JSON plus the file the
 /// backend dropped in Documents.
 pub struct ExportBenchDto {
@@ -563,6 +577,10 @@ pub struct AppSettings {
     pub close_to_tray: bool,
     /// The tray offers a one-click KovaaK's launch (deep-link, no param).
     pub launch_with_kovaaks: bool,
+    /// Look up each scenario's global board position. Off by default: this is
+    /// the only feature that talks to KovaaK's beyond your own scores.
+    #[serde(default)]
+    pub show_global_percentiles: bool,
 }
 
 impl Default for AppSettings {
@@ -572,6 +590,7 @@ impl Default for AppSettings {
             sync_interval_hours: 6,
             close_to_tray: true,
             launch_with_kovaaks: true,
+            show_global_percentiles: false,
         }
     }
 }
@@ -2379,6 +2398,71 @@ pub mod commands {
         Ok(path.display().to_string())
     }
 
+    /// Cached global board size lifetime: percentiles move slowly, and this is
+    /// the only outbound call the app makes on a user's behalf outside sync.
+    const GLOBAL_TTL_SECS: i64 = 24 * 60 * 60;
+
+    /// A scenario's position on its public global board (rank + board size).
+    ///
+    /// Off unless `show_global_percentiles` is enabled. Cached for a day; on a
+    /// network failure the stale cached size is reused rather than failing the
+    /// view, and with no cache at all the chip simply stays hidden.
+    #[tauri::command]
+    pub async fn scenario_global(
+        state: State<'_, AppState>,
+        scenario: String,
+    ) -> Result<Option<ScenarioGlobalDto>, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        if !state.load_settings().show_global_percentiles {
+            return Ok(None);
+        }
+        let rank = state
+            .store
+            .scenario_leaderboard_rank(&steam_id, &scenario)
+            .map_err(|e| e.to_string())?;
+        if rank <= 0 {
+            return Ok(None);
+        }
+
+        let cached = state
+            .store
+            .global_total(&scenario)
+            .map_err(|e| e.to_string())?;
+        let fresh = cached
+            .as_ref()
+            .map(|(_, at)| (chrono::Utc::now() - *at).num_seconds() < GLOBAL_TTL_SECS)
+            .unwrap_or(false);
+
+        let total = if fresh {
+            cached.as_ref().map(|(t, _)| *t).unwrap_or(0)
+        } else {
+            let client = KovaaksClient::new().map_err(|e| e.to_string())?;
+            match client.scenario_global(&scenario).await {
+                Ok(Some(total)) => {
+                    state
+                        .store
+                        .put_global_total(&scenario, total)
+                        .map_err(|e| e.to_string())?;
+                    total
+                }
+                Ok(None) => 0,
+                Err(_) => cached.map(|(t, _)| t).unwrap_or(0),
+            }
+        };
+        if total == 0 {
+            return Ok(None);
+        }
+        Ok(Some(ScenarioGlobalDto {
+            rank,
+            total,
+            percentile: 100.0 * rank as f64 / total as f64,
+        }))
+    }
+
     #[tauri::command]
     pub fn set_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
         let json = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
@@ -2547,6 +2631,7 @@ pub fn run() {
             commands::export_custom_bench,
             commands::import_custom_bench,
             commands::save_report_png,
+            commands::scenario_global,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

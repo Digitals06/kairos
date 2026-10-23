@@ -1,6 +1,6 @@
 <script lang="ts">
   import Chart from 'chart.js/auto'
-  import { getBenchmarkDetail, grindNext, launchBenchmark, launchScenario, reconcile, type BenchmarkDetail, type GrindNext } from '../lib/api'
+  import { getBenchmarkDetail, grindNext, launchBenchmark, launchScenario, reconcile, scenarioGlobal, type BenchmarkDetail, type GrindNext, type ScenarioGlobal } from '../lib/api'
   // DTO type mirrors live in the generated bindings directory.
   import type { ReconcileDto } from './bindings/ReconcileDto'
   import RankBadge from './RankBadge.svelte'
@@ -95,6 +95,30 @@
     return detail.scenario_history
       .filter((s) => s.points.length > 0)
       .map((s) => ({ scenario: s.scenario, category: s.category, n: s.points.length }))
+  })
+
+  // Global board position of the scenario in scope (v0.5.0, opt-in). Fetched
+  // on selection change, cached a day backend-side; hidden when the setting is
+  // off (the command returns null) or when we have no rank on that board.
+  let globalInfo = $state<ScenarioGlobal | null>(null)
+
+  $effect(() => {
+    const scenario = chartScope
+    if (!scenario) {
+      globalInfo = null
+      return
+    }
+    let alive = true
+    scenarioGlobal(scenario)
+      .then((info) => {
+        if (alive) globalInfo = info
+      })
+      .catch(() => {
+        if (alive) globalInfo = null
+      })
+    return () => {
+      alive = false
+    }
   })
 
   function scopeTitle(): string {
@@ -542,6 +566,16 @@
       <section class="panel chart-panel">
         <div class="chart-head">
           <h3>{scopeTitle()}</h3>
+          {#if globalInfo}
+            <span
+              class="chip global-chip"
+              title="Your position on this scenario's public leaderboard ({globalInfo.total.toLocaleString()} entries)"
+            >
+              #{globalInfo.rank.toLocaleString()} · top {globalInfo.percentile < 1
+                ? globalInfo.percentile.toFixed(2)
+                : globalInfo.percentile.toFixed(1)}%
+            </span>
+          {/if}
           {#if historyOptions.length > 0}
             <select
               class="scope-select"

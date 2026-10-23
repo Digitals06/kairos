@@ -17,7 +17,7 @@ use crate::error::Result;
 use crate::types::{BenchmarkProgress, PlayRecord, PlayerProfile};
 
 /// Schema version this build writes; `PRAGMA user_version` gates migrations.
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 /// Result of [`Store::record_snapshot`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -368,6 +368,17 @@ impl Store {
                  CREATE INDEX IF NOT EXISTS idx_custom_benches_player
                     ON custom_benchmarks(steam_id);
                  COMMIT;",
+            )?;
+        }
+        if version < 7 {
+            // v7: cached global board sizes per scenario (v0.5.0 leaderboards).
+            // A cache, not user data: safe to drop and refetch at any time.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS scenario_global (
+                    scenario   TEXT PRIMARY KEY,
+                    total      INTEGER NOT NULL,
+                    fetched_at TEXT NOT NULL
+                 );",
             )?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -972,6 +983,56 @@ impl Store {
             seen.entry(scenario).or_default();
         }
         Ok(seen.into_iter().collect())
+    }
+
+    // ----- scenario global boards (v0.5.0) --------------------------------
+
+    /// The player's stored leaderboard position for one scenario, from the
+    /// newest snapshot that contains it (0 when never seen).
+    pub fn scenario_leaderboard_rank(&self, steam_id: &str, scenario: &str) -> Result<i64> {
+        let conn = self.lock();
+        let rank: Option<i64> = conn
+            .query_row(
+                "SELECT ss.leaderboard_rank
+                 FROM scenario_scores ss
+                 JOIN snapshots s ON s.id = ss.snapshot_id
+                 WHERE s.steam_id = ?1 AND ss.scenario = ?2
+                 ORDER BY s.captured_at DESC, ss.id DESC
+                 LIMIT 1",
+                params![steam_id, scenario],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(rank.unwrap_or(0))
+    }
+
+    /// Cached board size and the instant it was fetched.
+    pub fn global_total(&self, scenario: &str) -> Result<Option<(u64, DateTime<Utc>)>> {
+        let conn = self.lock();
+        let row: Option<(i64, String)> = conn
+            .query_row(
+                "SELECT total, fetched_at FROM scenario_global WHERE scenario = ?1",
+                params![scenario],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        row.map(|(total, fetched_at)| {
+            let parsed = parse_rfc3339_column(1, &fetched_at)?;
+            Ok((total as u64, parsed))
+        })
+        .transpose()
+    }
+
+    /// Remember a scenario's board size (callers decide when it is stale).
+    pub fn put_global_total(&self, scenario: &str, total: u64) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT INTO scenario_global (scenario, total, fetched_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(scenario) DO UPDATE SET total = ?2, fetched_at = ?3",
+            params![scenario, total as i64, Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
     }
 
     /// Full-backup export: every table as generic JSON rows (column names

@@ -101,6 +101,8 @@ import type { CustomBenchDto as GenCustomBench } from './bindings/CustomBenchDto
 import type { ExportBenchDto as GenExportBench } from './bindings/ExportBenchDto'
 export type ExportBench = GenExportBench
 import type { ImportBenchDto as GenImportBench } from './bindings/ImportBenchDto'
+import type { ScenarioGlobalDto as GenScenarioGlobal } from './bindings/ScenarioGlobalDto'
+export type ScenarioGlobal = GenScenarioGlobal
 export type ImportBench = GenImportBench
 export type CustomBench = GenCustomBench
 import type { CustomScenarioDto as GenCustomScenario } from './bindings/CustomScenarioDto'
@@ -193,4 +195,9 @@ export function importCustomBench(json: string): Promise<ImportBench> {
 /** Write a composed PNG (from a canvas) to Pictures/Kairos; returns the path. */
 export function saveReportPng(bytes: Uint8Array): Promise<string> {
   return invoke('save_report_png', { bytes })
+}
+
+/** Global board position for a scenario (null when the setting is off). */
+export function scenarioGlobal(scenario: string): Promise<ScenarioGlobal | null> {
+  return invoke('scenario_global', { scenario })
 }

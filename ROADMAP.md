@@ -158,8 +158,9 @@ easing/shadow tokens stay cherry-picked by hand.
 - [x] Discord share card: composed 1200×630 card (weekly plaque, level bar,
   plays-per-day strip, benchmark table, top movers) — copy to clipboard or save
   as PNG
-- [ ] Opt-in global leaderboards: per-scenario global ranks/percentiles, cached
-  hard, off by default — local-only rank engine untouched
+- [x] Opt-in global percentiles: the scenario's public leaderboard position
+  ("#258 · top 0.7%") in the detail chart header, off by default, board sizes
+  cached 24 h — the local-only rank engine is untouched
 
 ## Later (unpromised)
 

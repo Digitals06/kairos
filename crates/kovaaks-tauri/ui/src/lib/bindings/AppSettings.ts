@@ -19,4 +19,9 @@ close_to_tray: boolean,
 /**
  * The tray offers a one-click KovaaK's launch (deep-link, no param).
  */
-launch_with_kovaaks: boolean, };
+launch_with_kovaaks: boolean, 
+/**
+ * Look up each scenario's global board position. Off by default: this is
+ * the only feature that talks to KovaaK's beyond your own scores.
+ */
+show_global_percentiles: boolean, };

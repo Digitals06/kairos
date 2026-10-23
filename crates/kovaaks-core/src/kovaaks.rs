@@ -26,6 +26,40 @@ fn parse_retry_after(value: &str) -> Option<u64> {
     Some(value.trim().parse::<u64>().ok()?.min(600))
 }
 
+/// Minimal percent-encoding for query values (the search string is the only
+/// free-form value we send; everything else is numeric).
+fn urlencode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            b' ' => out.push_str("%20"),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// Map 429/5xx onto [`Error::RateLimited`] so callers can back off politely,
+/// and everything else onto the HTTP error.
+fn handle_response(response: reqwest::Response) -> Result<reqwest::Response> {
+    let status = response.status();
+    if status.as_u16() == 429 || status.is_server_error() {
+        let retry_after_secs = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(parse_retry_after);
+        return Err(Error::RateLimited {
+            status: status.as_u16(),
+            retry_after_secs,
+        });
+    }
+    Ok(response.error_for_status()?)
+}
+
 /// HTTP client for kovaaks.com webapp-backend endpoints. Clones share the
 /// same pacing state and connection pool.
 #[derive(Debug, Clone)]
@@ -107,6 +141,73 @@ impl KovaaksClient {
         let mut progress: BenchmarkProgress = serde_json::from_str(&body).map_err(Error::from)?;
         progress.normalize_scale();
         Ok(progress)
+    }
+
+    // ----- scenario global boards (v0.5.0) --------------------------------
+
+    /// Resolve a scenario name to its public leaderboard id.
+    ///
+    /// KovaaK's only exposes name search as a fuzzy filter on the "popular
+    /// scenarios" listing (`scenarioNameSearch`); an exact, case-insensitive
+    /// name match is what makes the result trustworthy, so everything else the
+    /// filter returns is ignored.
+    pub async fn scenario_leaderboard_id(&self, name: &str) -> Result<Option<i64>> {
+        let wanted = name.trim().to_lowercase();
+        if wanted.is_empty() {
+            return Ok(None);
+        }
+        self.pace().await;
+        let url = format!(
+            "{BASE_URL}/scenario/popular?page=0&max=10&scenarioNameSearch={}",
+            urlencode(name.trim())
+        );
+        let response = self.http.get(&url).send().await?;
+        let response = handle_response(response)?;
+        let body = response.text().await?;
+        #[derive(serde::Deserialize)]
+        struct Popular {
+            data: Vec<Row>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Row {
+            #[serde(rename = "leaderboardId")]
+            leaderboard_id: i64,
+            #[serde(rename = "scenarioName")]
+            name: String,
+        }
+        let parsed: Popular = serde_json::from_str(&body)?;
+        Ok(parsed
+            .data
+            .into_iter()
+            .find(|row| row.name.trim().to_lowercase() == wanted)
+            .map(|row| row.leaderboard_id))
+    }
+
+    /// Total number of entries on one scenario's global board (the denominator
+    /// a percentile needs).
+    pub async fn scenario_board_total(&self, leaderboard_id: i64) -> Result<u64> {
+        self.pace().await;
+        let url = format!(
+            "{BASE_URL}/leaderboard/scores/global?leaderboardId={leaderboard_id}&page=0&max=1"
+        );
+        let response = self.http.get(&url).send().await?;
+        let response = handle_response(response)?;
+        let body = response.text().await?;
+        #[derive(serde::Deserialize)]
+        struct Board {
+            total: u64,
+        }
+        let parsed: Board = serde_json::from_str(&body)?;
+        Ok(parsed.total)
+    }
+
+    /// Scenario name → board size, in one call from the caller's point of view
+    /// (two paced HTTP requests inside).
+    pub async fn scenario_global(&self, name: &str) -> Result<Option<u64>> {
+        let Some(id) = self.scenario_leaderboard_id(name).await? else {
+            return Ok(None);
+        };
+        Ok(Some(self.scenario_board_total(id).await?))
     }
 }
 

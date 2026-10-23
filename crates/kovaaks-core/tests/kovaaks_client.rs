@@ -46,3 +46,29 @@ async fn live_fetches_benchmark_progress_for_verified_player() {
         "expected at least one category (Clicking/Tracking/...)"
     );
 }
+
+/// Live probe for the v0.5.0 global-board lookups: name → leaderboard id →
+/// board size. Ignored by default (network).
+#[tokio::test]
+#[ignore]
+async fn live_scenario_global_resolves_name_and_board_size() {
+    let client = KovaaksClient::new().expect("client construction needs no network");
+    let id = client
+        .scenario_leaderboard_id("VT Pasu Novice S5")
+        .await
+        .expect("live leaderboard id lookup");
+    assert!(id.is_some(), "a well-known scenario must resolve to an id");
+    let total = client
+        .scenario_board_total(id.expect("id"))
+        .await
+        .expect("live board size");
+    assert!(total > 100, "expected a real board, got {total}");
+    assert!(
+        client
+            .scenario_leaderboard_id("definitely not a scenario name")
+            .await
+            .expect("lookup")
+            .is_none(),
+        "fuzzy search must never match unrelated names"
+    );
+}

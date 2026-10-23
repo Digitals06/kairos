@@ -121,7 +121,7 @@ fn open_creates_schema_v1_and_reopen_preserves_data() {
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert_eq!(
-        version, 6,
+        version, 7,
         "migration must set user_version to current schema"
     );
     for table in [
@@ -596,5 +596,56 @@ fn upsert_player_inserts_and_updates_preserving_first_seen() {
     assert_eq!(first_seen(&path), before, "first_seen must be stable");
     assert_eq!(store.player(SID).unwrap().unwrap().persona, "TestPersona 2");
     assert!(store.player("76561190000000000").unwrap().is_none());
+    cleanup_db(&path);
+}
+
+#[test]
+fn scenario_global_cache_roundtrips_and_ranks_come_from_the_newest_snapshot() {
+    let path = temp_db("global-board");
+    let store = Store::open(&path).expect("open store");
+    store
+        .record_snapshot(
+            SID,
+            84,
+            &progress(
+                600.0,
+                3,
+                vec![(
+                    "Clicking",
+                    category(600.0, 3, vec![("VT Pasu", scenario(1281.0, 4321, 3))]),
+                )],
+            ),
+            ts(1_700_000_000),
+        )
+        .expect("snapshot");
+
+    assert_eq!(
+        store
+            .scenario_leaderboard_rank(SID, "VT Pasu")
+            .expect("rank"),
+        4321
+    );
+    assert_eq!(
+        store
+            .scenario_leaderboard_rank(SID, "Never Played")
+            .expect("rank"),
+        0
+    );
+
+    assert!(store.global_total("VT Pasu").expect("cached").is_none());
+    store.put_global_total("VT Pasu", 100_000).expect("put");
+    let (total, at) = store
+        .global_total("VT Pasu")
+        .expect("cached")
+        .expect("present");
+    assert_eq!(total, 100_000);
+    assert!((chrono::Utc::now() - at).num_seconds().abs() < 5);
+
+    // Upsert, not duplicate.
+    store.put_global_total("VT Pasu", 120_000).expect("re-put");
+    assert_eq!(
+        store.global_total("VT Pasu").expect("cached").unwrap().0,
+        120_000
+    );
     cleanup_db(&path);
 }
