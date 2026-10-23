@@ -162,6 +162,25 @@ easing/shadow tokens stay cherry-picked by hand.
   ("#258 · top 0.7%") in the detail chart header, off by default, board sizes
   cached 24 h — the local-only rank engine is untouched
 
-## Later (unpromised)
+## v0.6.0 — candidates (unscoped)
 
-- Windows installer (NSIS via Tauri bundler) — dropped from v0.2.1, revisit later
+Pick and order these when the next cycle starts. Nothing here is promised.
+
+- **Scenario goals** — a personal target per scenario ("720 on Pasu by December")
+  with the countdown on the weak-spot strip
+- **Streak calendar** — the weekly torch strip expanded to a month heatmap
+- **Auto-sync on exit** — when KovaaK's closes, run a quiet sync so ranks are
+  current the next time the app opens (pairs with the session marker)
+- **In-app updater** — a "new version available" chip via the GitHub releases
+  API, so users stop re-downloading installers by hand
+- **Taskbar jump list** — right-click the icon for Launch KovaaK's and your
+  three favourite benchmarks
+- **Localization skeleton** — all UI strings in one module (English + French
+  first), so translations don't mean a refactor later
+- **Custom-bench polish** — per-tier colour picker, bench duplication, and a
+  "start from a registry benchmark" preset
+
+## Housekeeping
+
+- Windows installers (NSIS + MSI) ship in every release since v0.3.2 — done,
+  not a roadmap item anymore.

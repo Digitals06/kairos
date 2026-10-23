@@ -12,15 +12,13 @@ If Kairos helps your grind, consider supporting development:
 
 ![Kairos overview — benchmark grid in the basalt theme with the weekly plaque and grind coach](docs/screenshots/app-grid-v030.png)
 
-## What's new in v0.4.0 — play sessions
+## What's new in v0.5.0 — your own benches
 
-- **Lives in the tray** — closing the window keeps Kairos running (and watching your KovaaK's stats); the tray icon restores it, and Launch KovaaK's is one menu click away.
-- **Post-session recap** — when a grind session ends (a twenty-minute quiet gap), a toast sums it up: plays and personal bests, straight from local data.
-- **Launch from anywhere** — every grind step and scenario row has a GO button that opens that exact scenario in KovaaK's; each benchmark page has a Launch in KovaaK's button.
-- **Weak-spot strip** — the next scenario to grind and its gap stay pinned at the bottom of a benchmark page.
-- **Keyboard-first stoa** — arrows walk the benchmark cards, Enter opens, Esc backs out, f toggles favorites.
-- **Reconcile** — the benchmark page says "N unranked plays" when your local runs are newer than the last leaderboard sync, so you know when to Sync Now.
-- All of the temple identity stays: the grind coach that plans per benchmark's rank method (v0.3.2), marble & basalt themes, weekly plaque, analytics, two-phase launch under 2s.
+- **Custom benchmarks** — build a bench from scenarios you already play, group them into subcategories, and write the thresholds yourself. Three rank rules: **every scenario counts**, **top N per subcategory**, or **global energy** (the harmonic mean Voltaic uses, where one weak subcategory drags the whole rank).
+- **Share a bench** — export it to a small JSON file (or copy it as text) and import someone else's. The file holds the structure only: scenarios, subcategories, thresholds, tier names, rule. Never your scores.
+- **Discord share card** — a 1200×630 card with your week, your level and your benchmarks, ready to copy straight into a chat or save as a PNG.
+- **Global percentiles (opt-in)** — the scenario you're looking at can show its public board position, e.g. `#258 · top 0.7%`. Off by default; the only calls it makes are board sizes, cached for a day.
+- Everything from v0.4.0 stays: tray mode, post-session recaps, GO buttons, the weak-spot strip, keyboard navigation.
 
 
 
@@ -40,6 +38,15 @@ If Kairos helps your grind, consider supporting development:
 - **Full benchmark coverage** — every benchmark tracked on [evxl.app](https://evxl.app) (Voltaic, Revosect, PureG, Aimerz+, …), with official rank names and colors.
 - **One card per family** — the overview groups benchmarks by family: best rank badge, difficulty count, and an unroll that shows every difficulty with its tier-ladder rungs lit up to your rank.
 
+### Custom benches
+
+![Kairos custom bench builder: rank rules, subcategory chips and a per-scenario threshold table](docs/screenshots/app-custombench-v050.png)
+
+- **Author your own** — pick scenarios from your own history, split them into subcategories (Clicking / Tracking / whatever you actually practise), and give each one its own ascending threshold ladder. Tier names are yours too.
+- **Three rules, honestly different** — on the same scores, *every scenario counts* can read Unranked while *top 1 per subcategory* reads Silver; global energy lands between them, because it harmonic-means the subcategories instead of letting the weakest one veto.
+- **It is a real bench** — custom benches appear in the stoa, take favorites, open a detail page with per-scenario gaps and GO buttons, and are scored by the same engine as the registry ones.
+- **Import / export** — the JSON is a template, not a backup: no ids, no scores, just the bench.
+
 ### The numbers
 
 ![Kairos weekly plaque with torch day strip, Twelve Steps frieze and rank inscription](docs/screenshots/app-weekly-v030.png)
@@ -47,18 +54,23 @@ If Kairos helps your grind, consider supporting development:
 - **Weekly plaque** — plays-per-day torch strip, current level along the Twelve Steps, and rank inscriptions — in a single element.
 - **Per-scenario detail** — score history chart (your local plays + sync snapshots, deduplicated so the same run never counts twice), running high, 7-day average, avg/high scores, and 30-day improvement %. Snapshots that don't set a new high are ignored, so stale syncs never pollute charts or averages. Scenario tables cycle **weakest → strongest → order** so the closest-to-flip grind heads the list.
 
-![Kairos score history chart with PB progression and consistency chips](docs/screenshots/app-detail-chart-v030.png)
+![Kairos score history chart with a global percentile chip next to the title](docs/screenshots/app-global-percentile-v050.png)
+
+- **Global percentiles (opt-in)** — the scenario in focus can show where it sits on the public board (`#53 · top 10.1%`), computed from your stored rank and the board's size. Enable it in settings; board sizes are cached for a day and nothing else about you leaves the machine.
 
 ### Around the app
 
-- **Benchmark type filter** — 12 tabs mirroring evxl's own grouping (Mixed, Tracking, Static, Clicking, Ground, Precise, Smooth, Micro, Dynamic, Reactive, Evasive, Switching), multi-select, combined with the name search. Tag assignments match evxl's live filter, so the Static tab shows only genuinely static benchmarks, Ground catches ground-tracking specialists, and everything unspecialized sits under Mixed.
+- **Benchmark type filter** — 12 tabs mirroring evxl's own grouping (Mixed, Tracking, Static, Clicking, Ground, Precise, Smooth, Micro, Dynamic, Reactive, Evasive, Switching), multi-select, combined with the name search — plus a **Custom** tab that shows only your own benches. Tag assignments match evxl's live filter, so the Static tab shows only genuinely static benchmarks, Ground catches ground-tracking specialists, and everything unspecialized sits under Mixed.
 - **Search + favorites** — filter the grid by name, pin benchmarks to the top. Pins survive restarts.
 - **Tray mode** — closing the window keeps Kairos in the tray so the stats watcher stays live; restore it from the tray menu, or launch KovaaK's straight from there.
 - **Keyboard-first** — arrows walk the benchmark cards, Enter opens, Esc backs out, f toggles favorites.
 - **Theme picker** — Marble (light), Basalt (dark), or follow the OS. Charts re-palette on the flip.
 - **Backup export** — one click in the settings menu writes your entire history as a JSON file in Documents.
 - **One-click sync** — a quick pass for your benchmarks; "Check everything at launch" refreshes every benchmark from the leaderboard when you want a deep pass. If the server throttles, Kairos waits and retries politely on its own. **Refresh Local** re-scans the stats folder without touching the network.
-- **Private by design** — no accounts, no telemetry; only public APIs, and live API tests skip unless you opt in.
+- **Share card** — one button composes a 1200×630 card (week, level, benchmarks, top movers) you can copy into Discord or save to Pictures/Kairos.
+- **Private by design** — no accounts, no telemetry; only public APIs, and live API tests skip unless you opt in. The global-percentile lookup is opt-in and returns only a board size.
+
+![Kairos Discord share card: wordmark, weekly stats, level bar, plays-per-day strip and benchmark table](docs/screenshots/share-card-v050.png)
 
 ![Kairos what-to-grind-next panel: a step-by-step plan with GO buttons per scenario](docs/screenshots/app-grind-v040.png)
 
@@ -68,7 +80,7 @@ If Kairos helps your grind, consider supporting development:
 
 | Source | Used for |
 |---|---|
-| KovaaK's public score server (no login needed) | Scores, ranks, leaderboard positions |
+| KovaaK's public score server (no login needed) | Scores, ranks, leaderboard positions; board sizes only when you opt into global percentiles |
 | evxl.app public lookup + built-in registry | Finding your profile, benchmark and rank definitions |
 | Your KovaaK's `Stats` folder (`*.csv` files) | Local play history |
 
@@ -153,7 +165,7 @@ The architecture is documented for contributors: domain glossary in [CONTEXT.md]
 
 ## Roadmap
 
-Planned features live in [ROADMAP.md](ROADMAP.md) — next up at v0.5.0: user-defined benchmarks (import or in-app builder), a Discord share card, and opt-in global leaderboards.
+Planned features live in [ROADMAP.md](ROADMAP.md) — v0.5.0 (custom benches, share card, opt-in percentiles) is done; the v0.6.0 candidate list is the next conversation.
 
 ## Layout
 

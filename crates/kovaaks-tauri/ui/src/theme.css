@@ -351,6 +351,37 @@ html[data-theme='basalt'] .panel { box-shadow: var(--hair-shadow), 0 2px 10px rg
   flex-wrap: wrap;
 }
 
+.chart-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Small status pill (reconcile "unranked plays", global board position). */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.chip.hot {
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+}
+
+.chip.global-chip {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
 .scope-select {
   background: var(--bg, #0a0e14);
   color: var(--text, #e5e7eb);

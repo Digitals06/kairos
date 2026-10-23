@@ -565,17 +565,19 @@
     {:else}
       <section class="panel chart-panel">
         <div class="chart-head">
-          <h3>{scopeTitle()}</h3>
-          {#if globalInfo}
-            <span
-              class="chip global-chip"
-              title="Your position on this scenario's public leaderboard ({globalInfo.total.toLocaleString()} entries)"
-            >
-              #{globalInfo.rank.toLocaleString()} · top {globalInfo.percentile < 1
-                ? globalInfo.percentile.toFixed(2)
-                : globalInfo.percentile.toFixed(1)}%
-            </span>
-          {/if}
+          <div class="chart-title">
+            <h3>{scopeTitle()}</h3>
+            {#if globalInfo}
+              <span
+                class="chip global-chip"
+                title="Your position on this scenario's public leaderboard ({globalInfo.total.toLocaleString()} entries)"
+              >
+                #{globalInfo.rank.toLocaleString()} · top {globalInfo.percentile < 1
+                  ? globalInfo.percentile.toFixed(2)
+                  : globalInfo.percentile.toFixed(1)}%
+              </span>
+            {/if}
+          </div>
           {#if historyOptions.length > 0}
             <select
               class="scope-select"
