@@ -808,6 +808,58 @@ fn kovaaks_open_uri() -> String {
     "steam://run/824270/".to_string()
 }
 
+/// Tray menu item ids.
+///
+/// These MUST be set explicitly: `MenuItemBuilder::new(text)` leaves the id to
+/// muda, which assigns a counter ("0", "1", …) — so a handler matching on the
+/// label silently never fires and every tray item becomes a no-op (the v0.5.0
+/// "Quit does nothing" bug).
+#[doc(hidden)]
+pub const TRAY_SHOW: &str = "tray-show";
+#[doc(hidden)]
+pub const TRAY_LAUNCH: &str = "tray-launch";
+#[doc(hidden)]
+pub const TRAY_QUIT: &str = "tray-quit";
+
+/// What one tray menu event should do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrayAction {
+    Show,
+    Launch,
+    Quit,
+    Ignore,
+}
+
+/// Route a menu id to its action. Kept pure so the id wiring is testable
+/// without a native menu.
+fn tray_action(id: &str) -> TrayAction {
+    match id {
+        TRAY_SHOW => TrayAction::Show,
+        TRAY_LAUNCH => TrayAction::Launch,
+        TRAY_QUIT => TrayAction::Quit,
+        _ => TrayAction::Ignore,
+    }
+}
+
+/// Build the tray menu. Extracted from `run()` so a test can assert the item
+/// ids: muda hands out numeric ids when a builder has none, and that silently
+/// kills every menu item (see [`TRAY_QUIT`]).
+#[doc(hidden)]
+pub fn build_tray_menu<R: tauri::Runtime, M: tauri::Manager<R>>(
+    manager: &M,
+    include_launch: bool,
+) -> tauri::Result<tauri::menu::Menu<R>> {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder};
+    let show = MenuItemBuilder::with_id(TRAY_SHOW, "Show Kairos").build(manager)?;
+    let mut menu = MenuBuilder::new(manager).item(&show);
+    if include_launch {
+        let launch = MenuItemBuilder::with_id(TRAY_LAUNCH, "Launch KovaaK's").build(manager)?;
+        menu = menu.item(&launch);
+    }
+    let quit = MenuItemBuilder::with_id(TRAY_QUIT, "Quit").build(manager)?;
+    menu.separator().item(&quit).build()
+}
+
 /// Open a URL through the OS shell (Windows: hidden cmd relay).
 fn open_url(url: &str) {
     #[cfg(windows)]
@@ -2518,34 +2570,24 @@ pub fn run() {
             // the KovaaK's item honors the setting read at startup; Show
             // restores and focuses the main window.
             {
-                use tauri::menu::{MenuBuilder, MenuItemBuilder};
                 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
                 let settings = app.state::<AppState>().load_settings();
-                let show = MenuItemBuilder::new("Show Kairos").build(app)?;
-                let mut menu = MenuBuilder::new(app).item(&show);
-                if settings.launch_with_kovaaks {
-                    let launch = MenuItemBuilder::new("Launch KovaaK's").build(app)?;
-                    menu = menu.item(&launch);
-                }
-                let quit = MenuItemBuilder::new("Quit").build(app)?;
-                let menu = menu.separator().item(&quit).build()?;
+                let menu = build_tray_menu(app, settings.launch_with_kovaaks)?;
                 TrayIconBuilder::with_id("kairos")
                     .icon(app.default_window_icon().expect("window icon").clone())
                     .tooltip("Kairos")
                     .menu(&menu)
-                    .on_menu_event(|app, event| match event.id().as_ref() {
-                        "Show Kairos" => {
+                    .on_menu_event(|app, event| match tray_action(event.id().as_ref()) {
+                        TrayAction::Show => {
                             if let Some(w) = app.get_webview_window("main") {
                                 let _ = w.show();
                                 let _ = w.unminimize();
                                 let _ = w.set_focus();
                             }
                         }
-                        "Launch KovaaK's" => {
-                            open_url(&kovaaks_open_uri());
-                        }
-                        "Quit" => app.exit(0),
-                        _ => {}
+                        TrayAction::Launch => open_url(&kovaaks_open_uri()),
+                        TrayAction::Quit => app.exit(0),
+                        TrayAction::Ignore => {}
                     })
                     .on_tray_icon_event(|tray, event| {
                         if let TrayIconEvent::Click {
@@ -2640,6 +2682,43 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// REGRESSION (v0.5.0): tray items were built with `MenuItemBuilder::new`,
+    /// which leaves the id to muda — it assigns a counter ("0", "1", …). The
+    /// handler matched on the labels, so no item ever fired and Quit did
+    /// nothing. Both sides now use the same explicit ids.
+    /// Companion guard: the builder must keep passing our ids. Mock-runtime
+    /// tests can't load here (WebView2 loader mismatch), so this checks the
+    /// construction itself — the exact line that caused the bug.
+    #[test]
+    fn tray_items_are_built_with_explicit_ids() {
+        let src = include_str!("lib.rs");
+        for (constant, label) in [
+            ("TRAY_SHOW", "Show Kairos"),
+            ("TRAY_LAUNCH", "Launch KovaaK's"),
+            ("TRAY_QUIT", "Quit"),
+        ] {
+            let expected = format!("MenuItemBuilder::with_id({constant}, {label:?})");
+            assert!(src.contains(&expected), "missing {expected}");
+        }
+        // split so this assertion does not match its own source text
+        let unlabelled = concat!("MenuItemBuilder::", "new(\"");
+        assert!(
+            !src.contains(unlabelled),
+            "tray items need with_id(): a generated id never reaches the handler"
+        );
+    }
+
+    #[test]
+    fn tray_menu_ids_route_to_their_actions() {
+        assert_eq!(tray_action(TRAY_SHOW), TrayAction::Show);
+        assert_eq!(tray_action(TRAY_LAUNCH), TrayAction::Launch);
+        assert_eq!(tray_action(TRAY_QUIT), TrayAction::Quit);
+        // muda's auto-generated ids are numeric, and the labels are not ids.
+        for other in ["0", "1", "Quit", "Show Kairos", "Launch KovaaK's", ""] {
+            assert_eq!(tray_action(other), TrayAction::Ignore, "id {other:?}");
+        }
+    }
 
     /// REGRESSION (skeleton-forever bug): the frontend reads snake_case fields
     /// (benchmark_progress, next_rank_delta, …). camelCase wire output made
