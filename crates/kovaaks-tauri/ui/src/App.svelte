@@ -28,6 +28,7 @@ import { listen } from '@tauri-apps/api/event'
   import Analytics from './lib/Analytics.svelte'
   import Coach from './lib/Coach.svelte'
   import Weekly from './lib/Weekly.svelte'
+  import CustomBenchPanel from './lib/CustomBenchPanel.svelte'
     import { humanError } from './lib/errors'
   import type { ThemeChoice } from './lib/nav.svelte'
   import { nav, themeState, applyTheme, loadTheme, openDetail, closeDetail, openAnalytics, closeAnalytics, showOverview, showSetup } from './lib/nav.svelte'
@@ -37,6 +38,8 @@ import { listen } from '@tauri-apps/api/event'
   let profile = $state<PlayerProfile | null>(null)
   let cards = $state<BenchmarkCard[]>([])
   let searchQuery = $state('')
+  /// Custom bench builder modal (v0.5.0).
+  let customOpen = $state(false)
   let loadingOverview = $state(false)
   let toast = $state<string | null>(null)
   let toastTimer: ReturnType<typeof setTimeout> | undefined
@@ -592,6 +595,9 @@ import { listen } from '@tauri-apps/api/event'
       {:else}
         <Weekly shared={weekly} />
         <Coach />
+        {#if customOpen}
+          <CustomBenchPanel onclose={() => (customOpen = false)} onsaved={() => loadOverview()} />
+        {/if}
         <div class="search-row">
           <input
             class="search-input"
@@ -599,6 +605,7 @@ import { listen } from '@tauri-apps/api/event'
             placeholder="Filter benchmarks…"
             bind:value={searchQuery}
           />
+          <button class="btn btn-small" onclick={() => (customOpen = true)}>+ Custom bench</button>
           {#if searchQuery || activeTypes.length > 0}
             <button
               class="btn btn-small"

@@ -379,9 +379,11 @@
             {pending!.plays_since.length} unranked play{pending!.plays_since.length === 1 ? '' : 's'}
           </span>
         {/if}
-        <button class="btn btn-small" title="Open this difficulty's shared scenario set in KovaaK's" onclick={() => detail && launchBenchmark(detail.card.benchmark_id)}>Launch in KovaaK's</button>
-        {#if onanalytics}
-          <button class="btn btn-small" onclick={onanalytics}>All scenarios</button>
+        {#if detail.card.benchmark_id > 0}
+          <button class="btn btn-small" title="Open this difficulty's shared scenario set in KovaaK's" onclick={() => detail && launchBenchmark(detail.card.benchmark_id)}>Launch in KovaaK's</button>
+          {#if onanalytics}
+            <button class="btn btn-small" onclick={onanalytics}>All scenarios</button>
+          {/if}
         {/if}
         <RankBadge tier={detail.card.rank} />
       </div>
@@ -528,9 +530,13 @@
     </div>
 
 
-    {#if detail.snapshot_history.length === 0}
+    {#if detail.snapshot_history.length === 0 && detail.plays.length === 0}
       <div class="empty-state panel">
-        <p>No syncs yet — hit Sync Now.</p>
+        <p>
+          {detail.card.benchmark_id < 0
+            ? 'No plays recorded for these scenarios yet — scores come from your synced benchmarks and local CSV plays.'
+            : 'No syncs yet — hit Sync Now.'}
+        </p>
       </div>
     {:else}
       <section class="panel chart-panel">
