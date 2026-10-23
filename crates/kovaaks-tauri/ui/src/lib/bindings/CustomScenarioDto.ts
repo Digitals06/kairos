@@ -6,6 +6,10 @@
  */
 export type CustomScenarioDto = { scenario: string, category: string, 
 /**
+ * The subcategory this scenario competes in.
+ */
+subcategory: string, 
+/**
  * Ascending thresholds, exactly `tier_names.len()` of them.
  */
 thresholds: Array<number>, 

@@ -2,10 +2,11 @@
   /**
    * Custom bench builder (v0.5.0).
    *
-   * A bench is authored entirely here: a scenario list, author-supplied
-   * thresholds per scenario, tier names, and one of two scoring modes. The
-   * rank preview mirrors the Rust rule exactly so what the user sees before
-   * saving is what they get after (validated by the backend on save too).
+   * A bench is authored entirely here: scenarios grouped into subcategories,
+   * author-supplied thresholds per scenario, tier names, and one of three
+   * aggregation rules (all scenarios / top N per subcategory / global energy).
+   * The rank preview mirrors the Rust engine exactly (rankcalc::rank_of plus
+   * the rule), so what the author sees before saving is what they get after.
    */
   import {
     customBenches,
@@ -21,8 +22,10 @@
 
   const PRESET_COLORS = ['#b08d57', '#8fa8a0', '#a86f6f', '#7f8fb0', '#b09a6a', '#8a7fa8']
   const DEFAULT_TIERS = 'Bronze, Silver, Gold, Platinum'
+  const DEFAULT_SUBCATEGORY = 'Main'
 
-  type Row = { scenario: string; category: string; score: number; text: string }
+  type Rule = 'all' | 'top_n' | 'energy'
+  type Row = { scenario: string; category: string; subcategory: string; score: number; text: string }
 
   let saved = $state<CustomBench[]>([])
   let choices = $state<ScenarioChoice[]>([])
@@ -36,10 +39,12 @@
   let name = $state('')
   let abbreviation = $state('CS')
   let color = $state(PRESET_COLORS[0])
-  let mode = $state<'all' | 'top_n'>('all')
-  let topN = $state(3)
+  let rule = $state<Rule>('all')
+  let topN = $state(2)
   let tiersText = $state(DEFAULT_TIERS)
   let rows = $state<Row[]>([])
+  let activeSubcat = $state(DEFAULT_SUBCATEGORY)
+  let newSubcat = $state('')
 
   const tierNames = $derived(
     tiersText
@@ -48,6 +53,16 @@
       .filter((t) => t.length > 0),
   )
 
+  /** Author-defined subcategories, in first-appearance order. */
+  const subcategories = $derived.by(() => {
+    const out: string[] = []
+    for (const row of rows) {
+      const name = row.subcategory.trim() || DEFAULT_SUBCATEGORY
+      if (!out.includes(name)) out.push(name)
+    }
+    return out
+  })
+
   /** Tier index for a score (0 = below the first threshold). Mirrors rankcalc::rank_of. */
   function tierOf(score: number, thresholds: number[]): number {
     if (score <= 0 || thresholds.length === 0) return 0
@@ -55,6 +70,16 @@
       if (score >= thresholds[i]) return i + 1
     }
     return 0
+  }
+
+  /** Precise tier (tier + band fraction, clamped at the top). Mirrors PreciseRank. */
+  function preciseOf(score: number, thresholds: number[]): number {
+    const tier = tierOf(score, thresholds)
+    if (tier === 0 || tier >= thresholds.length) return tier
+    const low = thresholds[tier - 1]
+    const high = thresholds[tier]
+    const band = high - low
+    return band > 0 ? tier + (score - low) / band : tier
   }
 
   function parseThresholds(text: string): number[] {
@@ -81,25 +106,48 @@
       tierNames.length > 0 &&
       rows.length > 0 &&
       rowErrors.every((e) => e === null) &&
-      (mode === 'all' || (topN >= 1 && topN <= rows.length)),
+      (rule !== 'top_n' || (topN >= 1 && topN <= rows.length)),
   )
 
-  const previewRank = $derived.by(() => {
-    const tiers = rows.map((r) => tierOf(r.score, parseThresholds(r.text)))
-    if (tiers.length === 0) return 0
-    if (mode === 'all') return Math.min(...tiers)
-    let best = 0
-    for (let candidate = tierNames.length; candidate >= 1; candidate--) {
-      if (tiers.filter((t) => t >= candidate).length >= topN) {
-        best = candidate
-        break
+  /** Per-subcategory preview, mirroring the Rust rule. */
+  const preview = $derived.by(() => {
+    const groups = new Map<string, number[]>()
+    const energies = new Map<string, number>()
+    for (const row of rows) {
+      const thresholds = parseThresholds(row.text)
+      const sub = row.subcategory.trim() || DEFAULT_SUBCATEGORY
+      const tier = tierOf(row.score, thresholds)
+      const precise = preciseOf(row.score, thresholds)
+      if (!groups.has(sub)) groups.set(sub, [])
+      groups.get(sub)!.push(tier)
+      energies.set(sub, Math.max(energies.get(sub) ?? 0, precise))
+    }
+    let rank = 0
+    let benchEnergy = 0
+    if (groups.size > 0) {
+      if (rule === 'energy') {
+        const values = [...energies.values()]
+        benchEnergy = values.some((v) => v <= 0)
+          ? 0
+          : values.length / values.reduce((sum, v) => sum + 1 / v, 0)
+        rank = Math.floor(Math.min(benchEnergy, tierNames.length))
+      } else if (rule === 'top_n') {
+        rank = Math.min(
+          ...[...groups.values()].map((tiers) => {
+            const sorted = [...tiers].sort((a, b) => b - a)
+            const take = Math.min(topN, sorted.length)
+            return sorted[take - 1] ?? 0
+          }),
+        )
+      } else {
+        rank = Math.min(...[...groups.values()].map((tiers) => Math.min(...tiers)))
       }
     }
-    return best
+    return { rank: Number.isFinite(rank) ? rank : 0, energy: benchEnergy, count: groups.size }
   })
 
   const previewName = $derived(
-    previewRank > 0 ? (tierNames[previewRank - 1] ?? '—') : 'Unranked',
+    preview.rank > 0 ? (tierNames[preview.rank - 1] ?? '—') : 'Unranked',
   )
 
   const matches = $derived(
@@ -132,10 +180,12 @@
     name = ''
     abbreviation = 'CS'
     color = PRESET_COLORS[0]
-    mode = 'all'
-    topN = 3
+    rule = 'all'
+    topN = 2
     tiersText = DEFAULT_TIERS
     rows = []
+    activeSubcat = DEFAULT_SUBCATEGORY
+    newSubcat = ''
     search = ''
     error = null
   }
@@ -145,36 +195,50 @@
     name = bench.name
     abbreviation = bench.abbreviation
     color = bench.color
-    mode = bench.mode === 'top_n' ? 'top_n' : 'all'
-    topN = bench.top_n || 3
+    rule = bench.rule === 'top_n' ? 'top_n' : bench.rule === 'energy' ? 'energy' : 'all'
+    topN = bench.top_n || 2
     tiersText = bench.tier_names.join(', ')
     rows = bench.scenarios.map((s: CustomScenario) => ({
       scenario: s.scenario,
       category: s.category,
+      subcategory: s.subcategory || DEFAULT_SUBCATEGORY,
       score: s.score,
       text: s.thresholds.join(', '),
     }))
+    activeSubcat = rows[0]?.subcategory ?? DEFAULT_SUBCATEGORY
+    newSubcat = ''
     search = ''
     error = null
   }
 
   function add(choice: ScenarioChoice) {
     const score = choice.score ?? 0
-    // Seed a plausible shape from the player's current score so the row is
+    // Seed a plausible ladder from the player's current score so the row is
     // never empty; the author edits it immediately.
     const base = score > 0 ? score : 100
-    const seeded = [0.7, 0.85, 1.0, 1.15].slice(0, Math.max(1, tierNames.length || 3))
-    while (seeded.length < tierNames.length) seeded.push(seeded[seeded.length - 1] + 0.15)
+    const factors = [0.7, 0.85, 1.0, 1.15]
+    const values = Array.from({ length: Math.max(1, tierNames.length) }, (_, i) => {
+      const f = factors[i] ?? 1.15 + 0.15 * (i - 3)
+      return Math.round(base * f)
+    })
     rows = [
       ...rows,
       {
         scenario: choice.scenario,
         category: choice.category,
+        subcategory: activeSubcat || DEFAULT_SUBCATEGORY,
         score,
-        text: seeded.map((f) => Math.round(base * f)).join(', '),
+        text: values.join(', '),
       },
     ]
     search = ''
+  }
+
+  function addSubcategory() {
+    const clean = newSubcat.trim()
+    if (clean.length === 0 || subcategories.includes(clean)) return
+    activeSubcat = clean
+    newSubcat = ''
   }
 
   function resyncThresholds() {
@@ -200,12 +264,13 @@
         name: name.trim(),
         abbreviation: abbreviation.trim() || 'CS',
         color,
-        mode,
-        top_n: mode === 'top_n' ? topN : 0,
+        rule,
+        top_n: rule === 'top_n' ? topN : 0,
         tier_names: tierNames,
         scenarios: rows.map((r) => ({
           scenario: r.scenario,
           category: r.category,
+          subcategory: r.subcategory.trim() || DEFAULT_SUBCATEGORY,
           thresholds: parseThresholds(r.text),
           score: r.score,
           tier: 0,
@@ -215,8 +280,10 @@
         })),
         rank_index: 0,
         complete: false,
+        energy: 0,
         rank: null,
         next_rank_name: null,
+        subcategories: [],
       })
       await load()
       onsaved()
@@ -271,6 +338,13 @@
                 <span class="chip">
                   {bench.rank?.name ?? 'Unranked'}{bench.complete ? ' · complete' : ''}
                 </span>
+                <span class="muted small">
+                  {bench.rule === 'energy'
+                    ? 'global energy'
+                    : bench.rule === 'top_n'
+                      ? `top ${bench.top_n} per subcategory`
+                      : 'all scenarios'} · {bench.subcategories.length} subcat
+                </span>
               </div>
               <div class="bench-item-actions">
                 <button class="btn btn-small" onclick={() => edit(bench)}>Edit</button>
@@ -309,14 +383,14 @@
         </div>
 
         <div class="field-row">
-          <span class="field-label">Scoring</span>
-          <div class="modes">
-            <label class="mode">
-              <input type="radio" bind:group={mode} value="all" />
-              every scenario counts
+          <span class="field-label">Rank rule</span>
+          <div class="rules">
+            <label class="rule">
+              <input type="radio" bind:group={rule} value="all" />
+              full subcategory <span class="muted small">every scenario counts</span>
             </label>
-            <label class="mode">
-              <input type="radio" bind:group={mode} value="top_n" />
+            <label class="rule">
+              <input type="radio" bind:group={rule} value="top_n" />
               top
               <input
                 class="topn"
@@ -324,12 +398,28 @@
                 min="1"
                 max="24"
                 bind:value={topN}
-                disabled={mode !== 'top_n'}
+                disabled={rule !== 'top_n'}
               />
-              count
+              per subcategory
+            </label>
+            <label class="rule">
+              <input type="radio" bind:group={rule} value="energy" />
+              global energy <span class="muted small">harmonic across subcategories</span>
             </label>
           </div>
         </div>
+        <p class="muted small">
+          {#if rule === 'all'}
+            Each subcategory sits at its weakest scenario, and the bench takes its weakest
+            subcategory.
+          {:else if rule === 'top_n'}
+            Only the best {topN} scenario{topN === 1 ? '' : 's'} of each subcategory count; the
+            weakest subcategory decides.
+          {:else}
+            Each subcategory is carried by its best scenario; the bench is the harmonic mean across
+            subcategories, so one weak subcategory drags the whole rank.
+          {/if}
+        </p>
 
         <label class="field">
           <span>Tier names (worst → best, comma separated)</span>
@@ -340,9 +430,46 @@
           {tierNames.length} thresholds.
         </p>
 
+        <div class="subcats">
+          <span class="field-label">Subcategories</span>
+          <div class="subcat-row">
+            {#if subcategories.length === 0}
+              <span class="muted small">No subcategories yet — add one, then pick scenarios for it.</span>
+            {:else}
+              {#each subcategories as sub (sub)}
+                <button
+                  class="subcat-chip"
+                  class:active={activeSubcat === sub}
+                  onclick={() => (activeSubcat = sub)}
+                >
+                  {sub}
+                  <span class="muted small">
+                    {rows.filter((r) => (r.subcategory.trim() || DEFAULT_SUBCATEGORY) === sub).length}
+                  </span>
+                </button>
+              {/each}
+            {/if}
+            <input
+              class="subcat-new"
+              type="text"
+              bind:value={newSubcat}
+              placeholder="New subcategory…"
+              onkeydown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  addSubcategory()
+                }
+              }}
+            />
+            <button class="btn btn-small" onclick={addSubcategory}>Add</button>
+          </div>
+        </div>
+
         <div class="scenario-picker">
           <label class="field">
-            <span>Add a scenario</span>
+            <span>
+              Add a scenario{activeSubcat ? ` to ${activeSubcat}` : ''}
+            </span>
             <input
               type="text"
               bind:value={search}
@@ -376,6 +503,7 @@
               <tr>
                 <th>Scenario</th>
                 <th>Score</th>
+                <th>Subcategory</th>
                 <th>Thresholds</th>
                 <th></th>
               </tr>
@@ -385,6 +513,14 @@
                 <tr>
                   <td class="row-name">{row.scenario.trim()}</td>
                   <td class="num">{row.score.toLocaleString()}</td>
+                  <td>
+                    <input
+                      class="subcat-input"
+                      type="text"
+                      list="subcat-options"
+                      bind:value={row.subcategory}
+                    />
+                  </td>
                   <td>
                     <input
                       class="threshold-input"
@@ -408,21 +544,31 @@
               {/each}
             </tbody>
           </table>
+          <datalist id="subcat-options">
+            {#each subcategories as sub (sub)}
+              <option value={sub}></option>
+            {/each}
+          </datalist>
         {/if}
 
-        <footer class="bench-foot">
-          <span class="preview">
-            Rank now: <b>{previewName}</b>
-            {#if previewRank > 0 && previewRank < tierNames.length}
-              <span class="muted small">→ next: {tierNames[previewRank]}</span>
-            {/if}
-          </span>
-          <button class="btn" disabled={!formValid || busy} onclick={save}>
-            {editingId === 0 ? 'Create bench' : 'Save changes'}
-          </button>
-        </footer>
       </section>
     </div>
+
+    <footer class="bench-foot">
+      <span class="preview">
+        Rank now: <b>{previewName}</b>
+        {#if rule === 'energy' && preview.energy > 0}
+          <span class="muted small">energy {preview.energy.toFixed(2)}</span>
+        {/if}
+        {#if preview.rank > 0 && preview.rank < tierNames.length}
+          <span class="muted small">→ next: {tierNames[preview.rank]}</span>
+        {/if}
+        <span class="muted small">· {preview.count} subcategories</span>
+      </span>
+      <button class="btn" disabled={!formValid || busy} onclick={save}>
+        {editingId === 0 ? 'Create bench' : 'Save changes'}
+      </button>
+    </footer>
   </div>
 </div>
 
@@ -438,8 +584,8 @@
     padding: 24px;
   }
   .bench-modal {
-    width: min(1100px, 100%);
-    max-height: min(86vh, 900px);
+    width: min(1180px, 100%);
+    max-height: min(88vh, 920px);
     display: flex;
     flex-direction: column;
     padding: 16px 18px;
@@ -544,24 +690,65 @@
   .swatch.active {
     border-color: var(--accent-2);
   }
-  .modes {
+  .rules {
     display: flex;
     gap: 14px;
     flex-wrap: wrap;
     align-items: center;
   }
-  .mode {
+  .rule {
     display: inline-flex;
     align-items: center;
     gap: 6px;
   }
-  .mode .topn {
+  .rule .topn {
     width: 56px;
     padding: 2px 4px;
     border: 1px solid var(--border);
     border-radius: 4px;
     background: var(--surface);
     color: var(--text);
+  }
+  .subcats {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .subcat-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .subcat-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+  }
+  .subcat-chip.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .subcat-new,
+  .subcat-input {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+  }
+  .subcat-new {
+    flex: 0 0 180px;
+  }
+  .subcat-input {
+    width: 100%;
+    min-width: 110px;
   }
   .matches {
     list-style: none;
@@ -607,7 +794,7 @@
     vertical-align: top;
   }
   .row-name {
-    max-width: 260px;
+    max-width: 220px;
   }
   .threshold-input {
     width: 100%;
@@ -633,7 +820,8 @@
     gap: 12px;
     border-top: 1px solid var(--border);
     padding-top: 10px;
-    margin-top: auto;
+    margin-top: 10px;
+    flex-wrap: wrap;
   }
   .preview b {
     color: var(--accent);

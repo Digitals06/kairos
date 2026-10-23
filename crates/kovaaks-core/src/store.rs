@@ -17,7 +17,7 @@ use crate::error::Result;
 use crate::types::{BenchmarkProgress, PlayRecord, PlayerProfile};
 
 /// Schema version this build writes; `PRAGMA user_version` gates migrations.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// Result of [`Store::record_snapshot`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +63,19 @@ pub struct StoredSnapshot {
     pub scenarios: Vec<StoredScenario>,
 }
 
+/// One scenario row of a user-defined benchmark.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CustomScenarioRow {
+    /// Scenario name, matched verbatim against KovaaK's data.
+    pub scenario: String,
+    /// Source category the scenario came from (display only).
+    pub category: String,
+    /// Author-defined subcategory this scenario competes in.
+    pub subcategory: String,
+    /// Ascending thresholds, exactly `tier_names.len()` of them.
+    pub thresholds: Vec<f64>,
+}
+
 /// One user-defined benchmark (v0.5.0). Stored rows carry a positive `id`;
 /// the app exposes `benchmark_id = -id` so custom benches can never collide
 /// with KovaaK's benchmark ids in favorites, detail routing or the grind panel.
@@ -76,15 +89,16 @@ pub struct CustomBenchRow {
     pub abbreviation: String,
     /// Card accent hex color.
     pub color: String,
-    /// `"all"` (every scenario must reach the tier) or `"top_n"`.
-    pub mode: String,
-    /// How many scenarios must reach a tier in `top_n` mode (0 in `all` mode).
+    /// Aggregation rule: `"all"` (every scenario), `"top_n"` (top N per
+    /// subcategory) or `"energy"` (harmonic mean of subcategory energies).
+    pub rule: String,
+    /// How many scenarios count per subcategory in `top_n` mode.
     pub top_n: u32,
     /// Tier names, worst → best. Each scenario carries exactly this many
     /// thresholds.
     pub tier_names: Vec<String>,
-    /// `(scenario, category, ascending thresholds)` in author order.
-    pub scenarios: Vec<(String, String, Vec<f64>)>,
+    /// Scenario rows in author order.
+    pub scenarios: Vec<CustomScenarioRow>,
 }
 
 /// The SQLite store. Cheap to clone; every method takes `&self` (the rusqlite
@@ -308,6 +322,52 @@ impl Store {
                  );
                  CREATE INDEX IF NOT EXISTS idx_custom_benches_player
                     ON custom_benchmarks(steam_id);",
+            )?;
+        }
+        if version < 6 {
+            // v6: subcategories + the three aggregation rules. Rebuild both
+            // tables (tiny, user-authored data): `mode` becomes `rule`, and
+            // every scenario gains a subcategory (existing rows land in "Main",
+            // which keeps their previous behaviour identical).
+            conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE custom_benchmarks_v6 (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    steam_id      TEXT NOT NULL,
+                    name          TEXT NOT NULL,
+                    abbreviation  TEXT NOT NULL DEFAULT 'CS',
+                    color         TEXT NOT NULL DEFAULT '#b08d57',
+                    rule          TEXT NOT NULL DEFAULT 'all',
+                    top_n         INTEGER NOT NULL DEFAULT 0,
+                    tier_names    TEXT NOT NULL,
+                    created_at    TEXT NOT NULL,
+                    updated_at    TEXT NOT NULL
+                 );
+                 INSERT INTO custom_benchmarks_v6
+                    (id, steam_id, name, abbreviation, color, rule, top_n, tier_names, created_at, updated_at)
+                    SELECT id, steam_id, name, abbreviation, color, mode, top_n, tier_names, created_at, updated_at
+                    FROM custom_benchmarks;
+                 CREATE TABLE custom_bench_scenarios_v6 (
+                    benchmark_row INTEGER NOT NULL
+                        REFERENCES custom_benchmarks_v6(id) ON DELETE CASCADE,
+                    position      INTEGER NOT NULL,
+                    scenario      TEXT NOT NULL,
+                    category      TEXT NOT NULL DEFAULT 'Custom',
+                    subcategory   TEXT NOT NULL DEFAULT 'Main',
+                    thresholds    TEXT NOT NULL,
+                    PRIMARY KEY (benchmark_row, scenario)
+                 );
+                 INSERT INTO custom_bench_scenarios_v6
+                    (benchmark_row, position, scenario, category, subcategory, thresholds)
+                    SELECT benchmark_row, position, scenario, category, 'Main', thresholds
+                    FROM custom_bench_scenarios;
+                 DROP TABLE custom_bench_scenarios;
+                 DROP TABLE custom_benchmarks;
+                 ALTER TABLE custom_benchmarks_v6 RENAME TO custom_benchmarks;
+                 ALTER TABLE custom_bench_scenarios_v6 RENAME TO custom_bench_scenarios;
+                 CREATE INDEX IF NOT EXISTS idx_custom_benches_player
+                    ON custom_benchmarks(steam_id);
+                 COMMIT;",
             )?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -663,7 +723,7 @@ impl Store {
     pub fn custom_benches(&self, steam_id: &str) -> Result<Vec<CustomBenchRow>> {
         let conn = self.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, name, abbreviation, color, mode, top_n, tier_names
+            "SELECT id, name, abbreviation, color, rule, top_n, tier_names
              FROM custom_benchmarks WHERE steam_id = ?1 ORDER BY id",
         )?;
         let heads = stmt
@@ -680,13 +740,13 @@ impl Store {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let mut out = Vec::with_capacity(heads.len());
-        for (id, name, abbreviation, color, mode, top_n, tier_names) in heads {
+        for (id, name, abbreviation, color, rule, top_n, tier_names) in heads {
             out.push(CustomBenchRow {
                 id,
                 name,
                 abbreviation,
                 color,
-                mode,
+                rule,
                 top_n,
                 tier_names: serde_json::from_str(&tier_names)?,
                 scenarios: self.custom_bench_scenarios(&conn, id)?,
@@ -700,9 +760,9 @@ impl Store {
         &self,
         conn: &Connection,
         benchmark_row: i64,
-    ) -> Result<Vec<(String, String, Vec<f64>)>> {
+    ) -> Result<Vec<CustomScenarioRow>> {
         let mut stmt = conn.prepare(
-            "SELECT scenario, category, thresholds FROM custom_bench_scenarios
+            "SELECT scenario, category, subcategory, thresholds FROM custom_bench_scenarios
              WHERE benchmark_row = ?1 ORDER BY position",
         )?;
         let rows = stmt
@@ -711,13 +771,19 @@ impl Store {
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
                 ))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         rows.into_iter()
-            .map(|(scenario, category, thresholds)| {
+            .map(|(scenario, category, subcategory, thresholds)| {
                 let parsed: Vec<f64> = serde_json::from_str(&thresholds)?;
-                Ok((scenario, category, parsed))
+                Ok(CustomScenarioRow {
+                    scenario,
+                    category,
+                    subcategory,
+                    thresholds: parsed,
+                })
             })
             .collect()
     }
@@ -730,14 +796,14 @@ impl Store {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
             "INSERT INTO custom_benchmarks
-                (steam_id, name, abbreviation, color, mode, top_n, tier_names, created_at, updated_at)
+                (steam_id, name, abbreviation, color, rule, top_n, tier_names, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
             params![
                 steam_id,
                 bench.name,
                 bench.abbreviation,
                 bench.color,
-                bench.mode,
+                bench.rule,
                 bench.top_n as i64,
                 serde_json::to_string(&bench.tier_names)?,
                 now
@@ -756,7 +822,7 @@ impl Store {
         let tx = conn.unchecked_transaction()?;
         let n = tx.execute(
             "UPDATE custom_benchmarks SET
-                name = ?3, abbreviation = ?4, color = ?5, mode = ?6,
+                name = ?3, abbreviation = ?4, color = ?5, rule = ?6,
                 top_n = ?7, tier_names = ?8, updated_at = ?9
              WHERE id = ?1 AND steam_id = ?2",
             params![
@@ -765,7 +831,7 @@ impl Store {
                 bench.name,
                 bench.abbreviation,
                 bench.color,
-                bench.mode,
+                bench.rule,
                 bench.top_n as i64,
                 serde_json::to_string(&bench.tier_names)?,
                 Utc::now().to_rfc3339()
@@ -811,17 +877,18 @@ impl Store {
         benchmark_row: i64,
         bench: &CustomBenchRow,
     ) -> Result<()> {
-        for (position, (scenario, category, thresholds)) in bench.scenarios.iter().enumerate() {
+        for (position, row) in bench.scenarios.iter().enumerate() {
             tx.execute(
                 "INSERT INTO custom_bench_scenarios
-                    (benchmark_row, position, scenario, category, thresholds)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                    (benchmark_row, position, scenario, category, subcategory, thresholds)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     benchmark_row,
                     position as i64,
-                    scenario,
-                    category,
-                    serde_json::to_string(thresholds)?
+                    row.scenario,
+                    row.category,
+                    row.subcategory,
+                    serde_json::to_string(&row.thresholds)?
                 ],
             )?;
         }

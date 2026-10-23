@@ -14,7 +14,7 @@ use ts_rs::TS;
 use kovaaks_core::{
     csv_ingest, metrics_for_benchmark, metrics_for_scenario_combined,
     rankdiff::RankChange,
-    store::{CustomBenchRow, StoredSnapshot},
+    store::{CustomBenchRow, CustomScenarioRow, StoredSnapshot},
     types::{Difficulty, RankTier},
     EvxlClient, KovaaksClient, Registry, Store, SyncEngine, SyncReport,
 };
@@ -95,6 +95,8 @@ pub struct BenchmarkCard {
 pub struct CustomScenarioDto {
     pub scenario: String,
     pub category: String,
+    /// The subcategory this scenario competes in.
+    pub subcategory: String,
     /// Ascending thresholds, exactly `tier_names.len()` of them.
     pub thresholds: Vec<f64>,
     /// Best known score (snapshot or local play); 0 when never played.
@@ -115,6 +117,25 @@ pub struct CustomScenarioDto {
 #[ts(export)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+/// How one subcategory scored under the bench's rule.
+pub struct CustomSubcategoryDto {
+    pub subcategory: String,
+    /// Scenarios that counted toward the rank in this subcategory.
+    #[serde(default)]
+    pub counted: Vec<String>,
+    #[serde(default)]
+    pub tier: u32,
+    #[serde(default)]
+    pub tier_name: Option<String>,
+    /// Subcategory energy (0 when the rule does not use it).
+    #[serde(default)]
+    pub energy: f64,
+}
+
+#[derive(TS)]
+#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 /// A user-defined benchmark: the wire shape both the builder and the read
 /// commands use. `benchmark_id` is 0 for a new bench and negative for saved
 /// ones (custom ids live in the negative space, away from KovaaK's ids).
@@ -123,8 +144,9 @@ pub struct CustomBenchDto {
     pub name: String,
     pub abbreviation: String,
     pub color: String,
-    /// `"all"` (every scenario counts) or `"top_n"`.
-    pub mode: String,
+    /// `"all"` (every scenario), `"top_n"` (top N per subcategory) or
+    /// `"energy"` (harmonic mean of subcategory energies).
+    pub rule: String,
     #[serde(default)]
     pub top_n: u32,
     /// Tier names, worst → best (1–12).
@@ -135,12 +157,18 @@ pub struct CustomBenchDto {
     pub rank_index: u32,
     #[serde(default)]
     pub complete: bool,
+    /// Read-only bench energy (harmonic mean under the energy rule).
+    #[serde(default)]
+    pub energy: f64,
     /// Read-only tier reached, for the card badge.
     #[serde(default)]
     pub rank: Option<RankTier>,
     /// Read-only name of the next tier, when one exists.
     #[serde(default)]
     pub next_rank_name: Option<String>,
+    /// Read-only per-subcategory breakdown.
+    #[serde(default)]
+    pub subcategories: Vec<CustomSubcategoryDto>,
 }
 
 #[derive(TS)]
@@ -1924,7 +1952,7 @@ pub mod commands {
         steam_id: &str,
         row: &CustomBenchRow,
     ) -> Result<CustomBenchDto, String> {
-        let names: Vec<String> = row.scenarios.iter().map(|(s, _, _)| s.clone()).collect();
+        let names: Vec<String> = row.scenarios.iter().map(|s| s.scenario.clone()).collect();
         let scores = state
             .store
             .scenario_scores_by_name(steam_id, &names)
@@ -1946,33 +1974,49 @@ pub mod commands {
         let scenarios = ranked
             .scenarios
             .iter()
-            .zip(row.scenarios.iter())
-            .map(
-                |(state_row, (_scenario, category, thresholds))| CustomScenarioDto {
-                    scenario: state_row.scenario.clone(),
-                    category: category.clone(),
-                    thresholds: thresholds.clone(),
-                    score: state_row.score,
-                    tier: state_row.tier,
-                    tier_name: tier_of(state_row.tier).map(|t| t.name),
-                    next_threshold: state_row.next_threshold,
-                    delta: state_row.delta,
-                },
-            )
+            .map(|state_row| CustomScenarioDto {
+                scenario: state_row.scenario.clone(),
+                category: state_row.category.clone(),
+                subcategory: state_row.subcategory.clone(),
+                thresholds: row
+                    .scenarios
+                    .iter()
+                    .find(|r| r.scenario == state_row.scenario)
+                    .map(|r| r.thresholds.clone())
+                    .unwrap_or_default(),
+                score: state_row.score,
+                tier: state_row.tier,
+                tier_name: tier_of(state_row.tier).map(|t| t.name),
+                next_threshold: state_row.next_threshold,
+                delta: state_row.delta,
+            })
             .collect::<Vec<_>>();
+        let subcategories = ranked
+            .subcategories
+            .iter()
+            .map(|s| CustomSubcategoryDto {
+                subcategory: s.subcategory.clone(),
+                counted: s.counted.clone(),
+                tier: s.tier,
+                tier_name: tier_of(s.tier).map(|t| t.name),
+                energy: s.energy,
+            })
+            .collect();
         Ok(CustomBenchDto {
             benchmark_id: app_id(row.id),
             name: row.name.clone(),
             abbreviation: row.abbreviation.clone(),
             color: row.color.clone(),
-            mode: row.mode.clone(),
+            rule: row.rule.clone(),
             top_n: row.top_n,
             tier_names: row.tier_names.clone(),
             rank_index: ranked.rank,
             complete: ranked.complete,
+            energy: ranked.energy,
             rank: tier_of(ranked.rank),
             next_rank_name: row.tier_names.get(ranked.rank as usize).cloned(),
             scenarios,
+            subcategories,
         })
     }
 
@@ -1983,7 +2027,7 @@ pub mod commands {
             name: dto.name.trim().to_string(),
             abbreviation: dto.abbreviation.trim().to_string(),
             color: dto.color.clone(),
-            mode: dto.mode.clone(),
+            rule: dto.rule.clone(),
             top_n: dto.top_n,
             tier_names: dto.tier_names.clone(),
             scenarios: dto
@@ -1993,11 +2037,12 @@ pub mod commands {
                     // Scenario names are matched against KovaaK's data
                     // verbatim — real names can carry a trailing space, so
                     // never trim here (validation only checks emptiness).
-                    (
-                        s.scenario.clone(),
-                        s.category.clone(),
-                        s.thresholds.clone(),
-                    )
+                    CustomScenarioRow {
+                        scenario: s.scenario.clone(),
+                        category: s.category.clone(),
+                        subcategory: s.subcategory.trim().to_string(),
+                        thresholds: s.thresholds.clone(),
+                    }
                 })
                 .collect(),
         };

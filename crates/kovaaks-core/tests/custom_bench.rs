@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, TimeZone, Utc};
-use kovaaks_core::custom::{rank_custom, validate, MODE_ALL, MODE_TOP_N};
-use kovaaks_core::store::CustomBenchRow;
+use kovaaks_core::custom::{rank_custom, validate, RULE_ALL, RULE_TOP_N};
+use kovaaks_core::store::{CustomBenchRow, CustomScenarioRow};
 use kovaaks_core::{BenchmarkProgress, CategoryProgress, PlayRecord, ScenarioEntry, Store};
 
 static TEMP_SEQ: AtomicU32 = AtomicU32::new(0);
@@ -75,22 +75,27 @@ fn play(scenario_name: &str, at: DateTime<Utc>, score: f64) -> PlayRecord {
     }
 }
 
+fn scenario_row(scenario: &str, subcategory: &str, thresholds: Vec<f64>) -> CustomScenarioRow {
+    CustomScenarioRow {
+        scenario: scenario.into(),
+        category: "Clicking".into(),
+        subcategory: subcategory.into(),
+        thresholds,
+    }
+}
+
 fn bench() -> CustomBenchRow {
     CustomBenchRow {
         id: 0,
         name: "Daily Five".into(),
         abbreviation: "D5".into(),
         color: "#b08d57".into(),
-        mode: MODE_ALL.into(),
+        rule: RULE_ALL.into(),
         top_n: 0,
         tier_names: vec!["Bronze".into(), "Silver".into(), "Gold".into()],
         scenarios: vec![
-            ("Pasu".into(), "Clicking".into(), vec![100.0, 200.0, 300.0]),
-            (
-                "Gridshot".into(),
-                "Clicking".into(),
-                vec![150.0, 250.0, 350.0],
-            ),
+            scenario_row("Pasu", "Main", vec![100.0, 200.0, 300.0]),
+            scenario_row("Gridshot", "Main", vec![150.0, 250.0, 350.0]),
         ],
     }
 }
@@ -109,6 +114,59 @@ fn schema_migrates_to_v5_and_keeps_user_data() {
     cleanup_db(&path);
 }
 
+/// A v5 database (pre-subcategory shape) must upgrade in place: the bench keeps
+/// its id and name, its old `mode` becomes `rule`, and every scenario lands in
+/// a "Main" subcategory so its behaviour is unchanged.
+#[test]
+fn v5_database_migrates_to_subcategories() {
+    let path = temp_db("migrate-v5");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE custom_benchmarks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                steam_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                abbreviation TEXT NOT NULL DEFAULT 'CS',
+                color TEXT NOT NULL DEFAULT '#b08d57',
+                mode TEXT NOT NULL DEFAULT 'all',
+                top_n INTEGER NOT NULL DEFAULT 0,
+                tier_names TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+             );
+             CREATE TABLE custom_bench_scenarios (
+                benchmark_row INTEGER NOT NULL REFERENCES custom_benchmarks(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                scenario TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'Custom',
+                thresholds TEXT NOT NULL,
+                PRIMARY KEY (benchmark_row, scenario)
+             );
+             INSERT INTO custom_benchmarks
+                (steam_id, name, abbreviation, color, mode, top_n, tier_names, created_at, updated_at)
+                VALUES ('76561190000000001', 'Legacy', 'LG', '#b08d57', 'top_n', 2,
+                        '[\"Bronze\",\"Silver\",\"Gold\"]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO custom_bench_scenarios
+                (benchmark_row, position, scenario, category, thresholds)
+                VALUES (1, 0, 'Pasu', 'Clicking', '[100,200,300]');
+             PRAGMA user_version = 5;",
+        )
+        .expect("seed a v5-shaped database");
+    }
+
+    let store = Store::open(&path).expect("open upgrades to v6");
+    let rows = store.custom_benches(SID).expect("list");
+    assert_eq!(rows.len(), 1, "the bench survives the rebuild");
+    assert_eq!(rows[0].name, "Legacy");
+    assert_eq!(rows[0].rule, RULE_TOP_N, "mode becomes rule");
+    assert_eq!(rows[0].top_n, 2);
+    assert_eq!(rows[0].scenarios.len(), 1);
+    assert_eq!(rows[0].scenarios[0].subcategory, "Main");
+    assert_eq!(rows[0].scenarios[0].thresholds, vec![100.0, 200.0, 300.0]);
+    cleanup_db(&path);
+}
+
 #[test]
 fn create_read_update_delete_roundtrip() {
     let path = temp_db("crud");
@@ -122,19 +180,21 @@ fn create_read_update_delete_roundtrip() {
     assert_eq!(saved.name, "Daily Five");
     assert_eq!(saved.tier_names, vec!["Bronze", "Silver", "Gold"]);
     assert_eq!(saved.scenarios.len(), 2);
-    assert_eq!(saved.scenarios[0].0, "Pasu");
-    assert_eq!(saved.scenarios[0].2, vec![100.0, 200.0, 300.0]);
+    assert_eq!(saved.scenarios[0].scenario, "Pasu");
+    assert_eq!(saved.scenarios[0].subcategory, "Main");
+    assert_eq!(saved.scenarios[0].thresholds, vec![100.0, 200.0, 300.0]);
 
     // Update: rename, switch mode, replace the scenario list.
     saved.name = "Nightly Three".into();
-    saved.mode = MODE_TOP_N.into();
+    saved.rule = RULE_TOP_N.into();
     saved.top_n = 2;
-    saved.scenarios = vec![("Pasu".into(), "Clicking".into(), vec![10.0, 20.0, 30.0])];
+    saved.scenarios = vec![scenario_row("Pasu", "Aim", vec![10.0, 20.0, 30.0])];
     assert!(store.update_custom_bench(SID, &saved).expect("update"));
 
     let rows = store.custom_benches(SID).expect("list after update");
     assert_eq!(rows[0].name, "Nightly Three");
-    assert_eq!(rows[0].mode, MODE_TOP_N);
+    assert_eq!(rows[0].rule, RULE_TOP_N);
+    assert_eq!(rows[0].scenarios[0].subcategory, "Aim");
     assert_eq!(rows[0].top_n, 2);
     assert_eq!(rows[0].scenarios.len(), 1, "old rows are replaced");
 
@@ -289,7 +349,7 @@ fn a_saved_bench_scores_from_stored_data() {
             &saved
                 .scenarios
                 .iter()
-                .map(|s| s.0.clone())
+                .map(|s| s.scenario.clone())
                 .collect::<Vec<_>>(),
         )
         .expect("scores");
@@ -305,7 +365,7 @@ fn a_saved_bench_scores_from_stored_data() {
 
     // Lower Gridshot's thresholds so the bench advances — authors stay in control.
     b.id = rowid;
-    b.scenarios[1].2 = vec![50.0, 100.0, 200.0];
+    b.scenarios[1].thresholds = vec![50.0, 100.0, 200.0];
     assert!(store.update_custom_bench(SID, &b).expect("update"));
     let saved = store.custom_benches(SID).expect("list").remove(0);
     let scores = store
