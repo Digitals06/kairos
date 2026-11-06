@@ -12,6 +12,7 @@ import { listen } from '@tauri-apps/api/event'
     rankChanges,
     getSettings,
     setSettings,
+    quitApp,
     getBenchmarkDetail,
     toggleFavorite,
     exportBackup,
@@ -524,7 +525,7 @@ import { listen } from '@tauri-apps/api/event'
                 />
               </label>
               <label class="row">
-                <span>Keep running in the tray<br /><small>Closing the window keeps Kairos fresh in the background while KovaaK's runs; the tray icon restores it. Uncheck to exit like a normal window.</small></span>
+                <span>Keep running in the tray<br /><small>Leave this off and closing the window quits Kairos. Turn it on to keep the app (and its stats watcher) alive in the background when you close; the tray icon restores it, and Quit there always exits.</small></span>
                 <input
                   type="checkbox"
                   checked={closeToTray}
@@ -567,6 +568,9 @@ import { listen } from '@tauri-apps/api/event'
               </button>
               <button class="btn" onclick={() => doExportSeriesCsv()} disabled={exportingCsv}>
                 {exportingCsv ? 'Exporting…' : 'Export scores (CSV)…'}
+              </button>
+              <button class="btn" onclick={() => quitApp()}>
+                Quit Kairos
               </button>
             <div class="theme-row" role="radiogroup" aria-label="Theme">
               <span class="theme-label">Theme</span>

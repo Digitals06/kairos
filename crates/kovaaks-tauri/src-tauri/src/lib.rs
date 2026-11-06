@@ -26,6 +26,8 @@ mod watcher;
 
 /// Meta key: JSON blob of app settings (stats dir override, sync interval).
 const SETTINGS_KEY: &str = "settings";
+/// Settings schema marker; see `AppState::load_settings`.
+const SETTINGS_SCHEMA_KEY: &str = "settings_schema";
 /// Meta key: stats `csv_seen` counter from the last ingest scan.
 const INGEST_SEEN_KEY: &str = "ingest_stats_csv_seen";
 /// Meta key: stats `csv_inserted` counter from the last ingest scan.
@@ -588,7 +590,7 @@ impl Default for AppSettings {
         Self {
             stats_dir: String::new(),
             sync_interval_hours: 6,
-            close_to_tray: true,
+            close_to_tray: false,
             launch_with_kovaaks: true,
             show_global_percentiles: false,
         }
@@ -689,13 +691,46 @@ impl AppState {
     }
 
     /// Settings JSON blob from meta (defaults when absent or corrupt).
+    ///
+    /// Schema 2: close-to-tray became opt-in. Installs from v0.4.0/v0.5.0
+    /// stored `close_to_tray: true` without ever asking, so closing the window
+    /// looked like "the app won't quit". One migration turns that off; the
+    /// setting stays available and whatever the user picks afterwards sticks.
     fn load_settings(&self) -> AppSettings {
-        self.store
+        let mut settings: AppSettings = self
+            .store
             .get_meta(SETTINGS_KEY)
             .ok()
             .flatten()
             .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if self.settings_schema() < 2 {
+            settings.close_to_tray = false;
+            let _ = self.save_settings(&settings);
+            let _ = self.store.set_meta(SETTINGS_SCHEMA_KEY, "2");
+        }
+        settings
+    }
+
+    /// Settings schema version (0 when this install predates the marker).
+    fn settings_schema(&self) -> u32 {
+        self.store
+            .get_meta(SETTINGS_SCHEMA_KEY)
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    }
+
+    /// Persist settings and stamp the current schema.
+    fn save_settings(&self, settings: &AppSettings) -> Result<(), String> {
+        let json = serde_json::to_string(settings).map_err(|e| e.to_string())?;
+        self.store
+            .set_meta(SETTINGS_KEY, &json)
+            .map_err(|e| e.to_string())?;
+        self.store
+            .set_meta(SETTINGS_SCHEMA_KEY, "2")
+            .map_err(|e| e.to_string())
     }
 
     /// Resolve the active stats dir: settings override or default path.
@@ -878,6 +913,13 @@ fn open_url(url: &str) {
 
 pub mod commands {
     use super::*;
+
+    /// Quit the app for real (the tray's Quit goes through the same call).
+    /// Exposed to the UI so a visible "Quit" is always reachable.
+    #[tauri::command]
+    pub fn quit_app(app: tauri::AppHandle) {
+        app.exit(0);
+    }
 
     // ---------------------------------------------------------------------------
     // Commands
@@ -2517,11 +2559,7 @@ pub mod commands {
 
     #[tauri::command]
     pub fn set_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
-        let json = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
-        state
-            .store
-            .set_meta(SETTINGS_KEY, &json)
-            .map_err(|e| e.to_string())
+        state.save_settings(&settings)
     }
     /// Copy a composed report image to the OS clipboard. The webview renders and
     /// rasterizes the report (SVG → canvas); Rust only owns the platform write.
@@ -2647,6 +2685,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::resolve_profile,
             commands::get_profile,
+            commands::quit_app,
             commands::sync_now,
             commands::rank_changes,
             commands::grind_next,

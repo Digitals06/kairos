@@ -18,7 +18,7 @@ If Kairos helps your grind, consider supporting development:
 - **Share a bench** — export it to a small JSON file (or copy it as text) and import someone else's. The file holds the structure only: scenarios, subcategories, thresholds, tier names, rule. Never your scores.
 - **Discord share card** — a 1200×630 card with your week, your level and your benchmarks, ready to copy straight into a chat or save as a PNG.
 - **Global percentiles (opt-in)** — the scenario you're looking at can show its public board position, e.g. `#258 · top 0.7%`. Off by default; the only calls it makes are board sizes, cached for a day.
-- Everything from v0.4.0 stays: tray mode, post-session recaps, GO buttons, the weak-spot strip, keyboard navigation.
+- Fixed since the first v0.5.0 build: the tray menu items (Quit, Show Kairos, Launch KovaaK's) never fired, and closing the window hid the app instead of exiting. Both are fixed; tray mode is now opt-in, and there is a Quit Kairos button in settings.
 
 
 
@@ -62,7 +62,7 @@ If Kairos helps your grind, consider supporting development:
 
 - **Benchmark type filter** — 12 tabs mirroring evxl's own grouping (Mixed, Tracking, Static, Clicking, Ground, Precise, Smooth, Micro, Dynamic, Reactive, Evasive, Switching), multi-select, combined with the name search — plus a **Custom** tab that shows only your own benches. Tag assignments match evxl's live filter, so the Static tab shows only genuinely static benchmarks, Ground catches ground-tracking specialists, and everything unspecialized sits under Mixed.
 - **Search + favorites** — filter the grid by name, pin benchmarks to the top. Pins survive restarts.
-- **Tray mode** — closing the window keeps Kairos in the tray so the stats watcher stays live; restore it from the tray menu, or launch KovaaK's straight from there.
+- **Tray mode (opt-in)** — closing the window exits, like any other app. Turn on *Keep running in the tray* and the X hides Kairos instead, so the stats watcher stays live while KovaaK's runs; the tray icon restores it, and Quit there always exits.
 - **Keyboard-first** — arrows walk the benchmark cards, Enter opens, Esc backs out, f toggles favorites.
 - **Theme picker** — Marble (light), Basalt (dark), or follow the OS. Charts re-palette on the flip.
 - **Backup export** — one click in the settings menu writes your entire history as a JSON file in Documents.

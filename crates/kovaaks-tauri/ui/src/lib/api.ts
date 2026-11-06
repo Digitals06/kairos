@@ -152,6 +152,11 @@ export function setSettings(settings: AppSettings): Promise<void> {
   return invoke('set_settings', { settings })
 }
 
+/** Quit the app for real — same path as the tray's Quit item. */
+export function quitApp(): Promise<void> {
+  return invoke('quit_app')
+}
+
 export function toggleFavorite(benchmarkId: number): Promise<boolean> {
   return invoke('toggle_favorite', { benchmarkId })
 }
