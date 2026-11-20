@@ -13,6 +13,11 @@ scenario: string,
  */
 target: number, 
 /**
+ * The player's best known score (snapshots + local plays) in display
+ * units — the same source as `done`.
+ */
+best: number, 
+/**
  * `YYYY-MM-DD` deadline, or null when the goal has none.
  */
 deadline: string | null, 

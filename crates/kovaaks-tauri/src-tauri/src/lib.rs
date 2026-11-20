@@ -201,6 +201,9 @@ pub struct ScenarioGoalDto {
     pub scenario: String,
     /// Target score in display units.
     pub target: f64,
+    /// The player's best known score (snapshots + local plays) in display
+    /// units — the same source as `done`.
+    pub best: f64,
     /// `YYYY-MM-DD` deadline, or null when the goal has none.
     pub deadline: Option<String>,
     /// The player's best known score (snapshots + local plays) meets the target.
@@ -2105,13 +2108,14 @@ pub mod commands {
         Some((date - chrono::Local::now().date_naive()).num_days())
     }
 
-    /// Wire goal with its computed `done`/`days_left` fields.
+    /// Wire goal with its computed `best`/`done`/`days_left` fields.
     fn goal_dto(goal: kovaaks_core::store::ScenarioGoal, best: f64) -> ScenarioGoalDto {
         ScenarioGoalDto {
             days_left: goal_days_left(goal.deadline.as_deref()),
             done: kovaaks_core::store::goal_crossed(best, goal.target),
             scenario: goal.scenario,
             target: goal.target,
+            best,
             deadline: goal.deadline,
         }
     }
@@ -2232,7 +2236,6 @@ pub mod commands {
     pub async fn grind_overview(state: State<'_, AppState>) -> Result<Vec<GrindChipDto>, String> {
         let state = state.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
-            let __t0 = std::time::Instant::now();
             let steam_id = state
                 .profile()
                 .map_err(|e| e.to_string())?

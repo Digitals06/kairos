@@ -218,8 +218,9 @@
 
   // --- personal scenario goals (v0.6.0) -------------------------------------
   // Keyed by scenario name (goals never inherit across difficulties). The
-  // backend resolves `done`/`days_left`; the row chip uses the displayed
-  // snapshot score for its gap text.
+  // backend resolves `best`/`done`/`days_left`; the row chip's gap text and
+  // `done` flag therefore share one source: the merged all-time best
+  // (snapshots + local plays), not the displayed snapshot score.
   let goalMap = $state<Record<string, ScenarioGoal>>({})
   let goalEditor = $state<{
     scenario: string
@@ -300,9 +301,9 @@
     }
   }
 
-  /** Points from the displayed score up to the target (rounded up). */
-  function goalGap(g: ScenarioGoal, score: number): number {
-    return Math.max(0, Math.ceil(g.target - score))
+  /** Points from the merged all-time best up to the target (rounded up). */
+  function goalGap(g: ScenarioGoal): number {
+    return Math.max(0, Math.ceil(g.target - g.best))
   }
 
   /** "12d left" / "today" / "overdue"; null for goals without a deadline. */
@@ -786,7 +787,7 @@
                         {#if goal.done}
                           goal done
                         {:else}
-                          {goalGap(goal, s.score).toLocaleString()} to goal
+                          {goalGap(goal).toLocaleString()} to goal
                         {/if}
                       </button>
                       {#if !goal.done && deadlineLabel(goal)}
