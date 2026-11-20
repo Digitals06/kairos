@@ -70,6 +70,8 @@ pub fn streaks_from_days(
 pub fn streak_summary(store: &Store, steam_id: &str) -> crate::Result<StreakSummary> {
     let timestamps = store.all_play_dates(steam_id)?;
     let total_plays = timestamps.len() as u32;
+    // Day buckets are UTC by design (one fixed boundary, deterministic tests);
+    // a late-local-evening play counts on its UTC calendar day.
     let days: std::collections::HashSet<chrono::NaiveDate> =
         timestamps.iter().map(|ts| ts.date_naive()).collect();
     let today = chrono::Utc::now().date_naive();

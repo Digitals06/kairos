@@ -1,19 +1,8 @@
 /**
- * Typed invoke() wrappers mirroring the Rust DTOs in
- * `crates/kovaaks-tauri/src-tauri/src/lib.rs` (serde camelCase on the wire).
+ * Typed invoke() wrappers over the Tauri commands. DTO shapes come from the
+ * ts-rs generated bindings in `./bindings` (snake_case on the wire).
  */
 import { invoke } from '@tauri-apps/api/core'
-
-/**
- * PlayerProfile comes from the profile resolution command. Not ts-rs
- * generated: it predates the binding workflow and is UI-owned.
- */
-export interface PlayerProfile {
-  steam_id: string
-  persona: string
-  avatar_url: string
-  country: string
-}
 
 // --- DTO mirrors -----------------------------------------------------------
 // GENERATED at build time from the Rust DTOs by ts-rs (the single adapter
@@ -73,6 +62,8 @@ import type { AppSettings as GenAppSettings } from './bindings/AppSettings'
 export type AppSettings = GenAppSettings
 import type { UpdateStatusDto as GenUpdateStatus } from './bindings/UpdateStatusDto'
 export type UpdateStatus = GenUpdateStatus
+import type { PlayerProfile as GenPlayerProfile } from './bindings/PlayerProfile'
+export type PlayerProfile = GenPlayerProfile
 
 export function resolveProfile(identifier: string): Promise<PlayerProfile> {
   return invoke('resolve_profile', { identifier })

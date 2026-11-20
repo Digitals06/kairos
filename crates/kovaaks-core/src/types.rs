@@ -366,7 +366,8 @@ pub struct BenchmarkDef {
 }
 
 /// A resolved KovaaK's player profile (evxl `/api/steam` response).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct PlayerProfile {
     /// 17-digit SteamID64.
     #[serde(rename = "steam_id", alias = "steamid")]

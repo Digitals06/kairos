@@ -56,7 +56,6 @@ pub fn weekly_report(
     steam_id: &str,
     now: chrono::DateTime<chrono::Utc>,
 ) -> crate::Result<WeeklyReport> {
-    let __t = std::time::Instant::now();
     let since = now - chrono::Duration::days(7);
 
     // Plays inside the week (from the plays table, all scenarios).
@@ -66,18 +65,12 @@ pub fn weekly_report(
         .filter(|ts| **ts >= since)
         .copied()
         .collect();
-    let mut days: std::collections::HashSet<chrono::NaiveDate> =
+    // Day buckets are UTC by design (one fixed boundary, deterministic tests).
+    let days: std::collections::HashSet<chrono::NaiveDate> =
         week_plays.iter().map(|ts| ts.date_naive()).collect();
     let days_played = days.len() as u32;
-    let _ = &mut days;
-    let scenarios_played: u32 = {
-        let mut set: std::collections::HashSet<String> = Default::default();
-        for ts in &week_plays {
-            set.insert(ts.date_naive().to_string());
-        }
-        // Distinct scenarios: approximate via plays scenarios this week.
-        store.plays_scenarios(steam_id)?.len() as u32
-    };
+    // Distinct scenarios: approximate via plays scenarios this week.
+    let scenarios_played: u32 = store.plays_scenarios(steam_id)?.len() as u32;
 
     // Improvements + PB events share ONE series pass per (benchmark, scenario).
     // Bulk loads: every play (854 rows) arrives in ONE query; per-bid history

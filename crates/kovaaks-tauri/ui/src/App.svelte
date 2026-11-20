@@ -400,9 +400,15 @@ import { listen } from '@tauri-apps/api/event'
 
   /** Phase-2 chips: grind-engine summaries arrive after first paint so the
    * grid never queues behind the per-scenario binary searches. */
+  let grindChipsGeneration = 0
   async function loadGrindChips() {
+    // A stale chips payload must never land on cards painted by a newer
+    // overview: bump the generation before the await and drop the merge if
+    // another load started meanwhile (same guard as CustomBenchPanel).
+    const gen = ++grindChipsGeneration
     try {
       const chips = await grindOverview()
+      if (gen !== grindChipsGeneration) return
       const byId = new Map(chips.map((c) => [c.benchmark_id, c]))
       cards = cards.map((card) => ({
         ...card,

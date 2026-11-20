@@ -19,8 +19,6 @@ use crate::AppState;
 pub const UPDATE_CHECKED_AT_KEY: &str = "update_check_at";
 /// Meta key: newest release version (without the tag's `v` prefix).
 pub const UPDATE_LATEST_KEY: &str = "update_latest_version";
-/// GitHub web tag page prefix for a specific release.
-const RELEASE_TAG_URL: &str = "https://github.com/Digitals06/kairos/releases/tag/v";
 /// Deferred so launch traffic (CSV scan, registry check) paints first.
 const DEFERRED_CHECK_DELAY: Duration = Duration::from_secs(10);
 
@@ -135,7 +133,7 @@ pub fn open_release_page(state: State<'_, AppState>) {
         .flatten()
         .filter(|v| !v.trim().is_empty());
     let url = match tag {
-        Some(version) => format!("{RELEASE_TAG_URL}{version}"),
+        Some(version) => kovaaks_core::update_check::release_tag_url(&version),
         None => kovaaks_core::update_check::RELEASES_PAGE.to_string(),
     };
     crate::open_url(&url);

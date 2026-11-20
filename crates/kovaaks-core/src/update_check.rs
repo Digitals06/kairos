@@ -49,6 +49,15 @@ pub fn tag_version(tag: &str) -> Option<String> {
     Some(numeric.to_string())
 }
 
+/// Web page for one specific release, e.g.
+/// `https://github.com/Digitals06/kairos/releases/tag/v0.6.0`.
+///
+/// `version` is a dotted-numeric version without the tag's `v` prefix (the
+/// shape [`tag_version`] returns), so callers never rebuild the repo URL.
+pub fn release_tag_url(version: &str) -> String {
+    format!("https://github.com/Digitals06/kairos/releases/tag/v{version}")
+}
+
 /// True while a stored RFC3339 check timestamp is younger than the cache TTL.
 /// A missing/malformed timestamp is stale (safe default: check again).
 pub fn cache_is_fresh(checked_at: &str, now: DateTime<Utc>) -> bool {
@@ -150,6 +159,14 @@ mod tests {
         assert_eq!(parse_latest_release("{}"), None);
         assert_eq!(parse_latest_release("not json"), None);
         assert_eq!(parse_latest_release(r#"{"tag_name":"nightly"}"#), None);
+    }
+
+    #[test]
+    fn release_tag_url_points_at_the_version_tag() {
+        assert_eq!(
+            release_tag_url("0.6.0"),
+            "https://github.com/Digitals06/kairos/releases/tag/v0.6.0"
+        );
     }
 
     #[test]
