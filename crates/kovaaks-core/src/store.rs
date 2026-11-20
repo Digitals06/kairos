@@ -17,7 +17,7 @@ use crate::error::Result;
 use crate::types::{BenchmarkProgress, PlayRecord, PlayerProfile};
 
 /// Schema version this build writes; `PRAGMA user_version` gates migrations.
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 /// Result of [`Store::record_snapshot`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +103,48 @@ pub struct CustomBenchRow {
     pub tier_names: Vec<String>,
     /// Scenario rows in author order.
     pub scenarios: Vec<CustomScenarioRow>,
+}
+
+/// One personal scenario target (v0.6.0). Keyed by the scenario name verbatim
+/// (custom-bench doctrine: no numeric ids, no inheritance). A deadline, when
+/// present, is a plain `YYYY-MM-DD` date — "by December" is a day, not an
+/// instant.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScenarioGoal {
+    pub scenario: String,
+    pub target: f64,
+    pub deadline: Option<String>,
+}
+
+/// Whether a best score meets a target. A score exactly equal to the target
+/// counts: that is what a target means (>=, not >). Non-finite inputs never
+/// cross.
+pub fn goal_crossed(current_best: f64, goal: f64) -> bool {
+    current_best.is_finite() && goal.is_finite() && current_best >= goal
+}
+
+/// Validate + normalize a goal target; the store is the user-data boundary.
+fn validate_goal_target(target: f64) -> Result<f64> {
+    if !target.is_finite() || target <= 0.0 {
+        return Err(crate::Error::InvalidGoal(
+            "goal target must be a positive number".to_string(),
+        ));
+    }
+    Ok(target)
+}
+
+/// Validate a `YYYY-MM-DD` deadline; blank/absent both mean "no deadline".
+fn normalize_goal_deadline(deadline: Option<&str>) -> Result<Option<String>> {
+    let Some(raw) = deadline else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+        .map_err(|_| crate::Error::InvalidGoal("deadline must be a YYYY-MM-DD date".to_string()))?;
+    Ok(Some(trimmed.to_string()))
 }
 
 /// The SQLite store. Cheap to clone; every method takes `&self` (the rusqlite
@@ -413,6 +455,20 @@ impl Store {
                     params![serde_json::to_string(&colors)?, id],
                 )?;
             }
+        }
+        if version < 9 {
+            // v9: personal per-scenario targets (v0.6.0). User data, keyed by
+            // the scenario name verbatim (custom-bench doctrine). Purely
+            // additive: no existing table changes.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS scenario_goals (
+                    steam_id TEXT NOT NULL,
+                    scenario TEXT NOT NULL,
+                    target   REAL NOT NULL,
+                    deadline TEXT NULL,
+                    PRIMARY KEY (steam_id, scenario)
+                 );",
+            )?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Self {
@@ -1023,6 +1079,95 @@ impl Store {
         Ok(out)
     }
 
+    // ----- personal scenario goals (v0.6.0) -------------------------------
+
+    /// Set (or overwrite) one scenario's personal target. `deadline` is a
+    /// `YYYY-MM-DD` date or `None`; blank is treated as `None`. The store is
+    /// the user-data boundary, so target/deadline are validated here.
+    pub fn set_scenario_goal(
+        &self,
+        steam_id: &str,
+        scenario: &str,
+        target: f64,
+        deadline: Option<&str>,
+    ) -> Result<()> {
+        let scenario = scenario.trim();
+        if scenario.is_empty() {
+            return Err(crate::Error::InvalidGoal(
+                "scenario name must not be empty".to_string(),
+            ));
+        }
+        let target = validate_goal_target(target)?;
+        let deadline = normalize_goal_deadline(deadline)?;
+        let conn = self.lock();
+        conn.execute(
+            "INSERT INTO scenario_goals (steam_id, scenario, target, deadline)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(steam_id, scenario)
+             DO UPDATE SET target = excluded.target, deadline = excluded.deadline",
+            params![steam_id, scenario, target, deadline],
+        )?;
+        Ok(())
+    }
+
+    /// Remove one scenario's target. Returns whether a row was removed.
+    pub fn clear_scenario_goal(&self, steam_id: &str, scenario: &str) -> Result<bool> {
+        let conn = self.lock();
+        let n = conn.execute(
+            "DELETE FROM scenario_goals WHERE steam_id = ?1 AND scenario = ?2",
+            params![steam_id, scenario.trim()],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Every target of one player, ordered by scenario name.
+    pub fn scenario_goals(&self, steam_id: &str) -> Result<Vec<ScenarioGoal>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare(
+            "SELECT scenario, target, deadline FROM scenario_goals
+             WHERE steam_id = ?1 ORDER BY scenario",
+        )?;
+        let rows = stmt
+            .query_map(params![steam_id], |row| {
+                Ok(ScenarioGoal {
+                    scenario: row.get(0)?,
+                    target: row.get(1)?,
+                    deadline: row.get(2)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Best score known for one scenario strictly before `before`: the higher
+    /// of the all-time snapshot high (snapshots are high-water marks, so they
+    /// always count as prior knowledge) and the best play before that instant.
+    /// Used to tell a fresh goal crossing from an already-reached goal.
+    pub fn scenario_best_before(
+        &self,
+        steam_id: &str,
+        scenario: &str,
+        before: DateTime<Utc>,
+    ) -> Result<f64> {
+        let conn = self.lock();
+        let snapshot_best: f64 = conn.query_row(
+            "SELECT COALESCE(MAX(ss.score), 0)
+             FROM scenario_scores ss
+             JOIN snapshots s ON s.id = ss.snapshot_id
+             WHERE s.steam_id = ?1 AND ss.scenario = ?2",
+            params![steam_id, scenario],
+            |row| row.get(0),
+        )?;
+        let play_best: f64 = conn.query_row(
+            "SELECT COALESCE(MAX(score), 0)
+             FROM plays
+             WHERE steam_id = ?1 AND scenario = ?2 AND played_at < ?3",
+            params![steam_id, scenario, before.to_rfc3339()],
+            |row| row.get(0),
+        )?;
+        Ok(snapshot_best.max(play_best))
+    }
+
     /// Every scenario the player can build a custom bench from: distinct names
     /// from snapshots and local plays. Snapshot names carry the category the
     /// benchmark author used; play-only names get an empty category.
@@ -1119,6 +1264,7 @@ impl Store {
             "benchmarks_playing",
             "custom_benchmarks",
             "custom_bench_scenarios",
+            "scenario_goals",
             "meta",
         ];
         let mut out = serde_json::Map::new();

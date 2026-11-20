@@ -109,6 +109,8 @@ export type ExportBench = GenExportBench
 import type { ImportBenchDto as GenImportBench } from './bindings/ImportBenchDto'
 import type { ScenarioGlobalDto as GenScenarioGlobal } from './bindings/ScenarioGlobalDto'
 export type ScenarioGlobal = GenScenarioGlobal
+import type { ScenarioGoalDto as GenScenarioGoal } from './bindings/ScenarioGoalDto'
+export type ScenarioGoal = GenScenarioGoal
 export type ImportBench = GenImportBench
 export type CustomBench = GenCustomBench
 import type { CustomScenarioDto as GenCustomScenario } from './bindings/CustomScenarioDto'
@@ -238,4 +240,25 @@ export function saveReportPng(bytes: Uint8Array): Promise<string> {
 /** Global board position for a scenario (null when the setting is off). */
 export function scenarioGlobal(scenario: string): Promise<ScenarioGlobal | null> {
   return invoke('scenario_global', { scenario })
+}
+
+// --- personal scenario goals (v0.6.0) --------------------------------------
+
+/** Every target of the connected player, with done/days_left resolved. */
+export function goals(): Promise<ScenarioGoal[]> {
+  return invoke('goals')
+}
+
+/** Set or overwrite one scenario target. Deadline is `YYYY-MM-DD` or null. */
+export function setGoal(
+  scenario: string,
+  target: number,
+  deadline: string | null,
+): Promise<ScenarioGoal> {
+  return invoke('set_goal', { scenario, target, deadline })
+}
+
+/** Remove one scenario target; returns whether a goal existed. */
+export function clearGoal(scenario: string): Promise<boolean> {
+  return invoke('clear_goal', { scenario })
 }

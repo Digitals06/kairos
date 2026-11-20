@@ -121,7 +121,7 @@ fn open_creates_schema_v1_and_reopen_preserves_data() {
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert_eq!(
-        version, 8,
+        version, 9,
         "migration must set user_version to current schema"
     );
     for table in [
@@ -131,6 +131,7 @@ fn open_creates_schema_v1_and_reopen_preserves_data() {
         "scenario_scores",
         "plays",
         "meta",
+        "scenario_goals",
     ] {
         let n: i64 = conn
             .query_row(
@@ -685,6 +686,219 @@ fn scenario_global_cache_roundtrips_and_ranks_come_from_the_newest_snapshot() {
     assert_eq!(
         store.global_total("VT Pasu").expect("cached").unwrap().0,
         120_000
+    );
+    cleanup_db(&path);
+}
+
+// ---------- scenario goals (v0.6.0) ----------
+
+#[test]
+fn scenario_goals_upsert_overwrite_list_and_clear() {
+    let path = temp_db("goals");
+    let store = Store::open(&path).expect("open store");
+    store
+        .set_scenario_goal(SID, "VT Pasu Novice S5", 720.0, Some("2026-12-01"))
+        .expect("set pasu goal");
+    store
+        .set_scenario_goal(SID, "VT Noviceaj Gridshot S5", 1200.0, None)
+        .expect("set gridshot goal");
+    let goals = store.scenario_goals(SID).expect("list goals");
+    assert_eq!(goals.len(), 2);
+    let pasu = goals
+        .iter()
+        .find(|g| g.scenario == "VT Pasu Novice S5")
+        .expect("pasu goal");
+    assert_eq!(pasu.target, 720.0);
+    assert_eq!(pasu.deadline.as_deref(), Some("2026-12-01"));
+
+    // Upsert, not duplicate: the latest target/deadline wins.
+    store
+        .set_scenario_goal(SID, "VT Pasu Novice S5", 750.0, Some("2026-12-15"))
+        .expect("overwrite pasu goal");
+    let goals = store.scenario_goals(SID).expect("relist goals");
+    assert_eq!(goals.len(), 2, "same scenario must stay one row");
+    let pasu = goals
+        .iter()
+        .find(|g| g.scenario == "VT Pasu Novice S5")
+        .expect("pasu goal");
+    assert_eq!(pasu.target, 750.0, "latest target must win");
+    assert_eq!(pasu.deadline.as_deref(), Some("2026-12-15"));
+
+    // Clearing is scoped to one scenario and reports whether a row existed.
+    assert!(store
+        .clear_scenario_goal(SID, "VT Pasu Novice S5")
+        .expect("clear"));
+    assert!(!store
+        .clear_scenario_goal(SID, "VT Pasu Novice S5")
+        .expect("second clear"));
+    assert_eq!(store.scenario_goals(SID).expect("after clear").len(), 1);
+
+    // Goals are per player, keyed by name with no inheritance.
+    assert!(store
+        .scenario_goals("76561190000000000")
+        .expect("other player")
+        .is_empty());
+    cleanup_db(&path);
+}
+
+#[test]
+fn scenario_goal_rejects_invalid_targets_and_deadlines() {
+    let path = temp_db("goals-validate");
+    let store = Store::open(&path).expect("open store");
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(
+            store.set_scenario_goal(SID, "VT Pasu", bad, None).is_err(),
+            "target {bad} must be rejected"
+        );
+    }
+    assert!(
+        store.set_scenario_goal(SID, "   ", 700.0, None).is_err(),
+        "blank scenario must be rejected"
+    );
+    assert!(
+        store
+            .set_scenario_goal(SID, "VT Pasu", 700.0, Some("December"))
+            .is_err(),
+        "a non-date deadline must be rejected"
+    );
+    assert!(
+        store.scenario_goals(SID).expect("list").is_empty(),
+        "rejected goals must not be stored"
+    );
+
+    store
+        .set_scenario_goal(SID, "VT Pasu", 700.0, Some("2026-12-01"))
+        .expect("valid goal");
+    // An empty deadline string means "no deadline", not an invalid date.
+    store
+        .set_scenario_goal(SID, "VT Pasu", 700.0, Some("  "))
+        .expect("blank deadline is none");
+    let goals = store.scenario_goals(SID).expect("list");
+    assert_eq!(goals.len(), 1);
+    assert_eq!(goals[0].deadline, None);
+    cleanup_db(&path);
+}
+
+#[test]
+fn migration_from_v8_adds_scenario_goals_table() {
+    let path = temp_db("goals-migrate");
+    {
+        let store = Store::open(&path).expect("open store");
+        store.set_meta("profile", SID).expect("set meta");
+    }
+    // Simulate a v8 install: no goals table, user_version 8.
+    {
+        let conn = rusqlite::Connection::open(&path).expect("raw open");
+        conn.execute_batch("DROP TABLE scenario_goals; PRAGMA user_version = 8;")
+            .expect("rewind to v8");
+        let n: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='scenario_goals'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 0, "v8 fixture must not have the goals table");
+    }
+    let store = Store::open(&path).expect("migrate v8 -> v9");
+    assert_eq!(
+        store.get_meta("profile").expect("meta").as_deref(),
+        Some(SID),
+        "migration must preserve existing user data"
+    );
+    {
+        let conn = rusqlite::Connection::open(&path).expect("raw open");
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 9, "migration must stamp v9");
+        let n: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='scenario_goals'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "v9 must create scenario_goals");
+    }
+    // The migrated table is usable straight away.
+    store
+        .set_scenario_goal(SID, "VT Pasu", 720.0, None)
+        .expect("set after migration");
+    assert_eq!(store.scenario_goals(SID).expect("list").len(), 1);
+    cleanup_db(&path);
+}
+
+#[test]
+fn goal_crossed_treats_an_exact_target_as_reached() {
+    use kovaaks_core::store::goal_crossed;
+    assert!(!goal_crossed(719.9, 720.0), "below target is not reached");
+    assert!(goal_crossed(720.0, 720.0), "equal to target is reached");
+    assert!(goal_crossed(720.1, 720.0), "above target is reached");
+    assert!(!goal_crossed(f64::NAN, 720.0), "NaN never crosses");
+    assert!(!goal_crossed(720.0, f64::NAN), "NaN target never crosses");
+}
+
+#[test]
+fn scenario_best_before_merges_snapshots_and_older_plays() {
+    let path = temp_db("goals-best-before");
+    let store = Store::open(&path).expect("open store");
+    store
+        .record_snapshot(
+            SID,
+            459,
+            &progress(
+                700.0,
+                3,
+                vec![(
+                    "Tracking",
+                    category(700.0, 3, vec![("VT Pasu", scenario(700.0, 10, 3))]),
+                )],
+            ),
+            ts(1_700_000_000),
+        )
+        .expect("snapshot");
+    store
+        .record_play(
+            SID,
+            &play("VT Pasu", ts(1_700_000_100), 710.0, 100, 240.0),
+            r"C:\stats\pasu-710.csv",
+        )
+        .expect("play 710");
+    store
+        .record_play(
+            SID,
+            &play("VT Pasu", ts(1_700_000_200), 730.0, 100, 240.0),
+            r"C:\stats\pasu-730.csv",
+        )
+        .expect("play 730");
+
+    // Before the batch: the older play's best, which still beats the snapshot.
+    assert_eq!(
+        store
+            .scenario_best_before(SID, "VT Pasu", ts(1_700_000_150))
+            .expect("best before"),
+        710.0
+    );
+    // After both plays: the newest high.
+    assert_eq!(
+        store
+            .scenario_best_before(SID, "VT Pasu", ts(1_700_000_300))
+            .expect("best after"),
+        730.0
+    );
+    // Snapshots are historical high-water marks and always count as prior.
+    assert_eq!(
+        store
+            .scenario_best_before(SID, "VT Pasu", ts(1_600_000_000))
+            .expect("snapshot prior"),
+        700.0
+    );
+    assert_eq!(
+        store
+            .scenario_best_before(SID, "Never Played", ts(1_700_000_300))
+            .expect("unknown"),
+        0.0
     );
     cleanup_db(&path);
 }

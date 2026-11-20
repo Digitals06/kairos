@@ -1,6 +1,6 @@
 <script lang="ts">
   import Chart from 'chart.js/auto'
-  import { getBenchmarkDetail, grindNext, launchBenchmark, launchScenario, reconcile, scenarioGlobal, type BenchmarkDetail, type GrindNext, type ScenarioGlobal } from '../lib/api'
+  import { clearGoal, getBenchmarkDetail, goals, grindNext, launchBenchmark, launchScenario, reconcile, scenarioGlobal, setGoal, type BenchmarkDetail, type GrindNext, type ScenarioGlobal, type ScenarioGoal } from '../lib/api'
   // DTO type mirrors live in the generated bindings directory.
   import type { ReconcileDto } from './bindings/ReconcileDto'
   import RankBadge from './RankBadge.svelte'
@@ -215,6 +215,103 @@
   // Reconcile chip: local plays newer than the last API snapshot (unranked
   // activity). Hidden while the snapshot is current.
   let pending = $state<ReconcileDto | null>(null)
+
+  // --- personal scenario goals (v0.6.0) -------------------------------------
+  // Keyed by scenario name (goals never inherit across difficulties). The
+  // backend resolves `done`/`days_left`; the row chip uses the displayed
+  // snapshot score for its gap text.
+  let goalMap = $state<Record<string, ScenarioGoal>>({})
+  let goalEditor = $state<{
+    scenario: string
+    target: string
+    deadline: string
+    error: string
+  } | null>(null)
+  let goalSaving = $state(false)
+
+  async function loadGoals(): Promise<void> {
+    try {
+      const list = await goals()
+      goalMap = Object.fromEntries(list.map((g) => [g.scenario, g]))
+    } catch {
+      goalMap = {}
+    }
+  }
+
+  $effect(() => {
+    // Reload whenever the benchmark (and therefore the scenario set) changes.
+    benchmarkId
+    void loadGoals()
+  })
+
+  function openGoal(scenario: string): void {
+    const existing = goalMap[scenario]
+    goalEditor = {
+      scenario,
+      target: existing ? String(existing.target) : '',
+      deadline: existing?.deadline ?? '',
+      error: '',
+    }
+  }
+
+  function closeGoalEditor(): void {
+    if (!goalSaving) goalEditor = null
+  }
+
+  async function saveGoal(): Promise<void> {
+    const editor = goalEditor
+    if (!editor || goalSaving) return
+    const target = Number(editor.target)
+    if (!Number.isFinite(target) || target <= 0) {
+      editor.error = 'Enter a target score above zero.'
+      return
+    }
+    const deadline = editor.deadline.trim()
+    if (deadline && !/^\d{4}-\d{2}-\d{2}$/.test(deadline)) {
+      editor.error = 'Deadline must look like 2026-12-01.'
+      return
+    }
+    goalSaving = true
+    try {
+      const saved = await setGoal(editor.scenario, target, deadline || null)
+      goalMap = { ...goalMap, [saved.scenario]: saved }
+      goalEditor = null
+    } catch (err) {
+      editor.error = String(err)
+    } finally {
+      goalSaving = false
+    }
+  }
+
+  async function removeGoal(): Promise<void> {
+    const editor = goalEditor
+    if (!editor || goalSaving) return
+    goalSaving = true
+    try {
+      await clearGoal(editor.scenario)
+      const next = { ...goalMap }
+      delete next[editor.scenario]
+      goalMap = next
+      goalEditor = null
+    } catch (err) {
+      editor.error = String(err)
+    } finally {
+      goalSaving = false
+    }
+  }
+
+  /** Points from the displayed score up to the target (rounded up). */
+  function goalGap(g: ScenarioGoal, score: number): number {
+    return Math.max(0, Math.ceil(g.target - score))
+  }
+
+  /** "12d left" / "today" / "overdue"; null for goals without a deadline. */
+  function deadlineLabel(g: ScenarioGoal): string | null {
+    if (!g.deadline || g.days_left === null) return null
+    if (g.days_left < 0) return 'overdue'
+    if (g.days_left === 0) return 'today'
+    return `${g.days_left}d left`
+  }
 
   // "What to grind next": engine-computed per-scenario targets for this benchmark.
   $effect(() => {
@@ -617,6 +714,7 @@
                 <th class="scenario-col">Scenario</th>
                 <th class="score-col">Score</th>
                 <th class="lb-col r num">#</th>
+                <th class="goal-col">Goal</th>
                 {#each detail.rank_tiers as tier, i (tier.name)}
                   <th
                     class="rank-col num"
@@ -634,6 +732,7 @@
               {#each sortedScenarios as s (s.scenario)}
                 {@const achieved = achievedIdx(s)}
                 {@const top = thresholdFor(s.rank_maxes, s.rank_maxes.length - 1)}
+                {@const goal = goalMap[s.scenario]}
                 <tr>
                   <td class="scenario-col">
                     <span class="scenario-line">
@@ -674,6 +773,38 @@
                       <span class="muted">—</span>
                     {/if}
                   </td>
+                  <td class="goal-col">
+                    {#if goal}
+                      <button
+                        class="goal-chip"
+                        class:done={goal.done}
+                        title={goal.done
+                          ? `Goal reached — target ${goal.target.toLocaleString()}`
+                          : `Edit goal — target ${goal.target.toLocaleString()}`}
+                        onclick={() => openGoal(s.scenario)}
+                      >
+                        {#if goal.done}
+                          goal done
+                        {:else}
+                          {goalGap(goal, s.score).toLocaleString()} to goal
+                        {/if}
+                      </button>
+                      {#if !goal.done && deadlineLabel(goal)}
+                        <span
+                          class="goal-days"
+                          class:overdue={goal.days_left !== null && goal.days_left < 0}
+                        >
+                          {deadlineLabel(goal)}
+                        </span>
+                      {/if}
+                    {:else}
+                      <button
+                        class="goal-add"
+                        title="Set a personal target for this scenario"
+                        onclick={() => openGoal(s.scenario)}
+                      >+ goal</button>
+                    {/if}
+                  </td>
                   {#each detail.rank_tiers as tier, i (tier.name)}
                     {@const thr = thresholdFor(s.rank_maxes, i)}
                     {@const isAchieved = achieved >= i}
@@ -701,12 +832,81 @@
 
   {#if grind && !grind.complete && (grind.targets.length > 0 || grind.plan.length > 0)}
     {@const nextTarget = grind.targets.length > 0 ? grind.targets[0] : grind.plan[0]}
+    {@const nextGoal = goalMap[nextTarget.scenario]}
     <footer class="weakspot panel">
       <span class="weak-get">Next up</span>
       <span class="weak-name">{nextTarget.scenario}</span>
+      {#if nextGoal}
+        {@const nextDeadline = deadlineLabel(nextGoal)}
+        <span
+          class="weak-goal"
+          class:done={nextGoal.done}
+          class:overdue={nextGoal.days_left !== null && nextGoal.days_left < 0}
+        >
+          {#if nextGoal.done}
+            goal done
+          {:else}
+            goal {nextGoal.target.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            {#if nextDeadline}· {nextDeadline}{/if}
+          {/if}
+        </span>
+      {/if}
       <span class="num weak-gap">+{nextTarget.delta.toLocaleString()} → {grind.nextRank}</span>
       <button class="grind-go" title="Launch this scenario in KovaaK's" onclick={() => launchScenario(nextTarget.scenario)}>GO</button>
     </footer>
+  {/if}
+
+  {#if goalEditor}
+    <div class="goal-modal-wrap">
+      <button
+        class="goal-backdrop"
+        aria-label="Close goal editor"
+        onclick={closeGoalEditor}
+      ></button>
+      <div
+        class="goal-modal panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="goal-modal-title"
+      >
+        <h3 id="goal-modal-title">Goal — {goalEditor.scenario}</h3>
+        <label class="goal-field">
+          <span>Target score</span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={goalEditor.target}
+            oninput={(e) => goalEditor && (goalEditor.target = e.currentTarget.value)}
+          />
+        </label>
+        <label class="goal-field">
+          <span>Deadline <em class="muted">(optional)</em></span>
+          <input
+            type="date"
+            value={goalEditor.deadline}
+            oninput={(e) => goalEditor && (goalEditor.deadline = e.currentTarget.value)}
+          />
+        </label>
+        {#if goalEditor.error}
+          <p class="goal-error">{goalEditor.error}</p>
+        {/if}
+        <div class="goal-actions">
+          {#if goalMap[goalEditor.scenario]}
+            <button class="btn btn-small goal-clear" disabled={goalSaving} onclick={removeGoal}>
+              Clear goal
+            </button>
+          {/if}
+          <span class="goal-spacer"></span>
+          <button class="btn btn-small" disabled={goalSaving} onclick={closeGoalEditor}>
+            Cancel
+          </button>
+          <button class="btn btn-small btn-accent" disabled={goalSaving} onclick={saveGoal}>
+            Save goal
+          </button>
+        </div>
+      </div>
+    </div>
   {/if}
 </div>
 
@@ -742,6 +942,138 @@
   }
   .weakspot .weak-gap {
     margin-left: auto;
+    color: var(--accent);
+  }
+
+  /* --- personal scenario goals (v0.6.0) ---------------------------------- */
+  .goal-col {
+    min-width: 118px;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .goal-chip {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 9px;
+    font: inherit;
+    font-size: 11px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .goal-chip:hover {
+    border-color: var(--accent-2);
+    color: var(--accent-2);
+  }
+  /* A reached goal goes quiet: success tint, no urgency. */
+  .goal-chip.done {
+    color: var(--success);
+    border-color: color-mix(in srgb, var(--success) 45%, transparent);
+    opacity: 0.8;
+  }
+
+  .goal-days {
+    display: block;
+    margin-top: 2px;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .goal-days.overdue {
+    color: var(--accent);
+  }
+
+  .goal-add {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-size: 11px;
+    color: var(--muted);
+    cursor: pointer;
+    opacity: 0.65;
+  }
+  .goal-add:hover {
+    color: var(--accent-2);
+    opacity: 1;
+  }
+
+  .weak-goal {
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .weak-goal.done {
+    color: var(--success);
+  }
+  .weak-goal.overdue {
+    color: var(--accent);
+  }
+
+  .goal-modal-wrap {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .goal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    border: none;
+    cursor: default;
+  }
+  .goal-modal {
+    position: relative;
+    width: min(360px, 90vw);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px;
+  }
+  .goal-modal h3 {
+    margin: 0;
+    font-size: 15px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .goal-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .goal-field input {
+    background: var(--bg, #0a0e14);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 9px;
+    font: inherit;
+  }
+  .goal-field input:focus {
+    outline: none;
+    border-color: var(--accent-2);
+    box-shadow: var(--glow-accent-2);
+  }
+  .goal-error {
+    margin: 0;
+    font-size: 12px;
+    color: var(--accent);
+  }
+  .goal-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .goal-spacer {
+    flex: 1;
+  }
+  .goal-clear {
     color: var(--accent);
   }
 </style>

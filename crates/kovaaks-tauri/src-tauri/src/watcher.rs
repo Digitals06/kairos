@@ -14,6 +14,9 @@ use std::time::{Duration, SystemTime};
 
 use tauri::Emitter;
 
+use kovaaks_core::store::{goal_crossed, ScenarioGoal};
+use kovaaks_core::PlayRecord;
+
 use crate::{run_csv_scan, run_smart_sync, AppState};
 
 /// Poll cadence. The mtime/count signature doubles as the debounce: KovaaK's
@@ -61,6 +64,56 @@ fn session_closed(last_play_ts: Option<i64>, now_ts: i64, gap: i64, session_acti
         return false;
     };
     now_ts >= last.saturating_add(gap)
+}
+
+/// One personal goal crossed by an ingest batch (v0.6.0).
+#[derive(Debug, Clone, PartialEq)]
+struct GoalCrossing {
+    scenario: String,
+    score: f64,
+    target: f64,
+}
+
+/// Which goals this batch newly crossed. A crossing is a batch high that meets
+/// the target while the prior best (snapshot high + older plays) did not, so an
+/// already-reached goal never re-toasts. Pure; `prior_best` resolves the score
+/// known before the batch's earliest play for that scenario.
+fn batch_goal_crossings(
+    batch: &[PlayRecord],
+    goals: &[ScenarioGoal],
+    prior_best: impl Fn(&str, chrono::DateTime<chrono::Utc>) -> f64,
+) -> Vec<GoalCrossing> {
+    // Per scenario: earliest batch play (the "before" cut) + batch high.
+    let mut per_scenario: std::collections::BTreeMap<&str, (chrono::DateTime<chrono::Utc>, f64)> =
+        std::collections::BTreeMap::new();
+    for play in batch {
+        let entry = per_scenario
+            .entry(play.scenario.as_str())
+            .or_insert((play.played_at, play.score));
+        if play.played_at < entry.0 {
+            entry.0 = play.played_at;
+        }
+        if play.score > entry.1 {
+            entry.1 = play.score;
+        }
+    }
+    goals
+        .iter()
+        .filter_map(|goal| {
+            let (earliest, high) = *per_scenario.get(goal.scenario.as_str())?;
+            if goal_crossed(high, goal.target)
+                && !goal_crossed(prior_best(&goal.scenario, earliest), goal.target)
+            {
+                Some(GoalCrossing {
+                    scenario: goal.scenario.clone(),
+                    score: high,
+                    target: goal.target,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// Signature of the stats dir: (file count, newest mtime). `None` when the
@@ -210,6 +263,33 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
                         });
                     }
                     let _ = app.emit("local-plays-updated", payload);
+                    // Personal goals: a play that newly crosses its target
+                    // emits one `goal-reached` toast event (the UI listener
+                    // only shows a toast; it never rebuilds the overview).
+                    if let Some(sid) = state.profile().ok().flatten().map(|p| p.steam_id) {
+                        let goals = state.store.scenario_goals(&sid).unwrap_or_default();
+                        if !goals.is_empty() {
+                            let batch =
+                                state.store.latest_plays(&sid, inserted).unwrap_or_default();
+                            let crossings =
+                                batch_goal_crossings(&batch, &goals, |scenario, before| {
+                                    state
+                                        .store
+                                        .scenario_best_before(&sid, scenario, before)
+                                        .unwrap_or(0.0)
+                                });
+                            for crossing in crossings {
+                                let _ = app.emit(
+                                    "goal-reached",
+                                    serde_json::json!({
+                                        "scenario": crossing.scenario,
+                                        "score": crossing.score,
+                                        "target": crossing.target,
+                                    }),
+                                );
+                            }
+                        }
+                    }
                     // Arm the quiet post-session sync (re-arms after every
                     // new batch; the next idle gap fires exactly one sync).
                     if let Some(ts) = newest_ingested {
@@ -323,5 +403,75 @@ mod tests {
         assert!(!session_closed(Some(last), now, GAP, false));
         // ...a later play re-arms it.
         assert!(session_closed(Some(now), now + GAP, GAP, true));
+    }
+
+    fn batch_play(scenario: &str, secs: i64, score: f64) -> kovaaks_core::PlayRecord {
+        use chrono::TimeZone;
+        kovaaks_core::PlayRecord {
+            scenario: scenario.to_string(),
+            played_at: chrono::Utc.timestamp_opt(secs, 0).single().expect("ts"),
+            score,
+            hit_count: 100,
+            avg_fps: 240.0,
+            source: kovaaks_core::types::PlaySource::Csv,
+        }
+    }
+
+    fn goal(scenario: &str, target: f64) -> kovaaks_core::store::ScenarioGoal {
+        kovaaks_core::store::ScenarioGoal {
+            scenario: scenario.to_string(),
+            target,
+            deadline: None,
+        }
+    }
+
+    /// A batch that pushes a scenario over its target is a crossing once.
+    #[test]
+    fn batch_goal_crossings_flags_a_newly_crossed_target() {
+        let batch = vec![
+            batch_play("VT Pasu", 1_700_000_100, 710.0),
+            batch_play("VT Pasu", 1_700_000_200, 725.0),
+            batch_play("Gridshot", 1_700_000_300, 1100.0),
+        ];
+        let goals = vec![goal("VT Pasu", 720.0), goal("Gridshot", 1200.0)];
+        let crossings = batch_goal_crossings(&batch, &goals, |scenario, _| {
+            if scenario == "VT Pasu" {
+                700.0
+            } else {
+                0.0
+            }
+        });
+        assert_eq!(
+            crossings,
+            vec![GoalCrossing {
+                scenario: "VT Pasu".to_string(),
+                score: 725.0,
+                target: 720.0,
+            }],
+            "only Pasu crossed, and only once despite two plays"
+        );
+    }
+
+    /// A goal that was already reached before this batch must not re-toast.
+    #[test]
+    fn batch_goal_crossings_ignores_already_reached_goals() {
+        let batch = vec![batch_play("VT Pasu", 1_700_000_200, 725.0)];
+        let goals = vec![goal("VT Pasu", 720.0)];
+        let crossings = batch_goal_crossings(&batch, &goals, |_, _| 730.0);
+        assert!(crossings.is_empty());
+    }
+
+    /// A score exactly equal to the target crosses (a target means "reach at
+    /// least this"), and the batch high is what gets reported.
+    #[test]
+    fn batch_goal_crossings_accepts_exact_equality() {
+        let batch = vec![
+            batch_play("VT Pasu", 1_700_000_100, 700.0),
+            batch_play("VT Pasu", 1_700_000_200, 720.0),
+        ];
+        let goals = vec![goal("VT Pasu", 720.0)];
+        let crossings = batch_goal_crossings(&batch, &goals, |_, _| 700.0);
+        assert_eq!(crossings.len(), 1);
+        assert_eq!(crossings[0].score, 720.0);
     }
 }

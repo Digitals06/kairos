@@ -207,7 +207,7 @@ fn v7_database_gains_tier_colors_and_keeps_user_data() {
         .expect("seed a v7-shaped database");
     }
 
-    let store = Store::open(&path).expect("open upgrades to v8");
+    let store = Store::open(&path).expect("open upgrades to v9");
     let rows = store.custom_benches(SID).expect("list");
     assert_eq!(rows.len(), 1, "the bench survives the additive migration");
     assert_eq!(rows[0].name, "Legacy");
@@ -222,7 +222,7 @@ fn v7_database_gains_tier_colors_and_keeps_user_data() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     drop(conn);
     cleanup_db(&path);
 }

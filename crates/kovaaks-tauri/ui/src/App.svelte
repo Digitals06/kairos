@@ -122,6 +122,19 @@ import { listen } from '@tauri-apps/api/event'
     return () => unlisten?.()
   })
 
+  // A local play crossed a personal target (v0.6.0): plain-word toast only —
+  // the detail/goals surfaces refresh on their own next load.
+  $effect(() => {
+    let unlisten: (() => void) | undefined
+    listen<{ scenario: string; score: number; target: number }>('goal-reached', (e) => {
+      const g = e.payload
+      showToast(
+        `Goal reached: ${Math.round(g.score)} on ${g.scenario} — target was ${Math.round(g.target)}`,
+      )
+    }).then((fn) => (unlisten = fn))
+    return () => unlisten?.()
+  })
+
   function refreshLastSynced() {
     ingestStatus()
       .then((s) => (lastSyncedAt = s.last_synced_at))

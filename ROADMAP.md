@@ -172,7 +172,7 @@ easing/shadow tokens stay cherry-picked by hand.
 - [x] Streak calendar: the weekly torch strip expanded to a month heatmap
 - [x] In-app updater: a "new version available" chip via the GitHub releases
       API — read-only check, off-switch in settings, no auto-install
-- [ ] Scenario goals: a personal target per scenario ("720 on Pasu by
+- [x] Scenario goals: a personal target per scenario ("720 on Pasu by
       December") with the countdown on the weak-spot strip
 
 ## Later candidates (unscoped)

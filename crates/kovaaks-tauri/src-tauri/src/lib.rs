@@ -198,6 +198,25 @@ pub struct ScenarioGlobalDto {
 #[ts(export)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
+/// One personal scenario target (v0.6.0) with its computed state.
+pub struct ScenarioGoalDto {
+    /// Scenario name, verbatim (goals never inherit across difficulties).
+    pub scenario: String,
+    /// Target score in display units.
+    pub target: f64,
+    /// `YYYY-MM-DD` deadline, or null when the goal has none.
+    pub deadline: Option<String>,
+    /// The player's best known score (snapshots + local plays) meets the target.
+    pub done: bool,
+    /// Whole days from today to the deadline (negative = overdue); null when
+    /// no deadline is set.
+    pub days_left: Option<i64>,
+}
+
+#[derive(TS)]
+#[ts(export)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
 /// Result of exporting a custom bench: the shareable JSON plus the file the
 /// backend dropped in Documents.
 pub struct ExportBenchDto {
@@ -2086,6 +2105,109 @@ pub mod commands {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Personal scenario goals (v0.6.0)
+    // ---------------------------------------------------------------------
+
+    /// Whole days from today to a `YYYY-MM-DD` deadline (negative = overdue).
+    fn goal_days_left(deadline: Option<&str>) -> Option<i64> {
+        let date = chrono::NaiveDate::parse_from_str(deadline?, "%Y-%m-%d").ok()?;
+        Some((date - chrono::Local::now().date_naive()).num_days())
+    }
+
+    /// Wire goal with its computed `done`/`days_left` fields.
+    fn goal_dto(goal: kovaaks_core::store::ScenarioGoal, best: f64) -> ScenarioGoalDto {
+        ScenarioGoalDto {
+            days_left: goal_days_left(goal.deadline.as_deref()),
+            done: kovaaks_core::store::goal_crossed(best, goal.target),
+            scenario: goal.scenario,
+            target: goal.target,
+            deadline: goal.deadline,
+        }
+    }
+
+    /// Best known score for one scenario (snapshots merged with local plays).
+    fn goal_best(state: &AppState, steam_id: &str, scenario: &str) -> Result<f64, String> {
+        let mut best = state
+            .store
+            .scenario_scores_by_name(steam_id, &[scenario.to_string()])
+            .map_err(|e| e.to_string())?;
+        Ok(best.remove(scenario).unwrap_or(0.0))
+    }
+
+    /// Every personal scenario goal of the connected player, with the current
+    /// best score resolved into `done` and the deadline into `days_left`.
+    #[tauri::command]
+    pub fn goals(state: State<'_, AppState>) -> Result<Vec<ScenarioGoalDto>, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        let goals = state
+            .store
+            .scenario_goals(&steam_id)
+            .map_err(|e| e.to_string())?;
+        let names: Vec<String> = goals.iter().map(|g| g.scenario.clone()).collect();
+        let best = state
+            .store
+            .scenario_scores_by_name(&steam_id, &names)
+            .map_err(|e| e.to_string())?;
+        Ok(goals
+            .into_iter()
+            .map(|g| {
+                let score = best.get(&g.scenario).copied().unwrap_or(0.0);
+                goal_dto(g, score)
+            })
+            .collect())
+    }
+
+    /// Set or overwrite one scenario target. `deadline` is `YYYY-MM-DD` or
+    /// null. Validation (positive finite target, parseable date) happens in
+    /// the store, the user-data boundary.
+    #[tauri::command]
+    pub fn set_goal(
+        state: State<'_, AppState>,
+        scenario: String,
+        target: f64,
+        deadline: Option<String>,
+    ) -> Result<ScenarioGoalDto, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        state
+            .store
+            .set_scenario_goal(&steam_id, &scenario, target, deadline.as_deref())
+            .map_err(|e| e.to_string())?;
+        // Re-read so the DTO carries the normalized name/deadline.
+        let name = scenario.trim();
+        let saved = state
+            .store
+            .scenario_goals(&steam_id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|g| g.scenario == name)
+            .ok_or_else(|| "goal was not saved".to_string())?;
+        let best = goal_best(state.inner(), &steam_id, &saved.scenario)?;
+        Ok(goal_dto(saved, best))
+    }
+
+    /// Remove one scenario target. Returns whether a goal existed.
+    #[tauri::command]
+    pub fn clear_goal(state: State<'_, AppState>, scenario: String) -> Result<bool, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        state
+            .store
+            .clear_scenario_goal(&steam_id, &scenario)
+            .map_err(|e| e.to_string())
+    }
+
     /// Deep-launch a scenario in KovaaK's: KovaaK's registers the
     /// `steam://run/824270/?action=jump-to-scenario;name=<name>` scheme with
     /// spaces percent-encoded (official deep-linking doc, patch 3.0.0).
@@ -2935,6 +3057,9 @@ pub fn run() {
             commands::launch_benchmark,
             commands::reconcile,
             commands::toggle_favorite,
+            commands::goals,
+            commands::set_goal,
+            commands::clear_goal,
             commands::copy_report_image,
             commands::custom_benches,
             commands::save_custom_bench,

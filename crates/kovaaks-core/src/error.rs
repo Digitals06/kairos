@@ -46,6 +46,12 @@ pub enum Error {
     #[error("{0}")]
     InvalidBenchmark(String),
 
+    /// A personal scenario goal was rejected by validation (non-positive or
+    /// non-finite target, malformed deadline, blank scenario). The message is
+    /// written for the user.
+    #[error("{0}")]
+    InvalidGoal(String),
+
     /// SQLite storage failure.
     #[error("storage error: {0}")]
     Store(#[from] rusqlite::Error),
