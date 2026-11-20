@@ -90,6 +90,7 @@ fn bench() -> CustomBenchRow {
         name: "Daily Five".into(),
         abbreviation: "D5".into(),
         color: "#b08d57".into(),
+        tier_colors: Vec::new(),
         rule: RULE_ALL.into(),
         top_n: 0,
         tier_names: vec!["Bronze".into(), "Silver".into(), "Gold".into()],
@@ -168,6 +169,80 @@ fn v5_database_migrates_to_subcategories() {
 }
 
 #[test]
+fn v7_database_gains_tier_colors_and_keeps_user_data() {
+    let path = temp_db("migrate-v7");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE custom_benchmarks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                steam_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                abbreviation TEXT NOT NULL DEFAULT 'CS',
+                color TEXT NOT NULL DEFAULT '#b08d57',
+                rule TEXT NOT NULL DEFAULT 'all',
+                top_n INTEGER NOT NULL DEFAULT 0,
+                tier_names TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+             );
+             CREATE TABLE custom_bench_scenarios (
+                benchmark_row INTEGER NOT NULL REFERENCES custom_benchmarks(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                scenario TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'Custom',
+                subcategory TEXT NOT NULL DEFAULT 'Main',
+                thresholds TEXT NOT NULL,
+                PRIMARY KEY (benchmark_row, scenario)
+             );
+             INSERT INTO custom_benchmarks
+                (id, steam_id, name, abbreviation, color, rule, top_n, tier_names, created_at, updated_at)
+                VALUES (1, '76561190000000001', 'Legacy', 'LG', '#b08d57', 'all', 0,
+                        '[\"Bronze\",\"Silver\",\"Gold\"]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO custom_bench_scenarios
+                (benchmark_row, position, scenario, category, subcategory, thresholds)
+                VALUES (1, 0, 'Pasu', 'Clicking', 'Main', '[100,200,300]');
+             PRAGMA user_version = 7;",
+        )
+        .expect("seed a v7-shaped database");
+    }
+
+    let store = Store::open(&path).expect("open upgrades to v8");
+    let rows = store.custom_benches(SID).expect("list");
+    assert_eq!(rows.len(), 1, "the bench survives the additive migration");
+    assert_eq!(rows[0].name, "Legacy");
+    assert_eq!(rows[0].scenarios.len(), 1);
+    assert_eq!(
+        rows[0].tier_colors,
+        vec!["#8a8477", "#a8b8a0", "#b08d57"],
+        "existing rows keep the pre-v8 palette rendering"
+    );
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 8);
+    drop(conn);
+    cleanup_db(&path);
+}
+
+#[test]
+fn create_ignores_the_row_id_so_duplicates_insert_new_benches() {
+    let path = temp_db("duplicate");
+    let store = Store::open(&path).expect("open store");
+    let mut source = bench();
+    source.id = 99;
+    let first = store.create_custom_bench(SID, &source).expect("create");
+    source.id = 0;
+    source.name = "Daily Five copy".into();
+    let second = store.create_custom_bench(SID, &source).expect("duplicate");
+    assert!(first > 0 && second > first, "each save inserts a new row");
+    assert_eq!(store.custom_benches(SID).expect("list").len(), 2);
+    cleanup_db(&path);
+}
+
+#[test]
 fn create_read_update_delete_roundtrip() {
     let path = temp_db("crud");
     let store = Store::open(&path).expect("open store");
@@ -179,6 +254,7 @@ fn create_read_update_delete_roundtrip() {
     assert_eq!(saved.id, rowid);
     assert_eq!(saved.name, "Daily Five");
     assert_eq!(saved.tier_names, vec!["Bronze", "Silver", "Gold"]);
+    assert_eq!(saved.tier_colors, Vec::<String>::new());
     assert_eq!(saved.scenarios.len(), 2);
     assert_eq!(saved.scenarios[0].scenario, "Pasu");
     assert_eq!(saved.scenarios[0].subcategory, "Main");
@@ -188,12 +264,18 @@ fn create_read_update_delete_roundtrip() {
     saved.name = "Nightly Three".into();
     saved.rule = RULE_TOP_N.into();
     saved.top_n = 2;
+    saved.tier_colors = vec!["#112233".into(), "#445566".into(), "#778899".into()];
     saved.scenarios = vec![scenario_row("Pasu", "Aim", vec![10.0, 20.0, 30.0])];
     assert!(store.update_custom_bench(SID, &saved).expect("update"));
 
     let rows = store.custom_benches(SID).expect("list after update");
     assert_eq!(rows[0].name, "Nightly Three");
     assert_eq!(rows[0].rule, RULE_TOP_N);
+    assert_eq!(
+        rows[0].tier_colors,
+        vec!["#112233", "#445566", "#778899"],
+        "tier colors round trip"
+    );
     assert_eq!(rows[0].scenarios[0].subcategory, "Aim");
     assert_eq!(rows[0].top_n, 2);
     assert_eq!(rows[0].scenarios.len(), 1, "old rows are replaced");

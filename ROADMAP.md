@@ -167,7 +167,7 @@ easing/shadow tokens stay cherry-picked by hand.
 - [x] Auto-sync on KovaaK's exit: the watcher's session boundary (20-min gap)
       quietly runs a smart sync so ranks are current the next time the app
       opens (pairs with the session marker)
-- [ ] Custom-bench polish: per-tier color picker, bench duplication, and a
+- [x] Custom-bench polish: per-tier color picker, bench duplication, and a
       "start from a registry benchmark" preset
 - [ ] Streak calendar: the weekly torch strip expanded to a month heatmap
 - [ ] In-app updater: a "new version available" chip via the GitHub releases

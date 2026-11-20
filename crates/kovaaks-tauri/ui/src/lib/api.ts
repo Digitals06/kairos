@@ -109,6 +109,8 @@ import type { CustomScenarioDto as GenCustomScenario } from './bindings/CustomSc
 export type CustomScenario = GenCustomScenario
 import type { ScenarioChoiceDto as GenScenarioChoice } from './bindings/ScenarioChoiceDto'
 export type ScenarioChoice = GenScenarioChoice
+import type { BenchPresetDto as GenBenchPreset } from './bindings/BenchPresetDto'
+export type BenchPreset = GenBenchPreset
 
 // Launch the whole difficulty (its shared scenario set) in KovaaK's — one
 // click starts the session's full benchmark pass.
@@ -185,6 +187,11 @@ export function deleteCustomBench(benchmarkId: number): Promise<void> {
 
 export function knownScenarios(): Promise<ScenarioChoice[]> {
   return invoke('known_scenarios')
+}
+
+/** Editable preset built from a registry difficulty's newest local snapshot. */
+export function registryBenchPreset(benchmarkId: number): Promise<BenchPreset> {
+  return invoke('registry_bench_preset', { benchmarkId })
 }
 
 /** Shareable JSON for one custom bench (also written to Documents). */

@@ -146,6 +146,10 @@ pub struct CustomBenchDto {
     pub name: String,
     pub abbreviation: String,
     pub color: String,
+    /// Per-tier hex colors, parallel to `tier_names`. Missing/empty entries
+    /// fall back to `color`.
+    #[serde(default)]
+    pub tier_colors: Vec<String>,
     /// `"all"` (every scenario), `"top_n"` (top N per subcategory) or
     /// `"energy"` (harmonic mean of subcategory energies).
     pub rule: String,
@@ -221,6 +225,45 @@ pub struct ScenarioChoiceDto {
     /// Best known score, `None` when never played.
     pub score: Option<f64>,
 }
+
+#[derive(TS)]
+#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+/// One scenario row prefilled by the "start from a registry benchmark" preset.
+pub struct PresetScenarioDto {
+    pub scenario: String,
+    /// Author category from the benchmark's newest local snapshot.
+    pub category: String,
+    /// Grouping used as the custom bench subcategory (the author category;
+    /// the registry asset does not map scenarios to subcategory names).
+    pub subcategory: String,
+    /// The scenario's registry ladder, verbatim.
+    pub thresholds: Vec<f64>,
+    /// Best known score at preset time (display only).
+    pub score: f64,
+}
+
+#[derive(TS)]
+#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+/// Editable starting point for a custom bench, built from a registry
+/// benchmark's newest local snapshot + its official tier metadata.
+pub struct BenchPresetDto {
+    pub benchmark_id: i64,
+    pub name: String,
+    pub abbreviation: String,
+    pub color: String,
+    pub tier_names: Vec<String>,
+    pub tier_colors: Vec<String>,
+    pub scenarios: Vec<PresetScenarioDto>,
+    /// Scenarios dropped because their local ladder did not match the tier
+    /// count (never guessed).
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
 #[derive(TS)]
 #[ts(export)]
 /// One difficulty of a folded family card.
@@ -1435,11 +1478,7 @@ pub mod commands {
             .enumerate()
             .map(|(i, name)| RankTier {
                 name: name.clone(),
-                color: kovaaks_core::custom::TIER_PALETTE
-                    .get(i)
-                    .copied()
-                    .unwrap_or(kovaaks_core::custom::TIER_PALETTE[0])
-                    .to_string(),
+                color: kovaaks_core::custom::tier_color(&row, i).to_string(),
             })
             .collect();
 
@@ -1478,11 +1517,7 @@ pub mod commands {
                 leaderboard_rank: 0,
                 tier: s.tier_name.as_ref().map(|name| RankTier {
                     name: name.clone(),
-                    color: kovaaks_core::custom::TIER_PALETTE
-                        .get(s.tier as usize - 1)
-                        .copied()
-                        .unwrap_or(kovaaks_core::custom::TIER_PALETTE[0])
-                        .to_string(),
+                    color: kovaaks_core::custom::tier_color(&row, s.tier as usize - 1).to_string(),
                 }),
                 scenario_rank: s.tier as i64,
                 rank_maxes: s.thresholds.clone(),
@@ -2123,11 +2158,7 @@ pub mod commands {
             }
             row.tier_names.get(tier as usize - 1).map(|name| RankTier {
                 name: name.clone(),
-                color: kovaaks_core::custom::TIER_PALETTE
-                    .get(tier as usize - 1)
-                    .copied()
-                    .unwrap_or(kovaaks_core::custom::TIER_PALETTE[0])
-                    .to_string(),
+                color: kovaaks_core::custom::tier_color(row, tier as usize - 1).to_string(),
             })
         };
         let scenarios = ranked
@@ -2166,6 +2197,7 @@ pub mod commands {
             name: row.name.clone(),
             abbreviation: row.abbreviation.clone(),
             color: row.color.clone(),
+            tier_colors: row.tier_colors.clone(),
             rule: row.rule.clone(),
             top_n: row.top_n,
             tier_names: row.tier_names.clone(),
@@ -2186,6 +2218,7 @@ pub mod commands {
             name: dto.name.trim().to_string(),
             abbreviation: dto.abbreviation.trim().to_string(),
             color: dto.color.clone(),
+            tier_colors: dto.tier_colors.clone(),
             rule: dto.rule.clone(),
             top_n: dto.top_n,
             tier_names: dto.tier_names.clone(),
@@ -2300,6 +2333,116 @@ pub mod commands {
                 category,
             })
             .collect())
+    }
+
+    /// Build an editable custom-bench preset from a registry difficulty: its
+    /// official tier names/colors plus the scenarios and ladders in the
+    /// player's newest local snapshot. Purely local — no network.
+    pub(crate) fn bench_preset_from(
+        registry: &Registry,
+        store: &Store,
+        steam_id: &str,
+        benchmark_id: i64,
+    ) -> Result<BenchPresetDto, String> {
+        if benchmark_id <= 0 {
+            return Err("not a registry benchmark".into());
+        }
+        let (def, difficulty) = registry
+            .by_id(benchmark_id as u64)
+            .ok_or_else(|| format!("unknown benchmark id {benchmark_id}"))?;
+        let snapshot = store
+            .latest(steam_id, benchmark_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| {
+                format!(
+                    "No local data for {} / {} yet — sync it once first.",
+                    def.name, difficulty.name
+                )
+            })?;
+        let tier_names: Vec<String> = difficulty
+            .rank_colors
+            .iter()
+            .map(|tier| tier.name.clone())
+            .collect();
+        let tier_colors: Vec<String> = difficulty
+            .rank_colors
+            .iter()
+            .map(|tier| tier.color.clone())
+            .collect();
+        let mut warnings = Vec::new();
+        let mut scenarios = Vec::new();
+        for row in &snapshot.scenarios {
+            if row.rank_maxes.len() != tier_names.len() {
+                warnings.push(format!(
+                    "\"{}\" was skipped: {} thresholds for {} tiers.",
+                    row.scenario.trim(),
+                    row.rank_maxes.len(),
+                    tier_names.len()
+                ));
+                continue;
+            }
+            if row.rank_maxes.iter().any(|t| *t < 0.0)
+                || row.rank_maxes.windows(2).any(|w| w[1] <= w[0])
+            {
+                warnings.push(format!(
+                    "\"{}\" was skipped: its ladder is not strictly ascending.",
+                    row.scenario.trim()
+                ));
+                continue;
+            }
+            let category = if row.category.trim().is_empty() {
+                "Custom".to_string()
+            } else {
+                row.category.clone()
+            };
+            scenarios.push(PresetScenarioDto {
+                scenario: row.scenario.clone(),
+                category: category.clone(),
+                // The registry asset counts scenarios per subcategory but does
+                // not name them; grouping by author category keeps every row
+                // editable and valid.
+                subcategory: category,
+                thresholds: row.rank_maxes.clone(),
+                score: row.score as f64,
+            });
+        }
+        if scenarios.is_empty() {
+            return Err(format!(
+                "{} / {} has no scenario ladders to start from.",
+                def.name, difficulty.name
+            ));
+        }
+        Ok(BenchPresetDto {
+            benchmark_id,
+            name: format!("{} {}", def.name, difficulty.name),
+            abbreviation: def.abbreviation.clone(),
+            color: if def.color.is_empty() {
+                tier_colors
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "#b08d57".to_string())
+            } else {
+                def.color.clone()
+            },
+            tier_names,
+            tier_colors,
+            scenarios,
+            warnings,
+        })
+    }
+
+    /// Prefill a new custom bench from a registry difficulty (local data only).
+    #[tauri::command]
+    pub fn registry_bench_preset(
+        state: State<'_, AppState>,
+        benchmark_id: i64,
+    ) -> Result<BenchPresetDto, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no profile connected".to_string())?
+            .steam_id;
+        bench_preset_from(state.registry, &state.store, &steam_id, benchmark_id)
     }
 
     /// Build the overview card for one custom benchmark (no snapshots: a custom
@@ -2733,6 +2876,7 @@ pub fn run() {
             commands::save_custom_bench,
             commands::delete_custom_bench,
             commands::known_scenarios,
+            commands::registry_bench_preset,
             commands::export_custom_bench,
             commands::import_custom_bench,
             commands::save_report_png,
@@ -2919,6 +3063,67 @@ mod tests {
             !json.contains("leaderboardRank"),
             "camelCase leaked: {json}"
         );
+    }
+
+    #[test]
+    fn preset_prefills_from_registry_and_local_snapshot() {
+        use kovaaks_core::{BenchmarkProgress, CategoryProgress, ScenarioEntry};
+
+        let path = std::env::temp_dir().join(format!(
+            "kairos-preset-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = Store::open(&path).unwrap();
+        let progress = BenchmarkProgress {
+            benchmark_progress: 1000.0,
+            overall_rank: 3,
+            categories: vec![(
+                "Clicking".to_string(),
+                CategoryProgress {
+                    benchmark_progress: 1000.0,
+                    category_rank: 3,
+                    rank_maxes: vec![100.0, 200.0, 300.0, 400.0],
+                    scenarios: vec![(
+                        "VT Pasu Novice S5".to_string(),
+                        ScenarioEntry {
+                            score: 1234.0,
+                            leaderboard_rank: 1,
+                            scenario_rank: 3,
+                            rank_maxes: vec![555.0, 660.0, 745.0, 800.0],
+                            leaderboard_id: 98059,
+                        },
+                    )],
+                },
+            )],
+        };
+        store
+            .record_snapshot("76561190000000001", 459, &progress, chrono::Utc::now())
+            .unwrap();
+
+        let preset =
+            crate::commands::bench_preset_from(&Registry, &store, "76561190000000001", 459)
+                .expect("registry preset");
+        assert_eq!(preset.name, "Voltaic S5 Novice");
+        assert_eq!(preset.abbreviation, "VT");
+        assert_eq!(preset.tier_names, vec!["Iron", "Bronze", "Silver", "Gold"]);
+        assert_eq!(preset.tier_colors[0], "#999999");
+        assert_eq!(preset.scenarios.len(), 1);
+        assert_eq!(preset.scenarios[0].scenario, "VT Pasu Novice S5");
+        assert_eq!(
+            preset.scenarios[0].thresholds,
+            vec![555.0, 660.0, 745.0, 800.0],
+            "thresholds come verbatim from the registry ladder"
+        );
+        assert_eq!(preset.scenarios[0].subcategory, "Clicking");
+
+        drop(store);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
     }
 
     #[test]

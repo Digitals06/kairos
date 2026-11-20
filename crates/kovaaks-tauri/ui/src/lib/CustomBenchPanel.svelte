@@ -12,8 +12,10 @@
     customBenches,
     deleteCustomBench,
     exportCustomBench,
+    getOverview,
     importCustomBench,
     knownScenarios,
+    registryBenchPreset,
     saveCustomBench,
     type CustomBench,
     type CustomScenario,
@@ -22,7 +24,7 @@
 
   let { onclose, onsaved }: { onclose: () => void; onsaved: () => void } = $props()
 
-  const PRESET_COLORS = ['#b08d57', '#8fa8a0', '#a86f6f', '#7f8fb0', '#b09a6a', '#8a7fa8']
+  const DEFAULT_COLOR = '#b08d57'
   const DEFAULT_TIERS = 'Bronze, Silver, Gold, Platinum'
   const DEFAULT_SUBCATEGORY = 'Main'
 
@@ -31,6 +33,9 @@
 
   let saved = $state<CustomBench[]>([])
   let choices = $state<ScenarioChoice[]>([])
+  let presets = $state<{ id: number; label: string }[]>([])
+  let presetId = $state(0)
+  let presetNote = $state<string | null>(null)
   let loading = $state(true)
   let busy = $state(false)
   let error = $state<string | null>(null)
@@ -40,7 +45,10 @@
   let editingId = $state(0)
   let name = $state('')
   let abbreviation = $state('CS')
-  let color = $state(PRESET_COLORS[0])
+  let color = $state(DEFAULT_COLOR)
+  let tierColors = $state<string[]>(
+    DEFAULT_TIERS.split(',').map(() => DEFAULT_COLOR),
+  )
   let rule = $state<Rule>('all')
   let topN = $state(2)
   let tiersText = $state(DEFAULT_TIERS)
@@ -52,12 +60,18 @@
   let transfer = $state('')
   let transferNote = $state<string | null>(null)
 
-  const tierNames = $derived(
-    tiersText
+  function parseTierNames(text: string): string[] {
+    return text
       .split(',')
       .map((t) => t.trim())
-      .filter((t) => t.length > 0),
-  )
+      .filter((t) => t.length > 0)
+  }
+
+  function isHexColor(value: string): boolean {
+    return /^#[0-9a-fA-F]{6}$/.test(value)
+  }
+
+  const tierNames = $derived(parseTierNames(tiersText))
 
   /** Author-defined subcategories, in first-appearance order. */
   const subcategories = $derived.by(() => {
@@ -107,11 +121,18 @@
   }
 
   const rowErrors = $derived(rows.map((r) => rowError(r)))
+  const tierColorErrors = $derived(
+    tierNames.map((_, i) => {
+      const value = (tierColors[i] ?? '').trim()
+      return value.length === 0 || isHexColor(value) ? null : 'use #RRGGBB'
+    }),
+  )
   const formValid = $derived(
     name.trim().length > 0 &&
       tierNames.length > 0 &&
       rows.length > 0 &&
       rowErrors.every((e) => e === null) &&
+      tierColorErrors.every((e) => e === null) &&
       (rule !== 'top_n' || (topN >= 1 && topN <= rows.length)),
   )
 
@@ -156,6 +177,10 @@
     preview.rank > 0 ? (tierNames[preview.rank - 1] ?? '—') : 'Unranked',
   )
 
+  const previewColor = $derived(
+    preview.rank > 0 ? (tierColors[preview.rank - 1] || color) : color,
+  )
+
   const matches = $derived(
     search.trim().length === 0
       ? []
@@ -169,7 +194,19 @@
     loading = true
     error = null
     try {
-      ;[saved, choices] = await Promise.all([customBenches(), knownScenarios()])
+      const [benches, scenarios, overview] = await Promise.all([
+        customBenches(),
+        knownScenarios(),
+        getOverview().catch(() => []),
+      ])
+      saved = benches
+      choices = scenarios
+      presets = overview
+        .filter((card) => card.benchmark_id > 0)
+        .map((card) => ({
+          id: card.benchmark_id,
+          label: `${card.benchmark_name} — ${card.difficulty_name}`,
+        }))
     } catch (e) {
       error = String(e)
     } finally {
@@ -185,7 +222,8 @@
     editingId = 0
     name = ''
     abbreviation = 'CS'
-    color = PRESET_COLORS[0]
+    color = DEFAULT_COLOR
+    tierColors = parseTierNames(DEFAULT_TIERS).map(() => DEFAULT_COLOR)
     rule = 'all'
     topN = 2
     tiersText = DEFAULT_TIERS
@@ -193,6 +231,8 @@
     activeSubcat = DEFAULT_SUBCATEGORY
     newSubcat = ''
     search = ''
+    presetId = 0
+    presetNote = null
     error = null
   }
 
@@ -204,6 +244,7 @@
     rule = bench.rule === 'top_n' ? 'top_n' : bench.rule === 'energy' ? 'energy' : 'all'
     topN = bench.top_n || 2
     tiersText = bench.tier_names.join(', ')
+    tierColors = bench.tier_names.map((_, i) => bench.tier_colors?.[i] || bench.color)
     rows = bench.scenarios.map((s: CustomScenario) => ({
       scenario: s.scenario,
       category: s.category,
@@ -214,6 +255,8 @@
     activeSubcat = rows[0]?.subcategory ?? DEFAULT_SUBCATEGORY
     newSubcat = ''
     search = ''
+    presetId = 0
+    presetNote = null
     error = null
   }
 
@@ -248,16 +291,83 @@
   }
 
   function resyncThresholds() {
-    // Tier count changed: every row now needs the same number of values.
+    // Tier count changed: every row and its color swatch move together.
+    const names = parseTierNames(tiersText)
+    tierColors = Array.from({ length: names.length }, (_, i) => tierColors[i] ?? color)
     rows = rows.map((r) => {
       const values = parseThresholds(r.text)
-      const next = values.slice(0, tierNames.length)
-      while (next.length < tierNames.length) {
+      const next = values.slice(0, names.length)
+      while (next.length < names.length) {
         const last = next[next.length - 1] ?? (r.score > 0 ? r.score : 100)
         next.push(Math.round(last * 1.2))
       }
       return { ...r, text: next.join(', ') }
     })
+  }
+
+  /** Load a saved bench's data into the form as a new, unsaved bench. */
+  async function applyPreset(id: number) {
+    if (id === 0 || busy) return
+    busy = true
+    error = null
+    presetNote = null
+    try {
+      const preset = await registryBenchPreset(id)
+      editingId = 0
+      name = preset.name
+      abbreviation = preset.abbreviation
+      color = preset.color
+      rule = 'all'
+      topN = 2
+      tiersText = preset.tier_names.join(', ')
+      tierColors = preset.tier_names.map((_, i) => preset.tier_colors[i] || preset.color)
+      rows = preset.scenarios.map((s) => ({
+        scenario: s.scenario,
+        category: s.category,
+        subcategory: s.subcategory || DEFAULT_SUBCATEGORY,
+        score: s.score,
+        text: s.thresholds.join(', '),
+      }))
+      activeSubcat = rows[0]?.subcategory ?? DEFAULT_SUBCATEGORY
+      newSubcat = ''
+      search = ''
+      if (preset.warnings.length > 0) presetNote = preset.warnings.join('; ')
+    } catch (e) {
+      error = String(e)
+      presetId = 0
+    } finally {
+      busy = false
+    }
+  }
+
+  /** "<name> copy", then "<name> copy 2", … against the loaded list. */
+  function copyName(base: string): string {
+    const used = new Set(saved.map((b) => b.name.trim().toLowerCase()))
+    let candidate = `${base} copy`
+    if (!used.has(candidate.toLowerCase())) return candidate
+    let n = 2
+    while (used.has(`${base} copy ${n}`.toLowerCase())) n += 1
+    return `${base} copy ${n}`
+  }
+
+  /** Save a second bench: id 0 forces the insert path, everything else copies. */
+  async function duplicate(bench: CustomBench) {
+    if (busy) return
+    busy = true
+    error = null
+    try {
+      await saveCustomBench({
+        ...bench,
+        benchmark_id: 0,
+        name: copyName(bench.name),
+      })
+      await load()
+      onsaved()
+    } catch (e) {
+      error = String(e)
+    } finally {
+      busy = false
+    }
   }
 
   async function exportBench(bench: CustomBench) {
@@ -300,6 +410,7 @@
         name: name.trim(),
         abbreviation: abbreviation.trim() || 'CS',
         color,
+        tier_colors: tierNames.map((_, i) => (tierColors[i] ?? '').trim()),
         rule,
         top_n: rule === 'top_n' ? topN : 0,
         tier_names: tierNames,
@@ -362,6 +473,21 @@
     <div class="bench-body">
       <aside class="bench-list">
         <button class="btn btn-small" onclick={resetForm}>+ New bench</button>
+        <div class="preset-picker">
+          <select
+            aria-label="Start from a benchmark"
+            bind:value={presetId}
+            onchange={(e) => applyPreset(Number((e.currentTarget as HTMLSelectElement).value))}
+          >
+            <option value={0}>Start from a benchmark…</option>
+            {#each presets as preset (preset.id)}
+              <option value={preset.id}>{preset.label}</option>
+            {/each}
+          </select>
+          {#if presetNote}
+            <span class="muted small">{presetNote}</span>
+          {/if}
+        </div>
         {#if loading}
           <p class="muted">Loading…</p>
         {:else if saved.length === 0}
@@ -384,6 +510,9 @@
               </div>
               <div class="bench-item-actions">
                 <button class="btn btn-small" onclick={() => edit(bench)}>Edit</button>
+                <button class="btn btn-small" disabled={busy} onclick={() => duplicate(bench)}
+                  >Duplicate</button
+                >
                 <button class="btn btn-small" onclick={() => exportBench(bench)}>Export</button>
                 <button class="btn btn-small danger" onclick={() => remove(bench)}>Delete</button>
               </div>
@@ -405,18 +534,10 @@
         </div>
 
         <div class="field-row">
-          <span class="field-label">Color</span>
-          <div class="swatches">
-            {#each PRESET_COLORS as preset (preset)}
-              <button
-                class="swatch"
-                class:active={color === preset}
-                style="background: {preset}"
-                aria-label="Use color {preset}"
-                onclick={() => (color = preset)}
-              ></button>
-            {/each}
-          </div>
+          <label class="field narrow">
+            <span>Bench color</span>
+            <input class="color-input" type="color" bind:value={color} />
+          </label>
         </div>
 
         <div class="field-row">
@@ -466,6 +587,30 @@
           {tierNames.length} tier{tierNames.length === 1 ? '' : 's'} → every scenario needs
           {tierNames.length} thresholds.
         </p>
+
+        <div class="tier-colors">
+          <span class="field-label">Tier colors (worst → best)</span>
+          <div class="tier-color-grid">
+            {#each tierNames as tier, i (i)}
+              <label class="tier-color">
+                <input
+                  type="color"
+                  value={tierColors[i] ?? color}
+                  aria-label="{tier} color"
+                  oninput={(e) => {
+                    const next = tierColors.slice()
+                    next[i] = (e.currentTarget as HTMLInputElement).value
+                    tierColors = next
+                  }}
+                />
+                <span>{tier}</span>
+                {#if tierColorErrors[i]}
+                  <span class="row-hint">{tierColorErrors[i]}</span>
+                {/if}
+              </label>
+            {/each}
+          </div>
+        </div>
 
         <div class="subcats">
           <span class="field-label">Subcategories</span>
@@ -618,7 +763,7 @@
 
     <footer class="bench-foot">
       <span class="preview">
-        Rank now: <b>{previewName}</b>
+        Rank now: <b style={`color: ${previewColor}`}>{previewName}</b>
         {#if rule === 'energy' && preview.energy > 0}
           <span class="muted small">energy {preview.energy.toFixed(2)}</span>
         {/if}
@@ -738,19 +883,52 @@
     background: var(--surface);
     color: var(--text);
   }
-  .swatches {
-    display: flex;
-    gap: 6px;
-  }
-  .swatch {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    border: 2px solid transparent;
+  .color-input {
+    width: 44px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
     cursor: pointer;
   }
-  .swatch.active {
-    border-color: var(--accent-2);
+  .preset-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .preset-picker select {
+    width: 100%;
+    padding: 5px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+  }
+  .tier-colors {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .tier-color-grid {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .tier-color {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+  }
+  .tier-color input[type='color'] {
+    width: 30px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    cursor: pointer;
   }
   .rules {
     display: flex;

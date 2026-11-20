@@ -17,7 +17,7 @@ use crate::error::Result;
 use crate::types::{BenchmarkProgress, PlayRecord, PlayerProfile};
 
 /// Schema version this build writes; `PRAGMA user_version` gates migrations.
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 /// Result of [`Store::record_snapshot`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +89,10 @@ pub struct CustomBenchRow {
     pub abbreviation: String,
     /// Card accent hex color.
     pub color: String,
+    /// Per-tier hex colors, parallel to `tier_names` (v0.6.0). Missing or
+    /// empty entries fall back to the bench accent color.
+    #[serde(default)]
+    pub tier_colors: Vec<String>,
     /// Aggregation rule: `"all"` (every scenario), `"top_n"` (top N per
     /// subcategory) or `"energy"` (harmonic mean of subcategory energies).
     pub rule: String,
@@ -380,6 +384,35 @@ impl Store {
                     fetched_at TEXT NOT NULL
                  );",
             )?;
+        }
+        if version < 8 {
+            // v8: per-tier colors (v0.6.0). Additive column: existing benches
+            // keep rendering the pre-v8 palette by seeding their colors from
+            // TIER_PALETTE; new benches may leave entries empty to inherit
+            // the bench accent color.
+            conn.execute(
+                "ALTER TABLE custom_benchmarks ADD COLUMN tier_colors TEXT NOT NULL DEFAULT '[]'",
+                [],
+            )?;
+            let mut stmt = conn.prepare("SELECT id, tier_names FROM custom_benchmarks")?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            drop(stmt);
+            for (id, tier_names) in rows {
+                let count = serde_json::from_str::<Vec<String>>(&tier_names)
+                    .map(|names| names.len())
+                    .unwrap_or(0);
+                let colors: Vec<&str> = crate::custom::TIER_PALETTE
+                    .iter()
+                    .take(count.min(crate::custom::MAX_TIERS))
+                    .copied()
+                    .collect();
+                conn.execute(
+                    "UPDATE custom_benchmarks SET tier_colors = ?1 WHERE id = ?2",
+                    params![serde_json::to_string(&colors)?, id],
+                )?;
+            }
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Self {
@@ -734,7 +767,7 @@ impl Store {
     pub fn custom_benches(&self, steam_id: &str) -> Result<Vec<CustomBenchRow>> {
         let conn = self.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, name, abbreviation, color, rule, top_n, tier_names
+            "SELECT id, name, abbreviation, color, tier_colors, rule, top_n, tier_names
              FROM custom_benchmarks WHERE steam_id = ?1 ORDER BY id",
         )?;
         let heads = stmt
@@ -745,18 +778,20 @@ impl Store {
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)? as u32,
-                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)? as u32,
+                    row.get::<_, String>(7)?,
                 ))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let mut out = Vec::with_capacity(heads.len());
-        for (id, name, abbreviation, color, rule, top_n, tier_names) in heads {
+        for (id, name, abbreviation, color, tier_colors, rule, top_n, tier_names) in heads {
             out.push(CustomBenchRow {
                 id,
                 name,
                 abbreviation,
                 color,
+                tier_colors: serde_json::from_str(&tier_colors).unwrap_or_default(),
                 rule,
                 top_n,
                 tier_names: serde_json::from_str(&tier_names)?,
@@ -807,13 +842,14 @@ impl Store {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
             "INSERT INTO custom_benchmarks
-                (steam_id, name, abbreviation, color, rule, top_n, tier_names, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+                (steam_id, name, abbreviation, color, tier_colors, rule, top_n, tier_names, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
             params![
                 steam_id,
                 bench.name,
                 bench.abbreviation,
                 bench.color,
+                serde_json::to_string(&bench.tier_colors)?,
                 bench.rule,
                 bench.top_n as i64,
                 serde_json::to_string(&bench.tier_names)?,
@@ -833,8 +869,8 @@ impl Store {
         let tx = conn.unchecked_transaction()?;
         let n = tx.execute(
             "UPDATE custom_benchmarks SET
-                name = ?3, abbreviation = ?4, color = ?5, rule = ?6,
-                top_n = ?7, tier_names = ?8, updated_at = ?9
+                name = ?3, abbreviation = ?4, color = ?5, tier_colors = ?6, rule = ?7,
+                top_n = ?8, tier_names = ?9, updated_at = ?10
              WHERE id = ?1 AND steam_id = ?2",
             params![
                 bench.id,
@@ -842,6 +878,7 @@ impl Store {
                 bench.name,
                 bench.abbreviation,
                 bench.color,
+                serde_json::to_string(&bench.tier_colors)?,
                 bench.rule,
                 bench.top_n as i64,
                 serde_json::to_string(&bench.tier_names)?,

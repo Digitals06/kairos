@@ -10,6 +10,11 @@ import type { RankTier } from "./RankTier";
  */
 export type CustomBenchDto = { benchmark_id: number, name: string, abbreviation: string, color: string, 
 /**
+ * Per-tier hex colors, parallel to `tier_names`. Missing/empty entries
+ * fall back to `color`.
+ */
+tier_colors: Array<string>, 
+/**
  * `"all"` (every scenario), `"top_n"` (top N per subcategory) or
  * `"energy"` (harmonic mean of subcategory energies).
  */

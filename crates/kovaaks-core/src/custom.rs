@@ -51,6 +51,22 @@ pub const TIER_PALETTE: [&str; MAX_TIERS] = [
     "#b06f8a", "#c26a5a", "#d9a05a", "#e6d3a3",
 ];
 
+/// Whether `value` is a `#RRGGBB` hex color (strictly 7 chars, ASCII hex).
+pub fn is_hex_color(value: &str) -> bool {
+    value.len() == 7 && value.starts_with('#') && value[1..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Resolve one tier's display color: the author's per-tier pick when present,
+/// otherwise the bench accent color (v0.6.0 fallback).
+pub fn tier_color(bench: &CustomBenchRow, index: usize) -> &str {
+    bench
+        .tier_colors
+        .get(index)
+        .filter(|color| !color.is_empty())
+        .map(String::as_str)
+        .unwrap_or(&bench.color)
+}
+
 /// One scenario's resolved state inside a custom bench: score, tier, and the
 /// gap to the next rung (what the detail table and the grind planner show).
 #[derive(Debug, Clone, PartialEq)]
@@ -120,6 +136,28 @@ pub fn validate(bench: &CustomBenchRow) -> Result<()> {
     }
     if bench.tier_names.iter().any(|n| n.trim().is_empty()) {
         return bad("Every tier needs a name.".into());
+    }
+    if bench.tier_colors.len() > bench.tier_names.len() {
+        return bad(format!(
+            "{} tier colors for {} tiers.",
+            bench.tier_colors.len(),
+            bench.tier_names.len()
+        ));
+    }
+    for (index, color) in bench.tier_colors.iter().enumerate() {
+        if color.is_empty() {
+            continue; // inherit the bench accent color
+        }
+        if !is_hex_color(color) {
+            let name = bench
+                .tier_names
+                .get(index)
+                .map(String::as_str)
+                .unwrap_or("tier");
+            return bad(format!(
+                "Tier \"{name}\" color \"{color}\" must be a #RRGGBB hex color."
+            ));
+        }
     }
     if bench.scenarios.is_empty() {
         return bad("Add at least one scenario.".into());
@@ -374,11 +412,7 @@ pub fn to_def(bench: &CustomBenchRow) -> BenchmarkDef {
         .enumerate()
         .map(|(i, name)| RankTier {
             name: name.clone(),
-            color: TIER_PALETTE
-                .get(i)
-                .copied()
-                .unwrap_or(TIER_PALETTE[MAX_TIERS - 1])
-                .to_string(),
+            color: tier_color(bench, i).to_string(),
         })
         .collect();
     BenchmarkDef {
@@ -419,6 +453,7 @@ mod tests {
             name: "Daily Five".into(),
             abbreviation: "D5".into(),
             color: "#b08d57".into(),
+            tier_colors: Vec::new(),
             rule: rule.into(),
             top_n,
             tier_names: vec!["Bronze".into(), "Silver".into(), "Gold".into()],
@@ -598,6 +633,46 @@ mod tests {
         let b = bench(RULE_TOP_N, 9);
         let err = validate(&b).expect_err("N > pool must be rejected");
         assert!(matches!(err, Error::InvalidBenchmark(ref m) if m.contains("only has")));
+    }
+
+    #[test]
+    fn validation_rejects_malformed_tier_colors() {
+        let mut b = bench(RULE_ALL, 0);
+        b.tier_colors = vec!["#123456".into(), "red".into()];
+        let err = validate(&b).expect_err("non-hex tier color must be rejected");
+        assert!(matches!(err, Error::InvalidBenchmark(ref m) if m.contains("#RRGGBB")));
+
+        let mut too_many = bench(RULE_ALL, 0);
+        too_many.tier_colors = vec![
+            "#123456".into(),
+            "#234567".into(),
+            "#345678".into(),
+            "#456789".into(),
+        ];
+        assert!(validate(&too_many).is_err(), "one color per tier at most");
+    }
+
+    #[test]
+    fn tier_color_falls_back_to_the_bench_accent() {
+        let mut b = bench(RULE_ALL, 0);
+        assert_eq!(tier_color(&b, 0), "#b08d57");
+        b.tier_colors = vec!["#112233".into(), String::new()];
+        assert_eq!(tier_color(&b, 0), "#112233");
+        assert_eq!(tier_color(&b, 1), "#b08d57", "empty entry inherits");
+        assert_eq!(tier_color(&b, 2), "#b08d57", "missing entry inherits");
+    }
+
+    #[test]
+    fn to_def_uses_author_tier_colors() {
+        let mut b = bench(RULE_ALL, 0);
+        b.tier_colors = vec!["#112233".into(), "#445566".into()];
+        let def = to_def(&b);
+        assert_eq!(def.difficulties[0].rank_colors[0].color, "#112233");
+        assert_eq!(def.difficulties[0].rank_colors[1].color, "#445566");
+        assert_eq!(
+            def.difficulties[0].rank_colors[2].color, "#b08d57",
+            "missing tier color falls back to the bench accent"
+        );
     }
 
     #[test]
