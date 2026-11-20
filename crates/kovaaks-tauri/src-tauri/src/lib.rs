@@ -35,9 +35,6 @@ const INGEST_SEEN_KEY: &str = "ingest_stats_csv_seen";
 const INGEST_INSERTED_KEY: &str = "ingest_stats_csv_inserted";
 /// Meta key: RFC3339 timestamp of the last successful `sync_now`.
 const LAST_SYNCED_KEY: &str = "last_synced_at";
-/// Default KovaaK's stats dir (standard Steam library install).
-const DEFAULT_STATS_DIR: &str =
-    "C:\\Program Files (x86)\\Steam\\steamapps\\common\\FPSAimTrainer\\FPSAimTrainer\\stats";
 /// Sync staleness threshold (hours): rows older than this get re-probed on
 /// every `sync_now` (and `force=true` re-probes everything regardless).
 const SYNC_MAX_AGE_HOURS: u64 = 2;
@@ -828,17 +825,12 @@ impl AppState {
             .map_err(|e| e.to_string())
     }
 
-    /// Resolve the active stats dir: settings override or default path.
+    /// Resolve the active stats dir: settings override -> auto-detection ->
+    /// default path (see `stats_detect::resolve_stats_dir`). The same
+    /// resolver backs `run_csv_scan`, so scan and watcher never diverge.
     pub(crate) fn stats_dir(&self) -> PathBuf {
         let settings = self.load_settings();
-        if !settings.stats_dir.trim().is_empty() {
-            // Explicit override always wins.
-            return PathBuf::from(settings.stats_dir.trim());
-        }
-        // Auto-detect KovaaK's across every Steam library / disk
-        // (registry Steam path + libraryfolders.vdf + per-drive probes).
-        // Fall back to the conventional default when nothing is found.
-        crate::stats_detect::detect_stats_dir().unwrap_or_else(|| PathBuf::from(DEFAULT_STATS_DIR))
+        crate::stats_detect::resolve_stats_dir(Some(settings.stats_dir.as_str()))
     }
 }
 
@@ -871,23 +863,21 @@ fn db_path() -> PathBuf {
 /// CSV ingest scan (forward-only from the stored first-run cutoff). Tolerates
 /// a missing KovaaK's install — scan errors land on stderr and the counters
 /// stay at their previous values. Runs without a profile as a no-op; called
-/// again from `resolve_profile` once a player is connected.
+/// again from `resolve_profile` once a player is connected. Resolves the dir
+/// through `stats_detect::resolve_stats_dir` (settings override -> detection
+/// -> default), the same contract the watcher uses.
 pub(crate) fn run_csv_scan(store: &Store) -> Option<(usize, usize)> {
     let steam_id = match store.get_meta("steam_id") {
         Ok(Some(id)) if !id.is_empty() => id,
         _ => return None,
     };
-    let dir = {
-        let settings: Option<AppSettings> = store
-            .get_meta(SETTINGS_KEY)
-            .ok()
-            .flatten()
-            .and_then(|raw| serde_json::from_str(&raw).ok());
-        match settings {
-            Some(s) if !s.stats_dir.trim().is_empty() => PathBuf::from(s.stats_dir.trim()),
-            _ => PathBuf::from(DEFAULT_STATS_DIR),
-        }
-    };
+    let settings: Option<AppSettings> = store
+        .get_meta(SETTINGS_KEY)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str(&raw).ok());
+    let dir =
+        crate::stats_detect::resolve_stats_dir(settings.as_ref().map(|s| s.stats_dir.as_str()));
     let cutoff = match csv_ingest::ensure_cutoff(store) {
         Ok(c) => c,
         Err(_) => return None,

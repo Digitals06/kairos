@@ -10,9 +10,18 @@
 //! wins. Pure path logic is cross-platform and unit-tested; registry/drive
 //! enumeration is Windows-only (on other platforms detection yields `None`
 //! and the caller falls back to the historical default path).
+//!
+//! Every caller resolves through [`resolve_stats_dir`] (contract: settings
+//! override -> auto-detection -> [`DEFAULT_STATS_DIR`]) so the CSV scan, the
+//! command layer and the file watcher can never disagree about which folder
+//! is active.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+
+/// Default KovaaK's stats dir (standard Steam library install).
+pub const DEFAULT_STATS_DIR: &str =
+    "C:\\Program Files (x86)\\Steam\\steamapps\\common\\FPSAimTrainer\\FPSAimTrainer\\stats";
 
 /// Candidate stats dirs under one Steam library root. The standard KovaaK's
 /// layout nests the game folder inside itself; a legacy flat layout is
@@ -134,6 +143,25 @@ pub fn detect_stats_dir() -> Option<PathBuf> {
         .clone()
 }
 
+/// Pure resolution contract: settings override -> detected dir -> default.
+///
+/// A trimmed non-empty `settings_dir` always wins; a blank or missing one
+/// falls through to `detected` and finally to [`DEFAULT_STATS_DIR`]. Pure, so
+/// the whole precedence order is unit-tested without touching the machine.
+pub fn resolve_from(settings_dir: Option<&str>, detected: Option<PathBuf>) -> PathBuf {
+    if let Some(dir) = settings_dir.map(str::trim).filter(|d| !d.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    detected.unwrap_or_else(|| PathBuf::from(DEFAULT_STATS_DIR))
+}
+
+/// The active stats dir: [`resolve_from`] applied to the settings override
+/// and live auto-detection. Single entry point for the command layer, the
+/// CSV scan and the watcher.
+pub fn resolve_stats_dir(settings_dir: Option<&str>) -> PathBuf {
+    resolve_from(settings_dir, detect_stats_dir())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,6 +212,49 @@ mod tests {
         assert_eq!(
             detect_in_roots(&[PathBuf::from("/nonexistent-kairos-probe-root")]),
             None
+        );
+    }
+
+    #[test]
+    fn resolve_from_settings_override_wins_over_detected() {
+        // An explicit override always beats whatever detection found.
+        assert_eq!(
+            resolve_from(
+                Some(r"D:\my\stats"),
+                Some(PathBuf::from(r"C:\detected\stats"))
+            ),
+            PathBuf::from(r"D:\my\stats")
+        );
+    }
+
+    #[test]
+    fn resolve_from_blank_settings_falls_through_to_detected() {
+        let detected = PathBuf::from(r"E:\SteamLibrary\stats");
+        for blank in [Some(""), Some("   "), Some(" \t\n ")] {
+            assert_eq!(resolve_from(blank, Some(detected.clone())), detected);
+        }
+    }
+
+    #[test]
+    fn resolve_from_blank_settings_without_detection_uses_default() {
+        assert_eq!(
+            resolve_from(Some("  "), None),
+            PathBuf::from(DEFAULT_STATS_DIR)
+        );
+        assert_eq!(resolve_from(None, None), PathBuf::from(DEFAULT_STATS_DIR));
+    }
+
+    #[test]
+    fn resolve_from_none_uses_detected() {
+        let detected = PathBuf::from(r"F:\Steam\steamapps\common\stats");
+        assert_eq!(resolve_from(None, Some(detected.clone())), detected);
+    }
+
+    #[test]
+    fn resolve_from_trims_override_whitespace() {
+        assert_eq!(
+            resolve_from(Some("  C:\\stats\\  "), None),
+            PathBuf::from(r"C:\stats")
         );
     }
 
