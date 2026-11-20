@@ -179,9 +179,10 @@ pub fn weekly_report(
     rows.extend(regressing);
 
     // Rank changes: diff consecutive snapshots inside the week window
-    // (histories reused from the fused pass — no re-query).
+    // (histories reused from the fused pass — no re-query). Ranks come from
+    // the engine, never the stored `overall_rank` column.
+    let registry = crate::registry::Registry;
     let mut rank_changes: Vec<(i64, String, String, String)> = Vec::new();
-    let mut __nwins: usize = 0;
     for bid in bids.clone() {
         let Some(history) = histories.get(&bid) else {
             continue;
@@ -201,28 +202,23 @@ pub fn weekly_report(
             prevs.insert(0, boundary);
         }
         prevs = trim(prevs);
-        let __nv = prevs.len();
-        __nwins += __nv;
         for w in prevs.windows(2) {
-            let from = w[0].overall_rank;
-            let to = w[1].overall_rank;
-            if from != to && w[1].captured_at >= since {
-                let registry = crate::registry::Registry;
+            let (Some((from_rank, from_name)), Some((to_rank, to_name))) = (
+                crate::rankdiff::engine_rank_for_snapshot(&registry, w[0]),
+                crate::rankdiff::engine_rank_for_snapshot(&registry, w[1]),
+            ) else {
+                continue; // not engine-computable — skip silently
+            };
+            if from_rank != to_rank && w[1].captured_at >= since {
                 let name = registry
                     .by_id(bid as u64)
                     .map(|(b, _)| b.name.clone())
                     .unwrap_or_else(|| format!("benchmark {bid}"));
-                let from_name = tier_name(bid as u64, from);
-                let to_name = tier_name(bid as u64, to);
                 rank_changes.push((bid, name, from_name, to_name));
             }
         }
     }
 
-    eprintln!(
-        "[trace] weekly: rank pass weighted. windows over {} snaps",
-        __nwins
-    );
     let streak =
         crate::streaks::streak_summary(store, steam_id).unwrap_or(crate::streaks::StreakSummary {
             current: 0,
@@ -307,19 +303,8 @@ fn trim(list: Vec<&crate::store::StoredSnapshot>) -> Vec<&crate::store::StoredSn
     out
 }
 
-fn tier_name(benchmark_id: u64, rank_index: i64) -> String {
-    let registry = crate::registry::Registry;
-    registry
-        .by_id(benchmark_id)
-        .and_then(|(_b, diff)| {
-            crate::ranks::rank_from_index(rank_index as u32, &diff).map(|t| t.name.to_string())
-        })
-        .unwrap_or_else(|| format!("tier {rank_index}"))
-}
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     /// streaks helper semantic check via weekly: streak fields flow through.
     #[test]
     fn streak_parity_segment_sets_values() {
@@ -332,13 +317,6 @@ mod tests {
         .collect();
         let today = chrono::NaiveDate::from_ymd_opt(2026, 9, 14).unwrap();
         assert_eq!(crate::streaks::streaks_from_days(&days, today), (2, 2));
-    }
-
-    /// tier name mapping: rank_from_index via registry by_id.
-    #[test]
-    fn tier_name_falls_back_gracefully() {
-        let name = tier_name(999999, 3);
-        assert!(name.contains("tier") || !name.is_empty());
     }
 }
 #[cfg(test)]
@@ -421,23 +399,26 @@ mod week_tests {
         let _ = std::fs::remove_file(&dir);
     }
 
+    /// Weekly rank changes come from the engine, not the stored column.
     #[test]
     fn weekly_report_counts_plays_ranks() {
         let dir = std::env::temp_dir().join(format!("weekly-{}", std::process::id()));
         let _ = std::fs::remove_file(&dir);
         let store = crate::store::Store::open(&dir).unwrap();
         let now = chrono::Utc::now();
-        // two snapshots inside the week with a rank change
+        // 644 (`mh`, Easy ladder [100,200,300,400]): score 100 → engine rank
+        // 1 (Copper), 250 → engine rank 2 (Bronze). Stored columns 2 → 3 lie;
+        // mapping the stored indices would name Bronze → Iron.
         store
             .record_snapshot(
                 "76561190000000001",
-                460,
+                644,
                 &prog(0, "s", 100, 2),
                 now - chrono::Duration::days(3),
             )
             .unwrap();
         store
-            .record_snapshot("76561190000000001", 460, &prog(0, "s", 200, 3), now)
+            .record_snapshot("76561190000000001", 644, &prog(0, "s", 250, 3), now)
             .unwrap();
         // local plays this week
         let rec = crate::types::PlayRecord {
@@ -455,11 +436,45 @@ mod week_tests {
         assert!(rep.plays >= 1, "plays {}", rep.plays);
         assert!(rep.days_played >= 1);
         assert!(rep.pb_events >= 1, "PB event from 200->210 within week");
-        // rank change 2->3 recorded
-        assert!(rep
+        let change = rep
             .rank_changes
             .iter()
-            .any(|(_, name, from, to)| name.contains("Voltaic") && from != to && from != to));
+            .find(|(bid, ..)| *bid == 644)
+            .expect("engine rank flip must be reported");
+        assert_eq!(change.2, "Copper", "from-name is the engine tier");
+        assert_eq!(change.3, "Bronze", "to-name is the engine tier");
+        let _ = std::fs::remove_file(&dir);
+    }
+
+    /// A change fires on an ENGINE rank flip even when the stored column is
+    /// unchanged — the old stored-index diff saw nothing here.
+    #[test]
+    fn weekly_rank_change_fires_on_engine_flip() {
+        let dir = std::env::temp_dir().join(format!("weekly-engine-{}", std::process::id()));
+        let _ = std::fs::remove_file(&dir);
+        let store = crate::store::Store::open(&dir).unwrap();
+        let now = chrono::Utc::now();
+        let sid = "76561190000000002";
+        // Stored rank stays 2 on both snapshots; the engine goes rank 1 → 2.
+        store
+            .record_snapshot(
+                sid,
+                644,
+                &prog(0, "s", 100, 2),
+                now - chrono::Duration::days(2),
+            )
+            .unwrap();
+        store
+            .record_snapshot(sid, 644, &prog(0, "s", 250, 2), now)
+            .unwrap();
+        let rep = weekly_report(&store, sid, now).unwrap();
+        let change = rep
+            .rank_changes
+            .iter()
+            .find(|(bid, ..)| *bid == 644)
+            .expect("engine flip must emit with a flat stored column");
+        assert_eq!(change.2, "Copper");
+        assert_eq!(change.3, "Bronze");
         let _ = std::fs::remove_file(&dir);
     }
 }
