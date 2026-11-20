@@ -179,6 +179,24 @@ pub struct CustomBenchDto {
 
 #[derive(TS)]
 #[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+/// Builder preview over the real rank rule (`kovaaks_core::custom::rank_custom`),
+/// so the chip in the custom-bench form can never drift from what a save will
+/// actually produce. `rank` 0 = unranked — also the fallback shape while the
+/// draft is invalid (mid-edit), in which case `subcategories` still counts the
+/// distinct non-empty subcategories entered so far.
+pub struct CustomBenchPreviewDto {
+    /// Bench rank index into `tier_names` (0 = unranked).
+    pub rank: u32,
+    /// Bench energy (harmonic mean under the energy rule; 0 otherwise).
+    pub energy: f64,
+    /// Distinct subcategories the draft spans.
+    pub subcategories: u32,
+}
+
+#[derive(TS)]
+#[ts(export)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 /// A scenario's position on its public global board.
@@ -2334,6 +2352,54 @@ pub mod commands {
         Ok(row)
     }
 
+    /// Map a scored rank onto the builder preview shape.
+    pub(super) fn preview_from_rank(
+        ranked: &kovaaks_core::custom::CustomRank,
+        subcategory_count: u32,
+    ) -> CustomBenchPreviewDto {
+        CustomBenchPreviewDto {
+            rank: ranked.rank,
+            energy: ranked.energy,
+            subcategories: subcategory_count,
+        }
+    }
+
+    /// Mid-edit fallback: the draft does not validate yet, so preview Unranked
+    /// while still reporting how many subcategories it spans.
+    fn preview_fallback(bench: &CustomBenchDto) -> CustomBenchPreviewDto {
+        let mut seen: Vec<&str> = Vec::new();
+        for scenario in &bench.scenarios {
+            let name = scenario.subcategory.trim();
+            if !name.is_empty() && !seen.contains(&name) {
+                seen.push(name);
+            }
+        }
+        CustomBenchPreviewDto {
+            rank: 0,
+            energy: 0.0,
+            subcategories: seen.len() as u32,
+        }
+    }
+
+    /// Pure preview computation: build the core row, score it with the real
+    /// rank rule, and fall back to Unranked while the draft is invalid.
+    pub(super) fn preview_of(bench: &CustomBenchDto) -> CustomBenchPreviewDto {
+        let Ok(row) = custom_row(bench) else {
+            return preview_fallback(bench);
+        };
+        // Scores are the draft's own row scores (duplicates: last wins), so
+        // the preview answers "what would this save rank right now?".
+        let scores: std::collections::HashMap<String, f64> = bench
+            .scenarios
+            .iter()
+            .map(|scenario| (scenario.scenario.clone(), scenario.score))
+            .collect();
+        match kovaaks_core::custom::rank_custom(&row, &scores) {
+            Ok(ranked) => preview_from_rank(&ranked, ranked.subcategories.len() as u32),
+            Err(_) => preview_fallback(bench),
+        }
+    }
+
     /// Every custom benchmark of the connected player, scored.
     #[tauri::command]
     pub fn custom_benches(state: State<'_, AppState>) -> Result<Vec<CustomBenchDto>, String> {
@@ -2370,6 +2436,15 @@ pub mod commands {
             return Err(format!("unknown custom benchmark {}", bench.benchmark_id));
         }
         custom_dto(&state, &steam_id, &row)
+    }
+
+    /// Live builder preview: run the real rank rule (`rank_custom`) on the
+    /// draft bench. Pure local math — no profile, store or network access — so
+    /// the chip can never drift from what a save produces. An invalid draft
+    /// (mid-edit) previews Unranked instead of erroring.
+    #[tauri::command]
+    pub fn custom_bench_preview(bench: CustomBenchDto) -> CustomBenchPreviewDto {
+        preview_of(&bench)
     }
 
     /// Delete a custom benchmark (its favorites go with it).
@@ -2940,6 +3015,7 @@ pub fn run() {
             commands::copy_report_image,
             commands::custom_benches,
             commands::save_custom_bench,
+            commands::custom_bench_preview,
             commands::delete_custom_bench,
             commands::known_scenarios,
             commands::registry_bench_preset,
@@ -3320,5 +3396,97 @@ mod tests {
     #[test]
     fn kovaaks_open_uri_is_the_plain_run_link() {
         assert_eq!(kovaaks_open_uri(), "steam://run/824270/");
+    }
+
+    fn preview_scenario(
+        scenario: &str,
+        subcategory: &str,
+        score: f64,
+        thresholds: Vec<f64>,
+    ) -> CustomScenarioDto {
+        CustomScenarioDto {
+            scenario: scenario.into(),
+            category: "Cat".into(),
+            subcategory: subcategory.into(),
+            thresholds,
+            score,
+            tier: 0,
+            tier_name: None,
+            next_threshold: None,
+            delta: None,
+        }
+    }
+
+    fn preview_bench(rule: &str, scenarios: Vec<CustomScenarioDto>) -> CustomBenchDto {
+        CustomBenchDto {
+            benchmark_id: 0,
+            name: "Preview test".into(),
+            abbreviation: "PT".into(),
+            color: "#b08d57".into(),
+            tier_colors: Vec::new(),
+            rule: rule.into(),
+            top_n: 0,
+            tier_names: vec!["Bronze".into(), "Silver".into()],
+            scenarios,
+            rank_index: 0,
+            complete: false,
+            energy: 0.0,
+            rank: None,
+            next_rank_name: None,
+            subcategories: Vec::new(),
+        }
+    }
+
+    /// An invalid draft is normal mid-edit: the preview comes back Unranked
+    /// (never an error) and still counts the distinct non-empty subcategories.
+    #[test]
+    fn custom_bench_preview_falls_back_to_unranked_on_invalid_draft() {
+        let mut bench = preview_bench(
+            "all",
+            vec![
+                preview_scenario("A", "Main", 150.0, vec![100.0]),
+                preview_scenario("B", "Aim", 250.0, vec![100.0]),
+                preview_scenario("C", "  ", 50.0, vec![100.0]),
+            ],
+        );
+        // No name: validate() rejects the draft before ranking.
+        bench.name = String::new();
+        let preview = commands::preview_of(&bench);
+        assert_eq!(preview.rank, 0);
+        assert_eq!(preview.energy, 0.0);
+        assert_eq!(preview.subcategories, 2);
+    }
+
+    /// The happy path runs the real rule: "all" takes the subcategory floor.
+    #[test]
+    fn custom_bench_preview_uses_the_real_all_rule() {
+        let bench = preview_bench(
+            "all",
+            vec![
+                preview_scenario("A", "Main", 150.0, vec![100.0, 200.0]),
+                preview_scenario("B", "Main", 250.0, vec![100.0, 200.0]),
+            ],
+        );
+        let preview = commands::preview_of(&bench);
+        assert_eq!(preview.rank, 1);
+        assert_eq!(preview.energy, 1.0);
+        assert_eq!(preview.subcategories, 1);
+    }
+
+    /// Energy uses `harmonic_strict`: one unplayed subcategory (energy 0)
+    /// zeroes the bench instead of the plain harmonic mean sneaking past.
+    #[test]
+    fn custom_bench_preview_energy_is_strict() {
+        let bench = preview_bench(
+            "energy",
+            vec![
+                preview_scenario("A", "Main", 250.0, vec![100.0, 200.0]),
+                preview_scenario("B", "Aim", 0.0, vec![100.0, 200.0]),
+            ],
+        );
+        let preview = commands::preview_of(&bench);
+        assert_eq!(preview.rank, 0);
+        assert_eq!(preview.energy, 0.0);
+        assert_eq!(preview.subcategories, 2);
     }
 }

@@ -115,6 +115,8 @@ export type ImportBench = GenImportBench
 export type CustomBench = GenCustomBench
 import type { CustomScenarioDto as GenCustomScenario } from './bindings/CustomScenarioDto'
 export type CustomScenario = GenCustomScenario
+import type { CustomBenchPreviewDto as GenCustomBenchPreview } from './bindings/CustomBenchPreviewDto'
+export type CustomBenchPreview = GenCustomBenchPreview
 import type { ScenarioChoiceDto as GenScenarioChoice } from './bindings/ScenarioChoiceDto'
 export type ScenarioChoice = GenScenarioChoice
 import type { BenchPresetDto as GenBenchPreset } from './bindings/BenchPresetDto'
@@ -207,6 +209,11 @@ export function customBenches(): Promise<CustomBench[]> {
 /** Create (`benchmark_id === 0`) or update (`benchmark_id < 0`) a bench. */
 export function saveCustomBench(bench: CustomBench): Promise<CustomBench> {
   return invoke('save_custom_bench', { bench })
+}
+
+/** Debounced builder preview: the real Rust rank rule over the draft bench. */
+export function customBenchPreview(bench: CustomBench): Promise<CustomBenchPreview> {
+  return invoke('custom_bench_preview', { bench })
 }
 
 export function deleteCustomBench(benchmarkId: number): Promise<void> {

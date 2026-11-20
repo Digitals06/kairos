@@ -5,10 +5,12 @@
    * A bench is authored entirely here: scenarios grouped into subcategories,
    * author-supplied thresholds per scenario, tier names, and one of three
    * aggregation rules (all scenarios / top N per subcategory / global energy).
-   * The rank preview mirrors the Rust engine exactly (rankcalc::rank_of plus
-   * the rule), so what the author sees before saving is what they get after.
+   * The rank preview calls a Rust command that runs the real engine
+   * (kovaaks_core::custom::rank_custom), so what the author sees before
+   * saving is what they get after — no mirrored rule to drift.
    */
   import {
+    customBenchPreview,
     customBenches,
     deleteCustomBench,
     exportCustomBench,
@@ -18,6 +20,7 @@
     registryBenchPreset,
     saveCustomBench,
     type CustomBench,
+    type CustomBenchPreview,
     type CustomScenario,
     type ScenarioChoice,
   } from './api'
@@ -83,25 +86,7 @@
     return out
   })
 
-  /** Tier index for a score (0 = below the first threshold). Mirrors rankcalc::rank_of. */
-  function tierOf(score: number, thresholds: number[]): number {
-    if (score <= 0 || thresholds.length === 0) return 0
-    for (let i = thresholds.length - 1; i >= 0; i--) {
-      if (score >= thresholds[i]) return i + 1
-    }
-    return 0
-  }
-
-  /** Precise tier (tier + band fraction, clamped at the top). Mirrors PreciseRank. */
-  function preciseOf(score: number, thresholds: number[]): number {
-    const tier = tierOf(score, thresholds)
-    if (tier === 0 || tier >= thresholds.length) return tier
-    const low = thresholds[tier - 1]
-    const high = thresholds[tier]
-    const band = high - low
-    return band > 0 ? tier + (score - low) / band : tier
-  }
-
+  /** Parse the comma-separated threshold text of one row. */
   function parseThresholds(text: string): number[] {
     return text
       .split(',')
@@ -136,41 +121,72 @@
       (rule !== 'top_n' || (topN >= 1 && topN <= rows.length)),
   )
 
-  /** Per-subcategory preview, mirroring the Rust rule. */
-  const preview = $derived.by(() => {
-    const groups = new Map<string, number[]>()
-    const energies = new Map<string, number>()
+  /** Rank preview, fed by the Rust command (see the $effect below). */
+  let preview = $state<CustomBenchPreview>({ rank: 0, energy: 0, subcategories: 0 })
+
+  /** Wire shape of the current draft — mirrors `save()`'s payload exactly. */
+  function previewPayload(): CustomBench {
+    return {
+      benchmark_id: editingId,
+      name: name.trim(),
+      abbreviation: abbreviation.trim() || 'CS',
+      color,
+      tier_colors: tierNames.map((_, i) => (tierColors[i] ?? '').trim()),
+      rule,
+      top_n: rule === 'top_n' ? topN : 0,
+      tier_names: tierNames,
+      scenarios: rows.map((r) => ({
+        scenario: r.scenario,
+        category: r.category,
+        subcategory: r.subcategory.trim() || DEFAULT_SUBCATEGORY,
+        thresholds: parseThresholds(r.text),
+        score: r.score,
+        tier: 0,
+        tier_name: null,
+        next_threshold: null,
+        delta: null,
+      })),
+      rank_index: 0,
+      complete: false,
+      energy: 0,
+      rank: null,
+      next_rank_name: null,
+      subcategories: [],
+    }
+  }
+
+  /**
+   * Debounced preview against the real Rust rank rule. A generation counter
+   * guards assignment: a stale in-flight response can never overwrite a newer
+   * one. The previous preview stays visible until the new one lands (no
+   * flicker), and failures are silent — the chip is supplementary.
+   */
+  let previewGeneration = 0
+  $effect(() => {
+    // Tracked inputs: every draft edit that can move the rank.
     for (const row of rows) {
-      const thresholds = parseThresholds(row.text)
-      const sub = row.subcategory.trim() || DEFAULT_SUBCATEGORY
-      const tier = tierOf(row.score, thresholds)
-      const precise = preciseOf(row.score, thresholds)
-      if (!groups.has(sub)) groups.set(sub, [])
-      groups.get(sub)!.push(tier)
-      energies.set(sub, Math.max(energies.get(sub) ?? 0, precise))
+      void row.subcategory
+      void row.text
     }
-    let rank = 0
-    let benchEnergy = 0
-    if (groups.size > 0) {
-      if (rule === 'energy') {
-        const values = [...energies.values()]
-        benchEnergy = values.some((v) => v <= 0)
-          ? 0
-          : values.length / values.reduce((sum, v) => sum + 1 / v, 0)
-        rank = Math.floor(Math.min(benchEnergy, tierNames.length))
-      } else if (rule === 'top_n') {
-        rank = Math.min(
-          ...[...groups.values()].map((tiers) => {
-            const sorted = [...tiers].sort((a, b) => b - a)
-            const take = Math.min(topN, sorted.length)
-            return sorted[take - 1] ?? 0
-          }),
-        )
-      } else {
-        rank = Math.min(...[...groups.values()].map((tiers) => Math.min(...tiers)))
-      }
+    void rule
+    void topN
+    void tierNames
+
+    const generation = ++previewGeneration
+    const timer = setTimeout(() => {
+      customBenchPreview(previewPayload())
+        .then((next) => {
+          if (generation === previewGeneration) preview = next
+        })
+        .catch(() => {
+          // Keep the last preview.
+        })
+    }, 400)
+
+    return () => {
+      clearTimeout(timer)
+      previewGeneration += 1
     }
-    return { rank: Number.isFinite(rank) ? rank : 0, energy: benchEnergy, count: groups.size }
   })
 
   const previewName = $derived(
@@ -770,7 +786,7 @@
         {#if preview.rank > 0 && preview.rank < tierNames.length}
           <span class="muted small">→ next: {tierNames[preview.rank]}</span>
         {/if}
-        <span class="muted small">· {preview.count} subcategories</span>
+        <span class="muted small">· {preview.subcategories} subcategories</span>
       </span>
       <button class="btn" disabled={!formValid || busy} onclick={save}>
         {editingId === 0 ? 'Create bench' : 'Save changes'}
