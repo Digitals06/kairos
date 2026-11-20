@@ -516,6 +516,45 @@ fn plays_history_is_ordered_by_played_at() {
     cleanup_db(&path);
 }
 
+#[test]
+fn plays_per_day_groups_by_utc_date_since_boundary() {
+    let path = temp_db("plays-per-day");
+    let store = Store::open(&path).unwrap();
+    let at = |day: u32, hour: u32| {
+        Utc.with_ymd_and_hms(2026, 9, day, hour, 0, 0)
+            .single()
+            .expect("valid date")
+    };
+    // Sep 9 falls before the window; Sep 10 has two plays; Sep 11 has none;
+    // Sep 12 has one. Two different scenarios to prove all rows count.
+    for (day, hour, scenario, file) in [
+        (9, 23, "VT Pasu Novice S5", r"C:\stats\p09.csv"),
+        (10, 1, "VT Pasu Novice S5", r"C:\stats\p10a.csv"),
+        (10, 23, "VT Noviceaj Gridshot S5", r"C:\stats\p10b.csv"),
+        (12, 12, "VT Noviceaj Gridshot S5", r"C:\stats\p12.csv"),
+    ] {
+        let record = play(scenario, at(day, hour), 900.0, 140, 240.0);
+        assert!(store.record_play(SID, &record, file).unwrap());
+    }
+
+    let since = chrono::NaiveDate::from_ymd_opt(2026, 9, 10).expect("valid date");
+    let rows = store.plays_per_day(SID, since).unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            (chrono::NaiveDate::from_ymd_opt(2026, 9, 10).unwrap(), 2),
+            (chrono::NaiveDate::from_ymd_opt(2026, 9, 12).unwrap(), 1),
+        ],
+        "one row per played day, Sep 11 omitted (no plays), Sep 9 before the window"
+    );
+    // Another player's plays never leak into this player's calendar.
+    assert!(store
+        .plays_per_day("76561190000000002", since)
+        .unwrap()
+        .is_empty());
+    cleanup_db(&path);
+}
+
 // ---------- benchmarks_playing ----------
 
 #[test]

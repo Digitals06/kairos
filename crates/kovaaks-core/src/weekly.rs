@@ -262,6 +262,38 @@ pub fn weekly_report(
     })
 }
 
+/// Dense day-by-day play counts for the trailing `days`-day calendar window,
+/// oldest first and ending today (UTC).
+///
+/// Missing days are zero-filled here, in the backend, so the wire payload is a
+/// gap-free array the heatmap can lay out without client-side hole patching.
+pub fn plays_calendar(
+    store: &Store,
+    steam_id: &str,
+    days: u32,
+) -> crate::Result<Vec<(chrono::NaiveDate, u32)>> {
+    plays_calendar_at(store, steam_id, days, chrono::Utc::now().date_naive())
+}
+
+/// [`plays_calendar`] with an injectable `today` for tests.
+pub fn plays_calendar_at(
+    store: &Store,
+    steam_id: &str,
+    days: u32,
+    today: chrono::NaiveDate,
+) -> crate::Result<Vec<(chrono::NaiveDate, u32)>> {
+    let days = days.max(1);
+    let start = today - chrono::Duration::days(days as i64 - 1);
+    let sparse: std::collections::HashMap<chrono::NaiveDate, u32> =
+        store.plays_per_day(steam_id, start)?.into_iter().collect();
+    Ok((0..days)
+        .map(|i| {
+            let date = start + chrono::Duration::days(i as i64);
+            (date, sparse.get(&date).copied().unwrap_or(0))
+        })
+        .collect())
+}
+
 /// Drop duplicate consecutive entries after the boundary insert.
 fn trim(list: Vec<&crate::store::StoredSnapshot>) -> Vec<&crate::store::StoredSnapshot> {
     let mut out: Vec<&crate::store::StoredSnapshot> = Vec::new();
@@ -337,6 +369,56 @@ mod week_tests {
                 },
             )],
         }
+    }
+
+    #[test]
+    fn plays_calendar_pads_missing_days_and_ends_today() {
+        let dir = std::env::temp_dir().join(format!(
+            "calendar-pad-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_file(&dir);
+        let store = crate::store::Store::open(&dir).unwrap();
+        let sid = "76561190000000001";
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 9, 14).unwrap();
+        let rec = |at: chrono::DateTime<chrono::Utc>| crate::types::PlayRecord {
+            scenario: "s".into(),
+            played_at: at,
+            score: 100.0,
+            hit_count: 10,
+            avg_fps: 240.0,
+            source: crate::types::PlaySource::Csv,
+        };
+        let at = |day: u32, hour: u32| {
+            chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 9, day, hour, 0, 0)
+                .single()
+                .expect("valid date")
+        };
+        // Window is Sep 8..Sep 14. Plays on Sep 10 (twice) and Sep 13; the
+        // rest must still reach the caller as explicit zeroes.
+        for (day, hour, csv) in [(10, 1, "c10a"), (10, 2, "c10b"), (13, 9, "c13")] {
+            assert!(store.record_play(sid, &rec(at(day, hour)), csv).unwrap());
+        }
+
+        let days = plays_calendar_at(&store, sid, 7, today).unwrap();
+        let dates: Vec<chrono::NaiveDate> = days.iter().map(|(d, _)| *d).collect();
+        assert_eq!(
+            dates,
+            (8..=14)
+                .map(|d| chrono::NaiveDate::from_ymd_opt(2026, 9, d).unwrap())
+                .collect::<Vec<_>>(),
+            "seven dense days, oldest first, today last"
+        );
+        assert_eq!(
+            days.iter().map(|(_, n)| *n).collect::<Vec<_>>(),
+            vec![0, 0, 2, 0, 0, 1, 0],
+            "gap days are zero-filled"
+        );
+        let _ = std::fs::remove_file(&dir);
     }
 
     #[test]

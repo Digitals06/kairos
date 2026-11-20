@@ -520,6 +520,40 @@ impl Store {
             .collect()
     }
 
+    /// Plays per UTC calendar day since `since_date` (inclusive), ascending.
+    ///
+    /// One `GROUP BY date(played_at)` pass over the local plays table — the
+    /// calendar heatmap's bulk query. Days with no plays are omitted; callers
+    /// densify their own window (see `weekly::plays_calendar_at`).
+    ///
+    /// `played_at` is stored as RFC3339 UTC, so SQLite's `date()` yields the
+    /// same day `date_naive()` would after parsing.
+    pub fn plays_per_day(
+        &self,
+        steam_id: &str,
+        since_date: chrono::NaiveDate,
+    ) -> Result<Vec<(chrono::NaiveDate, u32)>> {
+        let conn = self.lock();
+        let since = since_date.format("%Y-%m-%d").to_string();
+        let mut stmt = conn.prepare(
+            "SELECT date(played_at) AS day, COUNT(*)
+             FROM plays WHERE steam_id = ?1 AND played_at >= ?2
+             GROUP BY day ORDER BY day",
+        )?;
+        let rows = stmt
+            .query_map(params![steam_id, since], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<(String, i64)>, _>>()?;
+        rows.into_iter()
+            .map(|(day, count)| {
+                chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d")
+                    .map(|date| (date, count.max(0) as u32))
+                    .map_err(|e| crate::error::Error::Decode(format!("bad play day {day}: {e}")))
+            })
+            .collect()
+    }
+
     /// Whether ANY snapshot exists for this (player, benchmark). The sync
     /// gate treats "no snapshot" as always-stale — freshly discovered
     /// benchmarks must be fully pulled the next sync, not sit as bare cards

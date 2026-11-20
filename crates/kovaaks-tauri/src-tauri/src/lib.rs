@@ -40,6 +40,8 @@ const DEFAULT_STATS_DIR: &str =
 /// Sync staleness threshold (hours): rows older than this get re-probed on
 /// every `sync_now` (and `force=true` re-probes everything regardless).
 const SYNC_MAX_AGE_HOURS: u64 = 2;
+/// Streak calendar window: six full weeks, so the heatmap lays out cleanly.
+const CALENDAR_DAYS: u32 = 42;
 
 // ---------------------------------------------------------------------------
 // UI-facing DTOs (serde snake_case mirrors of the TypeScript interfaces in
@@ -503,6 +505,27 @@ pub struct WeeklyReportDto {
     pub improvements: Vec<ImprovementRowDto>,
     pub rank_changes: Vec<RankChangeDto>,
 }
+/// One day of the streak calendar heatmap (dense window, zero-filled).
+#[derive(TS)]
+#[ts(export)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PlayDayDto {
+    /// UTC calendar day, `YYYY-MM-DD`.
+    pub date: String,
+    /// Plays ingested that day (0 for a rest day).
+    pub plays: u32,
+}
+#[derive(TS)]
+#[ts(export)]
+/// Six-week play calendar for the streak heatmap. `days` is oldest-first and
+/// always ends today, with missing days already zero-filled.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PlaysCalendarDto {
+    pub days: Vec<PlayDayDto>,
+}
+
 #[derive(TS)]
 #[ts(export)]
 #[derive(Debug, Clone, Serialize)]
@@ -1839,6 +1862,34 @@ pub mod commands {
         Ok(WeeklyReportDto::from(report))
     }
 
+    /// Six-week streak calendar: plays per UTC day from the local plays table.
+    /// Cheap enough to refresh on its own after `local-plays-updated` (one
+    /// grouped query), unlike the merged-series weekly report.
+    #[tauri::command]
+    pub async fn plays_calendar(state: State<'_, AppState>) -> Result<PlaysCalendarDto, String> {
+        let steam_id = state
+            .profile()
+            .map_err(|e| e.to_string())?
+            .map(|p| p.steam_id)
+            .ok_or("no profile connected")?;
+        let store = state.store.clone();
+        let days = tauri::async_runtime::spawn_blocking(move || {
+            kovaaks_core::weekly::plays_calendar(&store, &steam_id, CALENDAR_DAYS)
+        })
+        .await
+        .map_err(|e| format!("calendar join error: {e}"))?
+        .map_err(|e| e.to_string())?;
+        Ok(PlaysCalendarDto {
+            days: days
+                .into_iter()
+                .map(|(date, plays)| PlayDayDto {
+                    date: date.to_string(),
+                    plays,
+                })
+                .collect(),
+        })
+    }
+
     /// CSV series export: one row per merged score point, analysis-friendly.
     #[tauri::command]
     pub async fn export_series_csv(state: State<'_, AppState>) -> Result<String, String> {
@@ -2863,6 +2914,7 @@ pub fn run() {
             commands::export_backup,
             commands::export_series_csv,
             commands::weekly_report,
+            commands::plays_calendar,
             commands::dashboard_rollup,
             commands::get_settings,
             commands::set_settings,
@@ -3062,6 +3114,18 @@ mod tests {
         assert!(
             !json.contains("leaderboardRank"),
             "camelCase leaked: {json}"
+        );
+
+        let calendar = PlaysCalendarDto {
+            days: vec![PlayDayDto {
+                date: "2026-09-10".into(),
+                plays: 2,
+            }],
+        };
+        let json = serde_json::to_string(&calendar).unwrap();
+        assert!(
+            json.contains("\"days\"") && json.contains("\"date\"") && json.contains("\"plays\""),
+            "calendar DTO must stay snake_case: {json}"
         );
     }
 

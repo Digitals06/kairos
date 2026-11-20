@@ -53,6 +53,10 @@ import type { SyncReportDto as GenSyncReport } from './bindings/SyncReportDto'
 export type SyncReport = GenSyncReport
 import type { WeeklyReportDto as GenWeeklyReport } from './bindings/WeeklyReportDto'
 export type WeeklyReport = GenWeeklyReport
+import type { PlaysCalendarDto as GenPlaysCalendar } from './bindings/PlaysCalendarDto'
+export type PlaysCalendar = GenPlaysCalendar
+import type { PlayDayDto as GenPlayDay } from './bindings/PlayDayDto'
+export type PlayDay = GenPlayDay
 import type { ImprovementRowDto as GenImprovementRow } from './bindings/ImprovementRowDto'
 export type ImprovementRow = GenImprovementRow
 import type { RankChangeDto as GenRankChange } from './bindings/RankChangeDto'
@@ -124,6 +128,11 @@ export function exportSeriesCsv(): Promise<string> {
 
 export function weeklyReport(): Promise<WeeklyReport> {
   return invoke('weekly_report')
+}
+
+/** Six-week play calendar (dense, oldest-first, ends today). */
+export function playsCalendar(): Promise<PlaysCalendar> {
+  return invoke('plays_calendar')
 }
 
 export function exportBackup(): Promise<string> {

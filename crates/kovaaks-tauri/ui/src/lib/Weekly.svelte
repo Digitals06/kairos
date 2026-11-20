@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { weeklyReport, type WeeklyReport } from './api'
+  import { listen } from '@tauri-apps/api/event'
+  import { playsCalendar, weeklyReport, type PlaysCalendar, type WeeklyReport } from './api'
 
   // Shared report from the overview (App prefetches it for the level frieze).
   let { shared = null }: { shared?: WeeklyReport | null } = $props()
@@ -50,6 +51,7 @@
   async function refresh() {
     refreshing = true
     await load(true)
+    await loadCalendar()
     refreshing = false
   }
 
@@ -67,6 +69,62 @@
       lit: n > 0,
     }))
   })
+
+  // --- streak calendar ------------------------------------------------------
+  // Its own cheap command (one grouped query), NOT the weekly report: a fresh
+  // play should light today's cell without rebuilding the merged-series view.
+  let calendar = $state<PlaysCalendar | null>(null)
+  let calendarError = $state<string | null>(null)
+  let calendarReq = 0
+
+  async function loadCalendar() {
+    const req = ++calendarReq
+    try {
+      const r = await playsCalendar()
+      if (req === calendarReq) {
+        calendar = r
+        calendarError = null
+      }
+    } catch (e) {
+      if (req === calendarReq) calendarError = String(e)
+    }
+  }
+
+  $effect(() => {
+    void loadCalendar()
+  })
+
+  // New local plays -> refresh only the calendar, never the whole overview.
+  $effect(() => {
+    let unlisten: (() => void) | undefined
+    listen<{ inserted: number }>('local-plays-updated', (e) => {
+      if (e.payload.inserted > 0) void loadCalendar()
+    }).then((fn) => (unlisten = fn))
+    return () => unlisten?.()
+  })
+
+  type HeatCell = { date: string; n: number; level: number } | null
+
+  // 7 weekday columns (Monday first); leading blanks keep every date under
+  // its real weekday. Intensity is relative to the busiest day in the window.
+  const heatCells = $derived.by(() => {
+    const days = calendar?.days ?? []
+    if (!days.length) return [] as HeatCell[]
+    const first = new Date(`${days[0].date}T00:00:00Z`)
+    const lead = (first.getUTCDay() + 6) % 7
+    const max = Math.max(1, ...days.map((d) => d.plays))
+    const cells: HeatCell[] = days.map((d) => {
+      let level = 0
+      if (d.plays > 0) {
+        const ratio = d.plays / max
+        level = ratio <= 0.25 ? 1 : ratio <= 0.5 ? 2 : ratio <= 0.75 ? 3 : 4
+      }
+      return { date: d.date, n: d.plays, level }
+    })
+    return [...Array<HeatCell>(lead).fill(null), ...cells]
+  })
+
+  const lastDay = $derived(calendar?.days.length ? calendar.days[calendar.days.length - 1].date : '')
 
 </script>
 
@@ -87,6 +145,29 @@
           </span>
         {/each}
       </span>
+    </div>
+
+    <div class="calendar">
+      <span class="calendar-title">Plays per day — last 6 weeks</span>
+      {#if calendar}
+        <div class="heatmap" role="img" aria-label="Plays per day over the last six weeks">
+          {#each heatCells as cell, i (i)}
+            {#if cell}
+              <span
+                class="cell l{cell.level}"
+                class:today={cell.date === lastDay}
+                title={`${cell.n} played`}
+              ></span>
+            {:else}
+              <span class="cell blank"></span>
+            {/if}
+          {/each}
+        </div>
+      {:else if calendarError}
+        <span class="calendar-empty">Plays calendar unavailable</span>
+      {:else}
+        <span class="calendar-empty">Loading plays…</span>
+      {/if}
     </div>
 
     <p class="sub">
@@ -228,6 +309,72 @@
     background: var(--accent);
     border-radius: 50% 50% 40% 40%;
     box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+
+  .calendar {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 10px;
+  }
+
+  .calendar-title {
+    font-family: var(--font-serif);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+
+  .heatmap {
+    display: grid;
+    grid-template-columns: repeat(7, 7px);
+    gap: 3px;
+    width: max-content;
+  }
+
+  .cell {
+    width: 7px;
+    height: 7px;
+    border-radius: 1px;
+    background: var(--panel-sunken);
+    border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  }
+
+  .cell.blank {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .cell.l1 {
+    background: color-mix(in srgb, var(--accent) 25%, var(--panel-sunken));
+    border-color: transparent;
+  }
+
+  .cell.l2 {
+    background: color-mix(in srgb, var(--accent) 50%, var(--panel-sunken));
+    border-color: transparent;
+  }
+
+  .cell.l3 {
+    background: color-mix(in srgb, var(--accent) 75%, var(--panel-sunken));
+    border-color: transparent;
+  }
+
+  .cell.l4 {
+    background: var(--accent);
+    border-color: transparent;
+  }
+
+  .cell.today {
+    box-shadow: 0 0 0 1px var(--accent-2);
+  }
+
+  .calendar-empty {
+    font-family: var(--font-serif);
+    font-size: 12px;
+    color: var(--faint);
+    font-style: italic;
   }
 
   .sub {
