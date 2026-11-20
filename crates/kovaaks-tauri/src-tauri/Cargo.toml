@@ -28,5 +28,6 @@ tauri = { version = "2", features = ["tray-icon"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
+tokio = { workspace = true }
 arboard = "3.6.1"
 ts-rs = { version = "12.0.1", features = ["serde-compat", "chrono-impl", "serde-json-impl"] }

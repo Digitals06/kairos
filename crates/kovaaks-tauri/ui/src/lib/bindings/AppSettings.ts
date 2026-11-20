@@ -24,4 +24,9 @@ launch_with_kovaaks: boolean,
  * Look up each scenario's global board position. Off by default: this is
  * the only feature that talks to KovaaK's beyond your own scores.
  */
-show_global_percentiles: boolean, };
+show_global_percentiles: boolean, 
+/**
+ * Ask GitHub once a day (and on the manual Check now) whether a newer
+ * release exists. On by default; opt out stops all automatic checks.
+ */
+update_check_enabled: boolean, };

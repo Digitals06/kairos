@@ -22,6 +22,7 @@ use kovaaks_core::{
 use tauri::Manager;
 
 mod stats_detect;
+mod update_check;
 mod watcher;
 
 /// Meta key: JSON blob of app settings (stats dir override, sync interval).
@@ -649,6 +650,14 @@ pub struct AppSettings {
     /// the only feature that talks to KovaaK's beyond your own scores.
     #[serde(default)]
     pub show_global_percentiles: bool,
+    /// Ask GitHub once a day (and on the manual Check now) whether a newer
+    /// release exists. On by default; opt out stops all automatic checks.
+    #[serde(default = "default_true")]
+    pub update_check_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppSettings {
@@ -659,6 +668,7 @@ impl Default for AppSettings {
             close_to_tray: false,
             launch_with_kovaaks: true,
             show_global_percentiles: false,
+            update_check_enabled: true,
         }
     }
 }
@@ -2864,6 +2874,8 @@ pub fn run() {
             // Live CSV watcher: emits local-plays-updated when new plays land.
             let state = app.state::<AppState>().inner().clone();
             watcher::spawn(app.handle().clone(), state);
+            // Update chip: deferred, cached (24h) and opt-out-able.
+            update_check::spawn_launch_check(app.handle().clone());
             // Registry update check (background, silent on failure): new
             // benchmark seasons arrive without waiting on a rebuild.
             tauri::async_runtime::spawn(async move {
@@ -2933,6 +2945,9 @@ pub fn run() {
             commands::import_custom_bench,
             commands::save_report_png,
             commands::scenario_global,
+            update_check::update_status,
+            update_check::check_update_now,
+            update_check::open_release_page,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

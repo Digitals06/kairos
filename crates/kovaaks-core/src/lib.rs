@@ -26,6 +26,7 @@ pub mod store;
 pub mod streaks;
 pub mod sync;
 pub mod types;
+pub mod update_check;
 pub mod weekly;
 
 pub use error::{Error, Result};

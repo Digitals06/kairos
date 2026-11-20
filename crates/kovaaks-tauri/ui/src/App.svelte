@@ -12,6 +12,9 @@ import { listen } from '@tauri-apps/api/event'
     rankChanges,
     getSettings,
     setSettings,
+    updateStatus,
+    checkUpdateNow,
+    openReleasePage,
     quitApp,
     getBenchmarkDetail,
     toggleFavorite,
@@ -20,6 +23,7 @@ import { listen } from '@tauri-apps/api/event'
     type BenchmarkCard,
     type PlayerProfile,
     type AppSettings,
+    type UpdateStatus,
     weeklyReport,
     type WeeklyReport as WeeklyRep,
   } from './lib/api'
@@ -226,6 +230,9 @@ import { listen } from '@tauri-apps/api/event'
   let closeToTray = $state(true)
   let launchWithKovaaks = $state(true)
   let showGlobalPercentiles = $state(false)
+  let updateCheckEnabled = $state(true)
+  let updateInfo = $state<UpdateStatus | null>(null)
+  let checkingUpdate = $state(false)
   let deepScan = $state(false)
   // `deep` is a per-call flag on sync_now, not persisted server-side; map the
   // toggle onto the sync interval (0h = deep mode) so it survives restarts.
@@ -235,10 +242,12 @@ import { listen } from '@tauri-apps/api/event'
   async function toggleSettings() {
     settingsOpen = !settingsOpen
     if (settingsOpen) {
+      void loadUpdateStatus()
       void getSettings().then((s) => {
         closeToTray = s.close_to_tray
         launchWithKovaaks = s.launch_with_kovaaks
         showGlobalPercentiles = s.show_global_percentiles
+        updateCheckEnabled = s.update_check_enabled
       })
     }
     if (settingsOpen && deepScanDirty) {
@@ -259,6 +268,34 @@ import { listen } from '@tauri-apps/api/event'
       await setSettings({ ...s, sync_interval_hours: on ? 0 : Math.max(1, s.sync_interval_hours || 6) })
     } catch (err) {
       showToast(`Could not save settings: ${String(err)}`)
+    }
+  }
+
+  async function loadUpdateStatus() {
+    try {
+      updateInfo = await updateStatus()
+    } catch {
+      /* update checks are supplementary; stay quiet */
+    }
+  }
+
+  async function doCheckUpdate() {
+    if (checkingUpdate) return
+    checkingUpdate = true
+    try {
+      updateInfo = await checkUpdateNow()
+    } catch {
+      /* quiet: keep the last known state */
+    } finally {
+      checkingUpdate = false
+    }
+  }
+
+  async function openRelease() {
+    try {
+      await openReleasePage()
+    } catch {
+      /* quiet: nothing to say if the browser refuses */
     }
   }
 
@@ -367,6 +404,7 @@ import { listen } from '@tauri-apps/api/event'
   }
 
   onMount(async () => {
+    void loadUpdateStatus()
     try {
       profile = await getProfile()
     } catch (err) {
@@ -570,6 +608,37 @@ import { listen } from '@tauri-apps/api/event'
                     showGlobalPercentiles = on
                     const s: AppSettings = await getSettings()
                     await setSettings({ ...s, show_global_percentiles: on })
+                  }}
+                />
+              </label>
+              <div class="row">
+                <span>
+                  {#if updateInfo?.update_available}
+                    New version available — {updateInfo?.latest_version}<br />
+                    <small>You're running {updateInfo?.current_version}. The release page has the download; Kairos never installs anything on its own.</small>
+                  {:else}
+                    Kairos {updateInfo?.current_version ?? ''}<br />
+                    <small>Updates are read-only here — when one exists, Kairos points you at the release page.</small>
+                  {/if}
+                </span>
+                {#if updateInfo?.update_available}
+                  <button class="btn btn-small" onclick={openRelease}>See release page</button>
+                {:else}
+                  <button class="btn btn-small" onclick={doCheckUpdate} disabled={checkingUpdate}>
+                    {checkingUpdate ? 'Checking…' : 'Check now'}
+                  </button>
+                {/if}
+              </div>
+              <label class="row">
+                <span>Check for Kairos updates<br /><small>Asks GitHub once a day (and when you press Check now) whether a newer version is out. Turn it off to keep Kairos fully offline.</small></span>
+                <input
+                  type="checkbox"
+                  checked={updateCheckEnabled}
+                  onchange={async (e) => {
+                    const on = e.currentTarget.checked
+                    updateCheckEnabled = on
+                    const s: AppSettings = await getSettings()
+                    await setSettings({ ...s, update_check_enabled: on })
                   }}
                 />
               </label>

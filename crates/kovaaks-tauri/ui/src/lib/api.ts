@@ -71,6 +71,8 @@ import type { FamilyDiffDto as GenFamilyDiff } from './bindings/FamilyDiffDto'
 export type FamilyDiff = GenFamilyDiff
 import type { AppSettings as GenAppSettings } from './bindings/AppSettings'
 export type AppSettings = GenAppSettings
+import type { UpdateStatusDto as GenUpdateStatus } from './bindings/UpdateStatusDto'
+export type UpdateStatus = GenUpdateStatus
 
 export function resolveProfile(identifier: string): Promise<PlayerProfile> {
   return invoke('resolve_profile', { identifier })
@@ -161,6 +163,21 @@ export function getSettings(): Promise<AppSettings> {
 
 export function setSettings(settings: AppSettings): Promise<void> {
   return invoke('set_settings', { settings })
+}
+
+/** Cached update state (no network); safe to call at boot. */
+export function updateStatus(): Promise<UpdateStatus> {
+  return invoke('update_status')
+}
+
+/** Bypass the 24h cache and ask GitHub now; failures leave the old state. */
+export function checkUpdateNow(): Promise<UpdateStatus> {
+  return invoke('check_update_now')
+}
+
+/** Open the release page in the system browser (backend owns the OS call). */
+export function openReleasePage(): Promise<void> {
+  return invoke('open_release_page')
 }
 
 /** Quit the app for real — same path as the tray's Quit item. */
