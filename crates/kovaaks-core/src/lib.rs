@@ -33,7 +33,7 @@ pub use error::{Error, Result};
 pub use http::USER_AGENT;
 pub use kovaaks::KovaaksClient;
 pub use metrics::{
-    compute, compute_trailing_30d, compute_window, improving_only, metrics_for_benchmark,
+    compute, compute_trailing_30d, compute_window, metrics_for_benchmark,
     metrics_for_scenario_combined, metrics_for_scenario_plays, Metrics,
 };
 pub use rankdiff::{
@@ -41,6 +41,7 @@ pub use rankdiff::{
 };
 pub use ranks::{rank_for, rank_from_index, scenario_rank_tier};
 pub use registry::Registry;
+pub use series::improving_only;
 pub use steam::EvxlClient;
 pub use store::{SnapshotWrite, Store, StoredScenario, StoredSnapshot};
 pub use sync::{ProgressSource, SyncEngine, SyncReport};

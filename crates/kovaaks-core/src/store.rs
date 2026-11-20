@@ -1316,8 +1316,7 @@ impl Store {
                 if !seen.insert((row.category.clone(), row.scenario.clone())) {
                     continue;
                 }
-                let series =
-                    crate::metrics::scenario_series_combined(self, steam_id, bid, &row.scenario)?;
+                let series = crate::series::scenario_series(self, steam_id, bid, &row.scenario)?;
                 for (at, score) in series {
                     lines.push(format!(
                         "{},{},{},{},{:.4},play",

@@ -2,7 +2,7 @@
 //! same run echoed by the sync) must not inflate the combined series.
 
 use chrono::TimeZone;
-use kovaaks_core::metrics::merge_plays_snapshots_dedup;
+use kovaaks_core::series::{improving_only, merge_plays_snapshots_dedup};
 
 fn utc(secs: i64) -> chrono::DateTime<chrono::Utc> {
     chrono::Utc.timestamp_opt(secs, 0).unwrap()
@@ -66,7 +66,7 @@ fn dedupe_applies_to_improving_snapshots_only_after_filter() {
     // verbatim. Two plays, one duplicate snapshot → 2 points.
     let plays = vec![("S".to_string(), utc(100), 800.0)];
     let snapshots = vec![(utc(110), 800.0), (utc(200), 900.0), (utc(210), 900.0)];
-    let filtered = kovaaks_core::improving_only(&snapshots);
+    let filtered = improving_only(&snapshots);
     let merged = merge_plays_snapshots_dedup(&plays, &filtered);
     assert_eq!(merged.len(), 2);
     assert_eq!(merged[1].1, 900.0);

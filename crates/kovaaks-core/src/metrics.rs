@@ -117,113 +117,18 @@ pub fn metrics_for_scenario_plays(
 /// the gaps where no local play was recorded — the displayed value must be
 /// absolute, from whichever source observed it).
 ///
-/// Snapshots that don't set a new high are skipped (see [`improving_only`]):
-/// a stale repeat usually means the scenario wasn't replayed, and when it
-/// was, the local CSV plays already carry the average.
+/// Snapshots that don't set a new high are skipped (see
+/// [`crate::series::improving_only`]): a stale repeat usually means the
+/// scenario wasn't replayed, and when it was, the local CSV plays already
+/// carry the average.
 pub fn metrics_for_scenario_combined(
     store: &Store,
     steam_id: &str,
     benchmark_id: i64,
     scenario: &str,
 ) -> Result<Metrics> {
-    let series = scenario_series_combined(store, steam_id, benchmark_id, scenario)?;
+    let series = crate::series::scenario_series(store, steam_id, benchmark_id, scenario)?;
     Ok(compute(&series))
-}
-
-/// The merged (plays + new-high snapshots) chronological series — the single
-/// owner of the dedup semantics, reused by consistency analytics.
-pub fn scenario_series_combined(
-    store: &Store,
-    steam_id: &str,
-    benchmark_id: i64,
-    scenario: &str,
-) -> Result<Vec<(DateTime<Utc>, f64)>> {
-    let plays: Vec<(String, DateTime<Utc>, f64)> = store
-        .plays_history(steam_id, scenario)?
-        .into_iter()
-        .map(|rec| (rec.scenario.clone(), rec.played_at, rec.score))
-        .collect();
-    let snapshots: Vec<(DateTime<Utc>, f64)> = store
-        .history(steam_id, benchmark_id)?
-        .iter()
-        .filter_map(|snap| {
-            snap.scenarios
-                .iter()
-                .find(|r| r.scenario == scenario)
-                .map(|row| (snap.captured_at, row.score as f64))
-        })
-        .collect();
-    // New-high snapshots only; snapshot points duplicating a local play (the
-    // same run echoed by the sync) are dropped — see merge_plays_snapshots_dedup.
-    Ok(
-        merge_plays_snapshots_dedup(&plays, &improving_only(&snapshots))
-            .into_iter()
-            .map(|(at, score, _)| (at, score))
-            .collect(),
-    )
-}
-
-/// Keep only the snapshots that set a new high for a scenario, in order.
-///
-/// A sync snapshot that doesn't improve the score almost always means the
-/// scenario wasn't replayed since the previous sync — recording it would
-/// drag averages toward stale data and spray flat dots across the chart.
-/// When the scenario WAS replayed without a new high, the local CSV plays
-/// already describe the average, so the snapshot adds nothing.
-///
-/// The running max seeds at `0.0`: an all-zero (never-played) series
-/// contributes nothing. Input must be chronological (as `Store::history`
-/// returns); output preserves order.
-pub fn improving_only(series: &[(DateTime<Utc>, f64)]) -> Vec<(DateTime<Utc>, f64)> {
-    let mut best = 0.0f64;
-    let mut kept = Vec::new();
-    for &(at, score) in series {
-        if score > best && score.is_finite() {
-            best = score;
-            kept.push((at, score));
-        }
-    }
-    kept
-}
-
-/// Two scores are the same run when they round to the same integer. KovaaK's
-/// scenario scores are precise floats locally, but the sync API echoes them
-/// ROUNDED TO INTEGERS (play 1558.668 syncs as 1559, 805.628 as 806) — so a
-/// raw-epsilon comparison never matches the echo. Rounding both sides first
-/// makes the rule exact: the same float always rounds to the same integer,
-/// and a genuinely different run (e.g. 1125.70 vs 1125.29) rounds apart.
-pub fn is_same_run(a: f64, b: f64) -> bool {
-    (a.round() - b.round()).abs() < 0.5
-}
-
-/// Merge local plays with (already new-high-filtered) snapshot points into one
-/// chronological series, dropping snapshot points that duplicate a local play.
-///
-/// A snapshot that is the same run as a local play (see [`is_same_run`]) is
-/// the same scenario run observed twice — keeping both would add a phantom
-/// sample at the sync timestamp and truncate the real average improvement, so
-/// the snapshot point is skipped and the play (exact time) is kept. Plays are
-/// always kept verbatim.
-pub fn merge_plays_snapshots_dedup(
-    plays: &[(String, DateTime<Utc>, f64)],
-    snapshots: &[(DateTime<Utc>, f64)],
-) -> Vec<(DateTime<Utc>, f64, bool)> {
-    // O(n+m): quantized play scores in a set (`is_same_run` = same rounded
-    // integer), so each snapshot point tests one hash lookup instead of a
-    // linear scan over every play of the scenario.
-    let play_scores: std::collections::HashSet<i64> =
-        plays.iter().map(|(_, _, s)| s.round() as i64).collect();
-    let mut merged: Vec<(DateTime<Utc>, f64, bool)> = plays
-        .iter()
-        .map(|(_, at, score)| (*at, *score, true))
-        .collect();
-    for &(at, score) in snapshots {
-        if !play_scores.contains(&(score.round() as i64)) {
-            merged.push((at, score, false));
-        }
-    }
-    merged.sort_by_key(|(t, _, _)| *t);
-    merged
 }
 
 // ---------- scenario history (charts) ----------
@@ -255,7 +160,7 @@ pub struct ScenarioSeries {
     pub source: ScenarioSeriesSource,
     /// Final merged run history (local plays + non-echo snapshot new-highs),
     /// chronological. The single same-run rule lives in
-    /// [`merge_plays_snapshots_dedup`]; this series is its output.
+    /// [`crate::series::merge_plays_snapshots_dedup`]; this series is its output.
     pub points: Vec<ScenarioPoint>,
 }
 
@@ -292,13 +197,13 @@ fn series_for_scenario(
             .collect();
         // New-highs only (as before): a non-improving replay would spray
         // flat dots and drag the 7-day average down.
-        improving_only(&raw)
+        crate::series::improving_only(&raw)
             .into_iter()
             .map(|(at, score)| (scenario.to_string(), at, score))
             .collect()
     };
-    let snapshots = improving_only(&snapshot_points_raw(history, scenario));
-    let merged = merge_plays_snapshots_dedup(&plays, &snapshots);
+    let snapshots = crate::series::improving_only(&snapshot_points_raw(history, scenario));
+    let merged = crate::series::merge_plays_snapshots_dedup(&plays, &snapshots);
     if merged.is_empty() {
         return None; // nothing synced AND nothing local: no chart
     }
@@ -346,10 +251,11 @@ fn snapshot_points_raw(
 /// that appear only in local plays are appended after, alphabetically.
 ///
 /// A scenario's points come from its synced snapshot scores (score > 0,
-/// new-highs only — see [`improving_only`]). When a scenario has NO synced
-/// score (score 0 in the latest snapshot, or absent from every snapshot) but
-/// has local CSV plays, its series is built from those plays instead — the
-/// chart still renders even though KovaaK's never reported a score for it.
+/// new-highs only — see [`crate::series::improving_only`]). When a scenario
+/// has NO synced score (score 0 in the latest snapshot, or absent from every
+/// snapshot) but has local CSV plays, its series is built from those plays
+/// instead — the chart still renders even though KovaaK's never reported a
+/// score for it.
 pub fn build_scenario_history(
     history: &[crate::store::StoredSnapshot],
     local_plays: &[(String, DateTime<Utc>, f64)],
@@ -745,36 +651,6 @@ mod tests {
         assert_eq!(plays_only.samples, 1);
 
         let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn improving_only_keeps_strict_highs_in_order() {
-        let day = |d: u32| ts(2026, 1, d, 12);
-        let series = vec![
-            (day(1), 0.0),   // unplayed: never a data point
-            (day(2), 500.0), // baseline high: kept
-            (day(3), 500.0), // stale repeat: dropped
-            (day(4), 400.0), // below high: dropped
-            (day(5), 450.0), // partial recovery, still stale: dropped
-            (day(6), 600.0), // new high: kept
-            (day(7), 600.0), // stale repeat: dropped
-        ];
-        let kept = improving_only(&series);
-        assert_eq!(
-            kept,
-            vec![(day(2), 500.0), (day(6), 600.0)],
-            "only new highs survive, in order"
-        );
-        assert!(improving_only(&[]).is_empty());
-        assert_eq!(
-            improving_only(&[(day(1), 300.0)]),
-            vec![(day(1), 300.0)],
-            "a lone baseline is informative"
-        );
-        assert!(
-            improving_only(&[(day(1), 0.0), (day(2), 0.0)]).is_empty(),
-            "all-zero series contributes nothing"
-        );
     }
 
     /// REGRESSION (flat cyan dots + stale averages): a snapshot that repeats

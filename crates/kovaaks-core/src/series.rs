@@ -26,21 +26,116 @@ pub struct SeriesInputs {
     pub snapshots: HashMap<i64, Vec<(DateTime<Utc>, String, f64)>>,
 }
 
-/// Merge local plays with new-high-filtered snapshot points into one
-/// chronological series — THE dedup rule (same rounded integer = same run).
-/// Public so per-call sites can reuse it on already-loaded parts.
-pub fn merge_parts(plays: &[(DateTime<Utc>, f64)], snapshots: &[(DateTime<Utc>, f64)]) -> Series {
-    let mut merged: Series = plays.to_vec();
-    let is = crate::metrics::improving_only(snapshots);
-    let play_scores: std::collections::HashSet<i64> =
-        plays.iter().map(|(_, s)| s.round() as i64).collect();
-    for (at, score) in is {
-        if !play_scores.contains(&(score.round() as i64)) {
-            merged.push((at, score));
+/// Keep only the snapshots that set a new high for a scenario, in order.
+///
+/// A sync snapshot that doesn't improve the score almost always means the
+/// scenario wasn't replayed since the previous sync — recording it would
+/// drag averages toward stale data and spray flat dots across the chart.
+/// When the scenario WAS replayed without a new high, the local CSV plays
+/// already describe the average, so the snapshot adds nothing.
+///
+/// The running max seeds at `0.0`: an all-zero (never-played) series
+/// contributes nothing. Input must be chronological (as `Store::history`
+/// returns); output preserves order.
+pub fn improving_only(series: &[(DateTime<Utc>, f64)]) -> Vec<(DateTime<Utc>, f64)> {
+    let mut best = 0.0f64;
+    let mut kept = Vec::new();
+    for &(at, score) in series {
+        if score > best && score.is_finite() {
+            best = score;
+            kept.push((at, score));
         }
     }
-    merged.sort_by_key(|(t, _)| *t);
+    kept
+}
+
+/// Two scores are the same run when they round to the same integer. KovaaK's
+/// scenario scores are precise floats locally, but the sync API echoes them
+/// ROUNDED TO INTEGERS (play 1558.668 syncs as 1559, 805.628 as 806) — so a
+/// raw-epsilon comparison never matches the echo. Rounding both sides first
+/// makes the rule exact: the same float always rounds to the same integer,
+/// and a genuinely different run (e.g. 1125.70 vs 1125.29) rounds apart.
+pub fn is_same_run(a: f64, b: f64) -> bool {
+    (a.round() - b.round()).abs() < 0.5
+}
+
+/// Merge local plays with (already new-high-filtered) snapshot points into one
+/// chronological series, dropping snapshot points that duplicate a local play.
+///
+/// A snapshot that is the same run as a local play (see [`is_same_run`]) is
+/// the same scenario run observed twice — keeping both would add a phantom
+/// sample at the sync timestamp and truncate the real average improvement, so
+/// the snapshot point is skipped and the play (exact time) is kept. Plays are
+/// always kept verbatim. The `bool` flag is `true` for a play, `false` for a
+/// snapshot.
+pub fn merge_plays_snapshots_dedup(
+    plays: &[(String, DateTime<Utc>, f64)],
+    snapshots: &[(DateTime<Utc>, f64)],
+) -> Vec<(DateTime<Utc>, f64, bool)> {
+    // O(n+m): quantized play scores in a set (`is_same_run` = same rounded
+    // integer), so each snapshot point tests one hash lookup instead of a
+    // linear scan over every play of the scenario.
+    let play_scores: std::collections::HashSet<i64> =
+        plays.iter().map(|(_, _, s)| s.round() as i64).collect();
+    let mut merged: Vec<(DateTime<Utc>, f64, bool)> = plays
+        .iter()
+        .map(|(_, at, score)| (*at, *score, true))
+        .collect();
+    for &(at, score) in snapshots {
+        if !play_scores.contains(&(score.round() as i64)) {
+            merged.push((at, score, false));
+        }
+    }
+    merged.sort_by_key(|(t, _, _)| *t);
     merged
+}
+
+/// Merge local plays with new-high-filtered snapshot points into one
+/// chronological series — THE dedup rule (same rounded integer = same run).
+/// Public so per-call sites can reuse it on already-loaded parts. Thin
+/// projection over [`merge_plays_snapshots_dedup`]: pairs in, pairs out.
+pub fn merge_parts(plays: &[(DateTime<Utc>, f64)], snapshots: &[(DateTime<Utc>, f64)]) -> Series {
+    let flagged_plays: Vec<(String, DateTime<Utc>, f64)> = plays
+        .iter()
+        .map(|&(at, score)| (String::new(), at, score))
+        .collect();
+    merge_plays_snapshots_dedup(&flagged_plays, &improving_only(snapshots))
+        .into_iter()
+        .map(|(at, score, _)| (at, score))
+        .collect()
+}
+
+/// One scenario's merged (plays + new-high snapshots) chronological series —
+/// the single owner of the dedup semantics, reused by consistency analytics.
+pub fn scenario_series(
+    store: &Store,
+    steam_id: &str,
+    benchmark_id: i64,
+    scenario: &str,
+) -> crate::Result<Vec<(DateTime<Utc>, f64)>> {
+    let plays: Vec<(String, DateTime<Utc>, f64)> = store
+        .plays_history(steam_id, scenario)?
+        .into_iter()
+        .map(|rec| (rec.scenario.clone(), rec.played_at, rec.score))
+        .collect();
+    let snapshots: Vec<(DateTime<Utc>, f64)> = store
+        .history(steam_id, benchmark_id)?
+        .iter()
+        .filter_map(|snap| {
+            snap.scenarios
+                .iter()
+                .find(|r| r.scenario == scenario)
+                .map(|row| (snap.captured_at, row.score as f64))
+        })
+        .collect();
+    // New-high snapshots only; snapshot points duplicating a local play (the
+    // same run echoed by the sync) are dropped — see merge_plays_snapshots_dedup.
+    Ok(
+        merge_plays_snapshots_dedup(&plays, &improving_only(&snapshots))
+            .into_iter()
+            .map(|(at, score, _)| (at, score))
+            .collect(),
+    )
 }
 
 /// Bulk series map: ONE history pass per benchmark, ONE plays query total.
@@ -118,5 +213,35 @@ mod tests {
         let mut sorted = times.clone();
         sorted.sort();
         assert_eq!(times, sorted);
+    }
+
+    #[test]
+    fn improving_only_keeps_strict_highs_in_order() {
+        let day = |d: u32| ts(2026, 1, d);
+        let series = vec![
+            (day(1), 0.0),   // unplayed: never a data point
+            (day(2), 500.0), // baseline high: kept
+            (day(3), 500.0), // stale repeat: dropped
+            (day(4), 400.0), // below high: dropped
+            (day(5), 450.0), // partial recovery, still stale: dropped
+            (day(6), 600.0), // new high: kept
+            (day(7), 600.0), // stale repeat: dropped
+        ];
+        let kept = improving_only(&series);
+        assert_eq!(
+            kept,
+            vec![(day(2), 500.0), (day(6), 600.0)],
+            "only new highs survive, in order"
+        );
+        assert!(improving_only(&[]).is_empty());
+        assert_eq!(
+            improving_only(&[(day(1), 300.0)]),
+            vec![(day(1), 300.0)],
+            "a lone baseline is informative"
+        );
+        assert!(
+            improving_only(&[(day(1), 0.0), (day(2), 0.0)]).is_empty(),
+            "all-zero series contributes nothing"
+        );
     }
 }

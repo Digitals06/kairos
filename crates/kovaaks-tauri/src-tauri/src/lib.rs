@@ -1302,7 +1302,7 @@ pub mod commands {
         // Consistency (CV/plateau) per scenario from its merged play/snapshot
         // series (kovaaks-core::consistency).
         let enrich = |scenario: &str| -> (Option<f64>, bool) {
-            let series = kovaaks_core::metrics::scenario_series_combined(
+            let series = kovaaks_core::series::scenario_series(
                 &state.store,
                 &steam_id,
                 benchmark_id,
@@ -2276,7 +2276,7 @@ pub mod commands {
                         false
                     } else {
                         snap.scenarios.iter().any(|row| {
-                            kovaaks_core::metrics::scenario_series_combined(
+                            kovaaks_core::series::scenario_series(
                                 &state.store,
                                 &steam_id,
                                 benchmark_id,
