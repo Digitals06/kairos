@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime};
 
 use tauri::Emitter;
 
-use crate::{run_csv_scan, AppState};
+use crate::{run_csv_scan, run_smart_sync, AppState};
 
 /// Poll cadence. The mtime/count signature doubles as the debounce: KovaaK's
 /// writes land between polls, so ingestion happens on quiesce.
@@ -32,10 +32,35 @@ static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 /// minute at most, so 20+ minutes means the player left and came back).
 const SESSION_GAP_SECS: i64 = 20 * 60;
 
+/// Session gap in seconds, overridable via `KAIROS_SESSION_GAP_SECS` so a
+/// live smoke can use a short gap. Unset/invalid/non-positive falls back to
+/// the 20-minute constant.
+fn session_gap_secs() -> i64 {
+    std::env::var("KAIROS_SESSION_GAP_SECS")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(SESSION_GAP_SECS)
+}
+
 /// A new session starts when the gap between the previous last play and a
 /// newly ingested play exceeds the session gap.
 fn session_boundary(prev_last_ts: i64, new_ts: i64) -> bool {
     new_ts - prev_last_ts >= SESSION_GAP_SECS
+}
+
+/// Quiescence decision: a session is active and its newest ingested play is
+/// at least `gap` seconds old. `None`/inactive never fires; a backwards clock
+/// (now < last play) never fires. Pure — the once-per-session guard lives in
+/// the poll loop (it clears `session_active` after firing).
+fn session_closed(last_play_ts: Option<i64>, now_ts: i64, gap: i64, session_active: bool) -> bool {
+    if !session_active {
+        return false;
+    }
+    let Some(last) = last_play_ts else {
+        return false;
+    };
+    now_ts >= last.saturating_add(gap)
 }
 
 /// Signature of the stats dir: (file count, newest mtime). `None` when the
@@ -65,6 +90,18 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
     std::thread::spawn(move || {
         let mut last_sig: Option<(usize, SystemTime)> = None;
         let mut last_dir: Option<PathBuf> = None;
+        // Quiet auto-sync state (in-thread; seeded from the meta marker so a
+        // previous run's plays don't count, but the newest timestamp is
+        // known). `session_active` = plays ingested this run and not yet
+        // auto-synced; cleared after the quiet sync so it fires once per
+        // session, re-armed by the next ingested play.
+        let mut last_play_ts: Option<i64> = state
+            .store
+            .get_meta(SESSION_LAST_KEY)
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<i64>().ok());
+        let mut session_active = false;
         loop {
             if SHUTDOWN.load(Ordering::Relaxed) {
                 return;
@@ -95,6 +132,9 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
                     }
                 };
                 if inserted > 0 {
+                    // Newest play timestamp of this batch; also arms the
+                    // quiet auto-sync once the session goes idle.
+                    let mut newest_ingested: Option<i64> = None;
                     // Post-session summary: a play above every earlier score
                     // for its scenario is a PB. A >20 min idle gap before
                     // this batch marks the end of the previous session; the
@@ -114,6 +154,7 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
                                     .and_then(|v| v.parse::<i64>().ok());
                                 let plays = state.store.latest_plays(&sid, inserted).ok()?;
                                 let new_last = plays.first()?.played_at;
+                                newest_ingested = Some(new_last.timestamp());
                                 let is_new_session = match prev_marker {
                                     Some(ts) => session_boundary(ts, new_last.timestamp()),
                                     None => false, // first pass ever: seed, no toast
@@ -169,6 +210,56 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
                         });
                     }
                     let _ = app.emit("local-plays-updated", payload);
+                    // Arm the quiet post-session sync (re-arms after every
+                    // new batch; the next idle gap fires exactly one sync).
+                    if let Some(ts) = newest_ingested {
+                        last_play_ts = Some(last_play_ts.map_or(ts, |prev| prev.max(ts)));
+                        session_active = true;
+                    }
+                }
+            }
+            // Quiescence detection: the existing session summary only fires
+            // when the NEXT play batch arrives after a >gap pause, so it can
+            // never notice the player merely stopping. Instead, once an
+            // ingested session has been idle for the gap, run one quiet smart
+            // sync (deep off: played benchmarks + snapshots for the new
+            // plays). No profile -> skip silently. `session_active` is
+            // cleared so this fires once per session; a new play re-arms it.
+            if session_closed(
+                last_play_ts,
+                chrono::Utc::now().timestamp(),
+                session_gap_secs(),
+                session_active,
+            ) {
+                session_active = false;
+                if let Some(steam_id) = state.profile().ok().flatten().map(|p| p.steam_id) {
+                    let app_handle = app.clone();
+                    let store = state.store.clone();
+                    let registry = state.registry;
+                    let stats_dir = state.stats_dir();
+                    tauri::async_runtime::spawn(async move {
+                        match run_smart_sync(
+                            store,
+                            registry,
+                            steam_id,
+                            stats_dir,
+                            false,
+                            "sync_auto",
+                        )
+                        .await
+                        {
+                            Ok(report) => {
+                                let _ = app_handle.emit(
+                                    "sync-quiet-finished",
+                                    serde_json::json!({
+                                        "ok": report.ok,
+                                        "failed": report.failed,
+                                    }),
+                                );
+                            }
+                            Err(e) => eprintln!("auto-sync skipped: {e}"),
+                        }
+                    });
                 }
             }
             last_sig = sig;
@@ -187,5 +278,50 @@ mod tests {
         assert!(session_boundary(1_000, 1_000 + 30 * 60));
         assert!(!session_boundary(1_000, 1_000 + 5 * 60));
         assert!(!session_boundary(5_000, 4_900)); // backwards: no boundary
+    }
+
+    const GAP: i64 = SESSION_GAP_SECS;
+
+    /// An active session whose newest play is at least a gap old is closed.
+    #[test]
+    fn session_closed_fires_after_gap_when_session_active() {
+        let last = 1_700_000_000;
+        assert!(!session_closed(Some(last), last + GAP - 1, GAP, true));
+        assert!(session_closed(Some(last), last + GAP, GAP, true));
+        assert!(session_closed(Some(last), last + 2 * GAP, GAP, true));
+    }
+
+    /// No session was ingested this run: nothing to sync, no matter the age.
+    #[test]
+    fn session_closed_never_fires_without_active_session() {
+        let last = 1_700_000_000;
+        assert!(!session_closed(Some(last), last + 10 * GAP, GAP, false));
+    }
+
+    /// A play timestamp in the future (clock skew) never counts as closed.
+    #[test]
+    fn session_closed_ignores_backwards_clock() {
+        let last = 1_700_000_000;
+        assert!(!session_closed(Some(last), last - GAP, GAP, true));
+        assert!(!session_closed(Some(last), last - 1, GAP, true));
+    }
+
+    /// No ingested play timestamp at all: never closed.
+    #[test]
+    fn session_closed_never_fires_without_last_play() {
+        assert!(!session_closed(None, 1_700_000_000, GAP, true));
+    }
+
+    /// The loop clears `session_active` after firing, so a quiet session is
+    /// not re-synced on every subsequent poll tick.
+    #[test]
+    fn session_closed_stays_quiet_once_cleared() {
+        let last = 1_700_000_000;
+        let now = last + 2 * GAP;
+        assert!(session_closed(Some(last), now, GAP, true));
+        // After the loop's one-shot guard clears the flag...
+        assert!(!session_closed(Some(last), now, GAP, false));
+        // ...a later play re-arms it.
+        assert!(session_closed(Some(now), now + GAP, GAP, true));
     }
 }

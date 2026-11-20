@@ -164,7 +164,7 @@ easing/shadow tokens stay cherry-picked by hand.
 
 ## v0.6.0
 
-- [ ] Auto-sync on KovaaK's exit: the watcher's session boundary (20-min gap)
+- [x] Auto-sync on KovaaK's exit: the watcher's session boundary (20-min gap)
       quietly runs a smart sync so ranks are current the next time the app
       opens (pairs with the session marker)
 - [ ] Custom-bench polish: per-tier color picker, bench duplication, and a

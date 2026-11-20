@@ -911,6 +911,72 @@ fn open_url(url: &str) {
     }
 }
 
+/// Smart sync shared by the `sync_now` command and the watcher's quiet
+/// post-session path: scan local CSVs first, then discover played benchmarks
+/// and probe only rows older than the max-age window (`deep` forces the full
+/// sweep; new local plays also force it). Stamps `last_synced_at` on success.
+/// `label` prefixes the stderr timing line so the two call sites stay
+/// distinguishable in logs.
+pub(crate) async fn run_smart_sync(
+    store: Store,
+    registry: &'static Registry,
+    steam_id: String,
+    stats_dir: PathBuf,
+    deep: bool,
+    label: &str,
+) -> Result<SyncReportDto, String> {
+    let started = Instant::now();
+    let source = KovaaksClient::new().map_err(|e| e.to_string())?;
+    let engine = SyncEngine::new(store.clone(), source, registry);
+    // Smart sync: scan local CSVs FIRST. New plays mean any benchmark
+    // might have changed → full sweep. No new plays → only rows not
+    // checked within the max-age window are re-probed (saves ~200
+    // probes per routine sync; the 2h max-age still catches remote-only
+    // rank changes).
+    let scan = match csv_ingest::ensure_cutoff(&store) {
+        Ok(cutoff) => Some(csv_ingest::scan_dir(&stats_dir, cutoff, &store, &steam_id)),
+        Err(_) => None,
+    };
+    if let Some(scan) = &scan {
+        let _ = store.set_meta(INGEST_SEEN_KEY, &scan.seen.to_string());
+        let _ = store.set_meta(INGEST_INSERTED_KEY, &scan.inserted.to_string());
+    }
+    let new_plays = scan.as_ref().map(|s| s.inserted).unwrap_or(0);
+    // Launch sync (deep off): probe only benchmarks the player already has
+    // rows for — the old full major-family registry sweep (hundreds of
+    // probes at 4/s) was the app's launch-time cost. Deep runs keep the
+    // full sweep (that's how new families are discovered).
+    let discovery = if deep {
+        engine
+            .discover(&steam_id, true)
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        engine
+            .discover_played(&steam_id)
+            .await
+            .map_err(|e| e.to_string())?
+    };
+    let stale = engine
+        .sync_stale(&steam_id, SYNC_MAX_AGE_HOURS, deep || new_plays > 0)
+        .await
+        .map_err(|e| e.to_string())?;
+    let report = SyncReportDto {
+        ok: discovery.ok + stale.ok,
+        failed: discovery.failed + stale.failed,
+        errors: discovery.errors.into_iter().chain(stale.errors).collect(),
+    };
+
+    let _ = store.set_meta(LAST_SYNCED_KEY, &chrono::Utc::now().to_rfc3339());
+    eprintln!(
+        "{label}: ok={} failed={} in {:?}",
+        report.ok,
+        report.failed,
+        started.elapsed()
+    );
+    Ok(report)
+}
+
 pub mod commands {
     use super::*;
 
@@ -965,61 +1031,19 @@ pub mod commands {
     /// populated. Combined report; RFC3339 timestamp lands in meta on success.
     #[tauri::command]
     pub async fn sync_now(state: State<'_, AppState>, deep: bool) -> Result<SyncReportDto, String> {
-        let started = Instant::now();
-        let (store, steam_id) = match state.profile().map_err(|e| e.to_string())? {
-            Some(p) => (state.store.clone(), p.steam_id),
+        let steam_id = match state.profile().map_err(|e| e.to_string())? {
+            Some(p) => p.steam_id,
             None => return Err("no profile connected".into()),
         };
-        let source = KovaaksClient::new().map_err(|e| e.to_string())?;
-        let engine = SyncEngine::new(store.clone(), source, state.registry);
-        // Smart sync: scan local CSVs FIRST. New plays mean any benchmark
-        // might have changed → full sweep. No new plays → only rows not
-        // checked within the max-age window are re-probed (saves ~200
-        // probes per routine sync; the 2h max-age still catches remote-only
-        // rank changes).
-        let dir = state.stats_dir();
-        let scan = match csv_ingest::ensure_cutoff(&store) {
-            Ok(cutoff) => Some(csv_ingest::scan_dir(&dir, cutoff, &store, &steam_id)),
-            Err(_) => None,
-        };
-        if let Some(scan) = &scan {
-            let _ = store.set_meta(INGEST_SEEN_KEY, &scan.seen.to_string());
-            let _ = store.set_meta(INGEST_INSERTED_KEY, &scan.inserted.to_string());
-        }
-        let new_plays = scan.as_ref().map(|s| s.inserted).unwrap_or(0);
-        // Launch sync (deep off): probe only benchmarks the player already has
-        // rows for — the old full major-family registry sweep (hundreds of
-        // probes at 4/s) was the app's launch-time cost. Deep runs keep the
-        // full sweep (that's how new families are discovered).
-        let discovery = if deep {
-            engine
-                .discover(&steam_id, true)
-                .await
-                .map_err(|e| e.to_string())?
-        } else {
-            engine
-                .discover_played(&steam_id)
-                .await
-                .map_err(|e| e.to_string())?
-        };
-        let stale = engine
-            .sync_stale(&steam_id, SYNC_MAX_AGE_HOURS, deep || new_plays > 0)
-            .await
-            .map_err(|e| e.to_string())?;
-        let report = SyncReportDto {
-            ok: discovery.ok + stale.ok,
-            failed: discovery.failed + stale.failed,
-            errors: discovery.errors.into_iter().chain(stale.errors).collect(),
-        };
-
-        let _ = store.set_meta(LAST_SYNCED_KEY, &chrono::Utc::now().to_rfc3339());
-        eprintln!(
-            "sync_now: ok={} failed={} in {:?}",
-            report.ok,
-            report.failed,
-            started.elapsed()
-        );
-        Ok(report)
+        run_smart_sync(
+            state.store.clone(),
+            state.registry,
+            steam_id,
+            state.stats_dir(),
+            deep,
+            "sync_now",
+        )
+        .await
     }
 
     /// Build one overview card from store + registry + metrics.

@@ -108,6 +108,16 @@ import { listen } from '@tauri-apps/api/event'
     return () => unlisten?.()
   })
 
+  // Auto-sync on KovaaK's exit (backend quiet smart sync). Refresh only the
+  // "last synced" badge — a background sync must not re-render the grid.
+  $effect(() => {
+    let unlisten: (() => void) | undefined
+    listen<{ ok: number; failed: number }>('sync-quiet-finished', () => {
+      refreshLastSynced()
+    }).then((fn) => (unlisten = fn))
+    return () => unlisten?.()
+  })
+
   function refreshLastSynced() {
     ingestStatus()
       .then((s) => (lastSyncedAt = s.last_synced_at))
