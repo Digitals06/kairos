@@ -39,6 +39,14 @@ pub struct GrindResult {
     /// together reach the next rank. Empty when `targets` is non-empty, the
     /// benchmark is complete, or no reachable plan exists.
     pub plan: Vec<GrindTarget>,
+    /// The engine's single completion answer, consumed by every surface (the
+    /// detail panel and the overview chip alike). True when the difficulty is
+    /// finished — `current.complete` or its rank already sits at the ladder
+    /// top — or when the engine found nothing to suggest and `next_rank`
+    /// really is `current_rank`. A plateau corner (no targets, no plan, but a
+    /// next tier exists) is NOT complete: the bench is stuck mid-ladder and
+    /// saying so is the honest answer.
+    pub complete: bool,
 }
 
 /// Set a scenario's probe score AND its derived tier: the engine's basic
@@ -535,6 +543,7 @@ pub fn next_targets(
             next_rank_index: next_index,
             targets: Vec::new(),
             plan: Vec::new(),
+            complete: true,
         };
     }
 
@@ -622,12 +631,16 @@ pub fn next_targets(
     } else {
         Vec::new()
     };
+    // One answer, computed once: a plateau corner (nothing to suggest, next
+    // tier still named) is deliberately NOT complete.
+    let complete = targets.is_empty() && plan.is_empty() && next_name == current.name;
     GrindResult {
         current_rank: current.name,
         next_rank: next_name,
         next_rank_index: next_index,
         targets,
         plan,
+        complete,
     }
 }
 
@@ -1082,6 +1095,7 @@ mod tests {
             result.targets.is_empty() && result.plan.is_empty(),
             "at-top must return the complete panel shape, not a plan"
         );
+        assert!(result.complete, "at the ladder top the engine is complete");
         assert_eq!(result.next_rank_index, 10, "no further tier");
     }
 
@@ -1144,9 +1158,80 @@ mod tests {
         }
     }
 
-    /// Complete benchmarks expose no targets and no plan.
+    /// Divergence corner (detail vs overview card, pre-unification): the card
+    /// claimed "complete" whenever `targets` and `plan` were both empty, while
+    /// the detail panel only did when `next_rank == current_rank`. A bench
+    /// stuck mid-ladder — no single-scenario flip and no honest plan, yet a
+    /// higher tier still named — is exactly that corner. The engine now
+    /// answers NOT complete on both surfaces.
     #[test]
-    fn complete_benchmark_has_no_plan() {
+    fn plateau_corner_mid_ladder_is_not_complete() {
+        // Floor family ("basic"), one subcategory holding both scenarios.
+        // Each scenario ladder has 2 rungs while the difficulty has 4 tiers:
+        // maxing both scenarios cannot lift the floor past tier 2.
+        let difficulty = Difficulty {
+            name: "All".into(),
+            kovaaks_benchmark_id: 0,
+            sharecode: String::new(),
+            rank_colors: ["A", "B", "C", "D"]
+                .iter()
+                .map(|n| crate::types::RankTier {
+                    name: n.to_string(),
+                    color: "#000".into(),
+                })
+                .collect(),
+            categories: vec![serde_json::json!({
+                "categoryName": "Clicking",
+                "subcategories": [
+                    {"subcategoryName": "Static", "scenarioCount": 2}
+                ]
+            })],
+            scenario_selection: None,
+        };
+        let bench = crate::types::BenchmarkDef {
+            name: "T".into(),
+            abbreviation: "T".into(),
+            color: "#000".into(),
+            rank_calculation: "basic".into(),
+            spreadsheet_url: String::new(),
+            difficulties: vec![difficulty.clone()],
+            hidden: false,
+        };
+        let ladder = [100.0, 200.0];
+        let mut base = progress_from(&[("a", 200.0, &ladder), ("b", 200.0, &ladder)]);
+        for (_, cat) in &mut base.categories {
+            for (_, e) in &mut cat.scenarios {
+                e.scenario_rank = 2; // both at the top of their own ladder
+            }
+        }
+        let current = compute_rank(&base, &bench, &difficulty);
+        assert!(
+            !current.complete && current.rank < 4,
+            "fixture must sit mid-ladder"
+        );
+        let result = next_targets(&base, &bench, &difficulty);
+        assert!(
+            result.targets.is_empty() && result.plan.is_empty(),
+            "fixture must produce the empty corner: {:?} / {:?}",
+            result.targets,
+            result.plan
+        );
+        assert_ne!(
+            result.next_rank, result.current_rank,
+            "fixture must keep a higher tier named (the old card would say complete)"
+        );
+        assert!(
+            !result.complete,
+            "a plateaued mid-ladder state is not complete"
+        );
+    }
+
+    /// Maxing every scenario ladder leaves the engine with nothing to suggest:
+    /// no targets, no plan. On VT S3 Advanced that state still names a higher
+    /// tier (Jade -> Master), so the unified completion answer is NOT complete.
+    /// This is the old detail-vs-card divergence corner made explicit.
+    #[test]
+    fn maxed_ladders_without_a_path_expose_no_plan() {
         let registry = crate::Registry;
         let (bench, difficulty) = registry.by_id(266).expect("VT S3 Advanced");
         let maxes: [&[f64]; 6] = [
@@ -1174,6 +1259,14 @@ mod tests {
         let result = next_targets(&base, bench, &difficulty);
         assert!(result.targets.is_empty());
         assert!(result.plan.is_empty());
+        assert_ne!(
+            result.next_rank, result.current_rank,
+            "next tier still named"
+        );
+        assert!(
+            !result.complete,
+            "no computed path while a higher tier is named is a plateau, not complete"
+        );
     }
 
     /// Complete benchmarks expose no targets.

@@ -1068,6 +1068,37 @@ pub(crate) async fn run_smart_sync(
 pub mod commands {
     use super::*;
 
+    /// The one profile gate: profile result in, SteamID or the canonical
+    /// error out. Pure (no `AppState`) so the error contract is unit-testable.
+    /// Error strings are UI-visible and must not drift: store errors propagate
+    /// via `to_string()`, a missing profile is exactly "no profile connected".
+    pub(crate) fn require_steam_id(
+        profile: kovaaks_core::Result<Option<kovaaks_core::types::PlayerProfile>>,
+    ) -> Result<String, String> {
+        profile
+            .map_err(|e| e.to_string())?
+            .map(|p| p.steam_id)
+            .ok_or_else(|| "no profile connected".to_string())
+    }
+
+    /// Every profile-gated command resolves its SteamID through here.
+    fn steam_id_of(state: &AppState) -> Result<String, String> {
+        require_steam_id(state.profile())
+    }
+
+    /// Join a `spawn_blocking` future, naming it in the join-error string.
+    /// The `{name} join error: ...` contract is UI-visible; callers pass the
+    /// same names they always used ("grind_overview", "weekly", ...).
+    async fn run_blocking<F, T>(name: &'static str, fut: F) -> Result<T, String>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        tauri::async_runtime::spawn_blocking(fut)
+            .await
+            .map_err(|e| format!("{name} join error: {e}"))
+    }
+
     /// Quit the app for real (the tray's Quit goes through the same call).
     /// Exposed to the UI so a visible "Quit" is always reachable.
     #[tauri::command]
@@ -1119,10 +1150,7 @@ pub mod commands {
     /// populated. Combined report; RFC3339 timestamp lands in meta on success.
     #[tauri::command]
     pub async fn sync_now(state: State<'_, AppState>, deep: bool) -> Result<SyncReportDto, String> {
-        let steam_id = match state.profile().map_err(|e| e.to_string())? {
-            Some(p) => p.steam_id,
-            None => return Err("no profile connected".into()),
-        };
+        let steam_id = steam_id_of(&state)?;
         run_smart_sync(
             state.store.clone(),
             state.registry,
@@ -1212,11 +1240,7 @@ pub mod commands {
     /// benchmark, for post-sync toast surfacing. Read-only.
     #[tauri::command]
     pub fn rank_changes(state: State<'_, AppState>) -> Result<Vec<RankChange>, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .map(|p| p.steam_id)
-            .ok_or("no profile connected")?;
+        let steam_id = steam_id_of(&state)?;
         let state = state.inner();
         kovaaks_core::rankdiff::compute_rank_changes(&state.store, state.registry, &steam_id)
             .map_err(|e| e.to_string())
@@ -1229,11 +1253,7 @@ pub mod commands {
         state: State<'_, AppState>,
         benchmark_id: i64,
     ) -> Result<Option<GrindNextDto>, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .map(|p| p.steam_id)
-            .ok_or("no profile connected")?;
+        let steam_id = steam_id_of(&state)?;
         let state = state.inner();
         let Some((bench, difficulty)) = state.registry.by_id(benchmark_id as u64) else {
             return Ok(None);
@@ -1247,7 +1267,6 @@ pub mod commands {
         };
         let base = kovaaks_core::stored_to_progress(latest);
         let result = kovaaks_core::grind::next_targets(&base, bench, &difficulty);
-        let complete = result.targets.is_empty() && result.next_rank == result.current_rank;
         // Consistency (CV/plateau) per scenario from its merged play/snapshot
         // series (kovaaks-core::consistency).
         let enrich = |scenario: &str| -> (Option<f64>, bool) {
@@ -1280,7 +1299,7 @@ pub mod commands {
         Ok(Some(GrindNextDto {
             current_rank: result.current_rank,
             next_rank: result.next_rank,
-            complete,
+            complete: result.complete,
             targets: result.targets.into_iter().map(to_dto).collect(),
             plan: result.plan.into_iter().map(to_dto).collect(),
         }))
@@ -1292,13 +1311,8 @@ pub mod commands {
     #[tauri::command]
     pub async fn get_overview(state: State<'_, AppState>) -> Result<Vec<BenchmarkCard>, String> {
         let state = state.inner().clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            let __instant = std::time::Instant::now();
-            let steam_id = state
-                .profile()
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "no profile connected".to_string())?
-                .steam_id;
+        run_blocking("overview", move || {
+            let steam_id = steam_id_of(&state)?;
             let favorite_ids: std::collections::HashSet<i64> = state
                 .store
                 .favorites(&steam_id)
@@ -1440,8 +1454,7 @@ pub mod commands {
             });
             Ok(folded)
         })
-        .await
-        .map_err(|e| format!("overview join error: {e}"))?
+        .await?
     }
 
     /// Detail for a user-defined benchmark. No snapshot history exists, so the
@@ -1549,12 +1562,8 @@ pub mod commands {
         benchmark_id: i64,
     ) -> Result<BenchmarkDetail, String> {
         let state = state.inner().clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            let steam_id = state
-                .profile()
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "no profile connected".to_string())?
-                .steam_id;
+        run_blocking("detail", move || {
+            let steam_id = steam_id_of(&state)?;
             if let Some(benchmark_row) = row_id(benchmark_id) {
                 return custom_detail(&state, &steam_id, benchmark_row);
             }
@@ -1758,8 +1767,7 @@ pub mod commands {
                 },
             })
         })
-        .await
-        .map_err(|e| format!("detail join error: {e}"))?
+        .await?
     }
 
     /// CSV ingest counters from the last scan + last sync timestamp.
@@ -1774,13 +1782,9 @@ pub mod commands {
     pub async fn dashboard_rollup(
         state: State<'_, AppState>,
     ) -> Result<DashboardFamiliesDto, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .map(|p| p.steam_id)
-            .ok_or("no profile connected")?;
+        let steam_id = steam_id_of(&state)?;
         let store = state.store.clone();
-        tauri::async_runtime::spawn_blocking(move || {
+        run_blocking("dashboard", move || {
             kovaaks_core::dashboard::dashboard_families(&store, &steam_id)
                 .map(|families| DashboardFamiliesDto {
                     families: families
@@ -1807,8 +1811,7 @@ pub mod commands {
                 })
                 .map_err(|e| e.to_string())
         })
-        .await
-        .map_err(|e| format!("dashboard join error: {e}"))?
+        .await?
     }
 
     /// Week-at-a-glance report (7-day window): plays, PBs, top improvements,
@@ -1821,18 +1824,12 @@ pub mod commands {
                 return Ok(WeeklyReportDto::from(r));
             }
         }
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .map(|p| p.steam_id)
-            .ok_or("no profile connected")?;
+        let steam_id = steam_id_of(&state)?;
         let store = state.store.clone();
-        let report = tauri::async_runtime::spawn_blocking(move || {
-            let __t = std::time::Instant::now();
+        let report = run_blocking("weekly", move || {
             kovaaks_core::weekly::weekly_report(&store, &steam_id, chrono::Utc::now())
         })
-        .await
-        .map_err(|e| format!("weekly join error: {e}"))?
+        .await?
         .map_err(|e| e.to_string())?;
         if let Ok(mut g) = state.weekly_cache.lock() {
             *g = Some((std::time::Instant::now(), report.clone()));
@@ -1845,17 +1842,12 @@ pub mod commands {
     /// grouped query), unlike the merged-series weekly report.
     #[tauri::command]
     pub async fn plays_calendar(state: State<'_, AppState>) -> Result<PlaysCalendarDto, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .map(|p| p.steam_id)
-            .ok_or("no profile connected")?;
+        let steam_id = steam_id_of(&state)?;
         let store = state.store.clone();
-        let days = tauri::async_runtime::spawn_blocking(move || {
+        let days = run_blocking("calendar", move || {
             kovaaks_core::weekly::plays_calendar(&store, &steam_id, CALENDAR_DAYS)
         })
-        .await
-        .map_err(|e| format!("calendar join error: {e}"))?
+        .await?
         .map_err(|e| e.to_string())?;
         Ok(PlaysCalendarDto {
             days: days
@@ -1871,15 +1863,10 @@ pub mod commands {
     /// CSV series export: one row per merged score point, analysis-friendly.
     #[tauri::command]
     pub async fn export_series_csv(state: State<'_, AppState>) -> Result<String, String> {
+        let steam_id = steam_id_of(&state)?;
         let csv = state
             .store
-            .export_series_csv(
-                &state
-                    .profile()
-                    .map_err(|e| e.to_string())?
-                    .map(|p| p.steam_id)
-                    .ok_or("no profile connected")?,
-            )
+            .export_series_csv(&steam_id)
             .map_err(|e| e.to_string())?;
         let home =
             std::env::var("USERPROFILE").map_err(|_| "no user profile directory".to_string())?;
@@ -1912,7 +1899,7 @@ pub mod commands {
     #[tauri::command]
     pub async fn refresh_local(state: State<'_, AppState>) -> Result<IngestStatus, String> {
         let state = state.inner().clone();
-        tauri::async_runtime::spawn_blocking(move || {
+        run_blocking("refresh", move || {
             // Prefer the scan's own counts when it ran; fall back to the
             // stored meta (last scan's counters) when there was no profile.
             let status = match run_csv_scan(&state.store) {
@@ -1925,8 +1912,7 @@ pub mod commands {
             };
             Ok(status)
         })
-        .await
-        .map_err(|e| format!("refresh join error: {e}"))?
+        .await?
     }
 
     /// Current app settings.
@@ -1970,11 +1956,7 @@ pub mod commands {
         state: State<'_, AppState>,
         benchmark_id: i64,
     ) -> Result<ReconcileDto, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         let history = state
             .store
             .history(&steam_id, benchmark_id)
@@ -2030,11 +2012,7 @@ pub mod commands {
     /// Toggle a benchmark's favorite pin. Returns the new state (true = pinned).
     #[tauri::command]
     pub fn toggle_favorite(state: State<'_, AppState>, benchmark_id: i64) -> Result<bool, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         let favorites = state
             .store
             .favorites(&steam_id)
@@ -2089,11 +2067,7 @@ pub mod commands {
     /// best score resolved into `done` and the deadline into `days_left`.
     #[tauri::command]
     pub fn goals(state: State<'_, AppState>) -> Result<Vec<ScenarioGoalDto>, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         let goals = state
             .store
             .scenario_goals(&steam_id)
@@ -2122,11 +2096,7 @@ pub mod commands {
         target: f64,
         deadline: Option<String>,
     ) -> Result<ScenarioGoalDto, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         state
             .store
             .set_scenario_goal(&steam_id, &scenario, target, deadline.as_deref())
@@ -2147,11 +2117,7 @@ pub mod commands {
     /// Remove one scenario target. Returns whether a goal existed.
     #[tauri::command]
     pub fn clear_goal(state: State<'_, AppState>, scenario: String) -> Result<bool, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         state
             .store
             .clear_scenario_goal(&steam_id, &scenario)
@@ -2191,12 +2157,8 @@ pub mod commands {
     #[tauri::command]
     pub async fn grind_overview(state: State<'_, AppState>) -> Result<Vec<GrindChipDto>, String> {
         let state = state.inner().clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            let steam_id = state
-                .profile()
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "no profile connected".to_string())?
-                .steam_id;
+        run_blocking("grind_overview", move || {
+            let steam_id = steam_id_of(&state)?;
             let mut chips = Vec::new();
             for benchmark_id in state
                 .store
@@ -2217,11 +2179,10 @@ pub mod commands {
                 let progress = kovaaks_core::stored_to_progress(&snap);
                 let grind = kovaaks_core::grind::next_targets(&progress, def, &diff);
                 let plateaued = {
-                    // complete tiers can't plateau: a meaningless tag would
-                    // read as a bug (suppressed, as the old inline chip did).
-                    let complete = grind.next_rank == grind.current_rank
-                        || (grind.targets.is_empty() && grind.plan.is_empty());
-                    if complete {
+                    // Complete tiers can't plateau: a meaningless tag would
+                    // read as a bug. The engine owns the completion answer
+                    // (detail panel and this chip now agree on it).
+                    if grind.complete {
                         false
                     } else {
                         snap.scenarios.iter().any(|row| {
@@ -2253,8 +2214,7 @@ pub mod commands {
             }
             Ok(chips)
         })
-        .await
-        .map_err(|e| format!("grind_overview join error: {e}"))?
+        .await?
     }
 
     // ---------------------------------------------------------------------
@@ -2377,11 +2337,7 @@ pub mod commands {
     /// Every custom benchmark of the connected player, scored.
     #[tauri::command]
     pub fn custom_benches(state: State<'_, AppState>) -> Result<Vec<CustomBenchDto>, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         let rows = state
             .store
             .custom_benches(&steam_id)
@@ -2398,11 +2354,7 @@ pub mod commands {
         state: State<'_, AppState>,
         bench: CustomBenchDto,
     ) -> Result<CustomBenchDto, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         let mut row = custom_row(&bench)?;
         if row.id == 0 {
             let rowid = state
@@ -2426,11 +2378,7 @@ pub mod commands {
         state: State<'_, AppState>,
         benchmark_id: i64,
     ) -> Result<(), String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         let rowid = row_id(benchmark_id).ok_or_else(|| "not a custom benchmark".to_string())?;
         state
             .store
@@ -2443,11 +2391,7 @@ pub mod commands {
     /// score (snapshots + local plays) so the picker can show something useful.
     #[tauri::command]
     pub fn known_scenarios(state: State<'_, AppState>) -> Result<Vec<ScenarioChoiceDto>, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         let known = state
             .store
             .known_scenarios(&steam_id)
@@ -2569,11 +2513,7 @@ pub mod commands {
         state: State<'_, AppState>,
         benchmark_id: i64,
     ) -> Result<BenchPresetDto, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         bench_preset_from(state.registry, &state.store, &steam_id, benchmark_id)
     }
 
@@ -2647,11 +2587,7 @@ pub mod commands {
         state: State<'_, AppState>,
         benchmark_id: i64,
     ) -> Result<ExportBenchDto, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         let rowid = row_id(benchmark_id).ok_or_else(|| "not a custom benchmark".to_string())?;
         let row = state
             .store
@@ -2709,11 +2645,7 @@ pub mod commands {
         state: State<'_, AppState>,
         json: String,
     ) -> Result<ImportBenchDto, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         let value: serde_json::Value =
             serde_json::from_str(&json).map_err(|e| format!("not valid JSON: {e}"))?;
         let bench_value = value.get("bench").cloned().unwrap_or_else(|| value.clone());
@@ -2805,11 +2737,7 @@ pub mod commands {
         state: State<'_, AppState>,
         scenario: String,
     ) -> Result<Option<ScenarioGlobalDto>, String> {
-        let steam_id = state
-            .profile()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no profile connected".to_string())?
-            .steam_id;
+        let steam_id = steam_id_of(&state)?;
         if !state.load_settings().show_global_percentiles {
             return Ok(None);
         }
@@ -3066,6 +2994,34 @@ mod tests {
         for other in ["0", "1", "Quit", "Show Kairos", "Launch KovaaK's", ""] {
             assert_eq!(tray_action(other), TrayAction::Ignore, "id {other:?}");
         }
+    }
+
+    /// The profile gate's error strings are UI-visible: a missing profile must
+    /// stay exactly "no profile connected", and store errors pass through
+    /// verbatim (`to_string()`). One resolver, one contract.
+    #[test]
+    fn profile_gate_error_strings_are_stable() {
+        assert_eq!(
+            commands::require_steam_id(Ok(None)).unwrap_err(),
+            "no profile connected"
+        );
+        let profile = kovaaks_core::types::PlayerProfile {
+            steam_id: "76561198000000001".into(),
+            persona: "P".into(),
+            avatar_url: String::new(),
+            country: String::new(),
+        };
+        assert_eq!(
+            commands::require_steam_id(Ok(Some(profile))).unwrap(),
+            "76561198000000001"
+        );
+        let err = kovaaks_core::Error::SteamNotFound("nope".into());
+        let expected = err.to_string();
+        assert_eq!(
+            commands::require_steam_id(Err(err)).unwrap_err(),
+            expected,
+            "store errors must pass through verbatim"
+        );
     }
 
     /// REGRESSION (skeleton-forever bug): the frontend reads snake_case fields
