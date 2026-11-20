@@ -47,9 +47,23 @@ fn session_gap_secs() -> i64 {
 }
 
 /// A new session starts when the gap between the previous last play and a
-/// newly ingested play exceeds the session gap.
-fn session_boundary(prev_last_ts: i64, new_ts: i64) -> bool {
-    new_ts - prev_last_ts >= SESSION_GAP_SECS
+/// newly ingested play exceeds the session gap. The gap is passed in so the
+/// loop resolves it once per tick and every use agrees.
+fn session_boundary(prev_last_ts: i64, new_ts: i64, gap: i64) -> bool {
+    new_ts - prev_last_ts >= gap
+}
+
+/// Start of the just-finished session's window: the previous marker (as unix
+/// secs) minus one gap, falling back to `newest` when the marker is not a
+/// representable timestamp. Pure, so the same resolved gap feeds it as the
+/// boundary check and the quiescence check.
+fn session_window_start(
+    prev_marker: i64,
+    newest: chrono::DateTime<chrono::Utc>,
+    gap: i64,
+) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::<chrono::Utc>::from_timestamp(prev_marker, 0).unwrap_or(newest)
+        - chrono::Duration::seconds(gap)
 }
 
 /// Quiescence decision: a session is active and its newest ingested play is
@@ -64,6 +78,44 @@ fn session_closed(last_play_ts: Option<i64>, now_ts: i64, gap: i64, session_acti
         return false;
     };
     now_ts >= last.saturating_add(gap)
+}
+
+/// Session state owned by the poll loop: the newest play timestamp seen this
+/// run and whether that session still owes a quiet auto-sync.
+///
+/// Seeded from the meta marker so a previous run's plays don't arm a sync,
+/// armed by every ingested batch, fires once on quiescence (`on_fired`), then
+/// stays quiet until the next batch re-arms it.
+struct SessionTracker {
+    last_play_ts: Option<i64>,
+    active: bool,
+}
+
+impl SessionTracker {
+    /// Seed from the persisted marker: the newest timestamp is known but no
+    /// session is armed.
+    fn seeded(last_play_ts: Option<i64>) -> Self {
+        Self {
+            last_play_ts,
+            active: false,
+        }
+    }
+
+    /// Arm after an ingested batch, keeping the newest timestamp.
+    fn note_batch(&mut self, ts: i64) {
+        self.last_play_ts = Some(self.last_play_ts.map_or(ts, |prev| prev.max(ts)));
+        self.active = true;
+    }
+
+    /// Quiescence decision: armed and idle for at least `gap` seconds.
+    fn should_fire(&self, now_ts: i64, gap: i64) -> bool {
+        session_closed(self.last_play_ts, now_ts, gap, self.active)
+    }
+
+    /// Consume the fire: one quiet sync per session, re-armed by a batch.
+    fn on_fired(&mut self) {
+        self.active = false;
+    }
 }
 
 /// One personal goal crossed by an ingest batch (v0.6.0).
@@ -145,21 +197,26 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
         let mut last_dir: Option<PathBuf> = None;
         // Quiet auto-sync state (in-thread; seeded from the meta marker so a
         // previous run's plays don't count, but the newest timestamp is
-        // known). `session_active` = plays ingested this run and not yet
-        // auto-synced; cleared after the quiet sync so it fires once per
-        // session, re-armed by the next ingested play.
-        let mut last_play_ts: Option<i64> = state
-            .store
-            .get_meta(SESSION_LAST_KEY)
-            .ok()
-            .flatten()
-            .and_then(|v| v.parse::<i64>().ok());
-        let mut session_active = false;
+        // known). The tracker arms on ingested plays and is cleared after the
+        // quiet sync so it fires once per session.
+        let mut session = SessionTracker::seeded(
+            state
+                .store
+                .get_meta(SESSION_LAST_KEY)
+                .ok()
+                .flatten()
+                .and_then(|v| v.parse::<i64>().ok()),
+        );
         loop {
             if SHUTDOWN.load(Ordering::Relaxed) {
                 return;
             }
             std::thread::sleep(Duration::from_secs(POLL_SECS));
+
+            // Resolve the gap once per tick: boundary toasts, the summary
+            // window and the quiescence check must all use the same value, so
+            // an env override changes every use, not just the auto-sync.
+            let gap = session_gap_secs();
 
             // Re-resolve the dir every tick so a settings change takes
             // effect without an app restart.
@@ -209,7 +266,7 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
                                 let new_last = plays.first()?.played_at;
                                 newest_ingested = Some(new_last.timestamp());
                                 let is_new_session = match prev_marker {
-                                    Some(ts) => session_boundary(ts, new_last.timestamp()),
+                                    Some(ts) => session_boundary(ts, new_last.timestamp(), gap),
                                     None => false, // first pass ever: seed, no toast
                                 };
                                 let _ = state
@@ -220,12 +277,11 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
                                 }
                                 // The just-finished session's plays: everything
                                 // ingested after (prev marker - gap).
-                                let window_start = chrono::DateTime::<chrono::Utc>::from_timestamp(
+                                let window_start = session_window_start(
                                     prev_marker.unwrap_or(new_last.timestamp()),
-                                    0,
-                                )
-                                .unwrap_or(new_last)
-                                    - chrono::Duration::seconds(SESSION_GAP_SECS);
+                                    new_last,
+                                    gap,
+                                );
                                 let mut plays_in_session = 0u32;
                                 let mut pbs = 0u32;
                                 let mut best_delta: Option<f64> = None;
@@ -293,8 +349,7 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
                     // Arm the quiet post-session sync (re-arms after every
                     // new batch; the next idle gap fires exactly one sync).
                     if let Some(ts) = newest_ingested {
-                        last_play_ts = Some(last_play_ts.map_or(ts, |prev| prev.max(ts)));
-                        session_active = true;
+                        session.note_batch(ts);
                     }
                 }
             }
@@ -303,15 +358,10 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
             // never notice the player merely stopping. Instead, once an
             // ingested session has been idle for the gap, run one quiet smart
             // sync (deep off: played benchmarks + snapshots for the new
-            // plays). No profile -> skip silently. `session_active` is
-            // cleared so this fires once per session; a new play re-arms it.
-            if session_closed(
-                last_play_ts,
-                chrono::Utc::now().timestamp(),
-                session_gap_secs(),
-                session_active,
-            ) {
-                session_active = false;
+            // plays). No profile -> skip silently. `on_fired` clears the arm
+            // so this fires once per session; a new play re-arms it.
+            if session.should_fire(chrono::Utc::now().timestamp(), gap) {
+                session.on_fired();
                 if let Some(steam_id) = state.profile().ok().flatten().map(|p| p.steam_id) {
                     let app_handle = app.clone();
                     let store = state.store.clone();
@@ -351,16 +401,79 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
 mod tests {
     use super::*;
 
+    const GAP: i64 = SESSION_GAP_SECS;
+
     /// 40-min gap between two plays starts a new session; 5-min does not.
     #[test]
     fn session_boundary_flags_half_hour_gaps() {
-        assert!(session_boundary(1_000, 1_000 + 40 * 60));
-        assert!(session_boundary(1_000, 1_000 + 30 * 60));
-        assert!(!session_boundary(1_000, 1_000 + 5 * 60));
-        assert!(!session_boundary(5_000, 4_900)); // backwards: no boundary
+        assert!(session_boundary(1_000, 1_000 + 40 * 60, GAP));
+        assert!(session_boundary(1_000, 1_000 + 30 * 60, GAP));
+        assert!(!session_boundary(1_000, 1_000 + 5 * 60, GAP));
+        assert!(!session_boundary(5_000, 4_900, GAP)); // backwards: no boundary
     }
 
-    const GAP: i64 = SESSION_GAP_SECS;
+    /// The session window opens one gap before the previous marker.
+    #[test]
+    fn session_window_start_subtracts_gap_from_prev_marker() {
+        let newest = chrono::DateTime::<chrono::Utc>::from_timestamp(2_000_000, 0).expect("ts");
+        let start = session_window_start(1_000_000, newest, 60);
+        assert_eq!(start.timestamp(), 1_000_000 - 60);
+    }
+
+    /// An unrepresentable marker falls back to `newest` before subtracting.
+    #[test]
+    fn session_window_start_falls_back_on_impossible_marker() {
+        let newest = chrono::DateTime::<chrono::Utc>::from_timestamp(2_000_000, 0).expect("ts");
+        let start = session_window_start(i64::MAX, newest, 60);
+        assert_eq!(start, newest - chrono::Duration::seconds(60));
+    }
+
+    /// A seed alone never arms; an ingested batch does and keeps the newest ts.
+    #[test]
+    fn tracker_arms_only_on_batch() {
+        let mut tracker = SessionTracker::seeded(Some(1_000));
+        assert!(
+            !tracker.should_fire(1_000 + 10 * GAP, GAP),
+            "a previous run's marker must not arm a sync"
+        );
+        tracker.note_batch(900); // older than the seed: max keeps the seed
+        assert!(tracker.should_fire(1_000 + GAP, GAP));
+        assert_eq!(tracker.last_play_ts, Some(1_000));
+    }
+
+    /// Firing clears the arm: the idle session syncs once, not every tick.
+    #[test]
+    fn tracker_fires_once_then_stays_quiet() {
+        let mut tracker = SessionTracker::seeded(None);
+        tracker.note_batch(1_700_000_000);
+        let now = 1_700_000_000 + GAP;
+        assert!(tracker.should_fire(now, GAP));
+        tracker.on_fired();
+        assert!(!tracker.should_fire(now + GAP, GAP));
+        assert!(!tracker.should_fire(now + 10 * GAP, GAP));
+    }
+
+    /// A new batch after the quiet sync re-arms exactly one more fire.
+    #[test]
+    fn tracker_rearms_after_new_batch() {
+        let mut tracker = SessionTracker::seeded(Some(1_000));
+        tracker.note_batch(1_100);
+        assert!(tracker.should_fire(1_100 + GAP, GAP));
+        tracker.on_fired();
+        assert!(!tracker.should_fire(1_100 + GAP, GAP));
+        tracker.note_batch(1_200);
+        assert!(!tracker.should_fire(1_200 + GAP - 1, GAP));
+        assert!(tracker.should_fire(1_200 + GAP, GAP));
+    }
+
+    /// Nothing ingested this run: no marker, no arm, no fire.
+    #[test]
+    fn tracker_never_fires_without_batch() {
+        let mut tracker = SessionTracker::seeded(None);
+        assert!(!tracker.should_fire(1_700_000_000, GAP));
+        tracker.on_fired(); // idempotent on an unarmed tracker
+        assert!(!tracker.should_fire(1_700_000_000, GAP));
+    }
 
     /// An active session whose newest play is at least a gap old is closed.
     #[test]
