@@ -6,6 +6,11 @@
 //! KovaaK's writes incrementally mid-session, the signature lag is the
 //! debounce) and emits a `local-plays-updated` Tauri event with the report.
 //!
+//! A batch is defined by store content — the plays newer than the watcher's
+//! high-water mark, whoever ingested them (this scan or a concurrent smart
+//! sync) — so session toasts, goal crossings and the quiet auto-sync fire
+//! exactly once per batch no matter which path wrote the rows.
+//!
 //! Strictly local: no network, ranks still change only on Sync Now.
 
 use std::path::PathBuf;
@@ -14,7 +19,7 @@ use std::time::{Duration, SystemTime};
 
 use tauri::Emitter;
 
-use kovaaks_core::store::{goal_crossed, ScenarioGoal};
+use kovaaks_core::store::{goal_crossed, ScenarioGoal, Store};
 use kovaaks_core::PlayRecord;
 
 use crate::{run_csv_scan, run_smart_sync, AppState};
@@ -80,20 +85,87 @@ fn session_closed(last_play_ts: Option<i64>, now_ts: i64, gap: i64, session_acti
     now_ts >= last.saturating_add(gap)
 }
 
+/// Query mark for a tick: the tracker's high-water mark as an instant, or the
+/// epoch when there is none yet. The epoch makes the first batch unbounded —
+/// every stored play is newer — so a fresh install processes (and arms on)
+/// its first ingest instead of adopting it as the seed. Pure.
+fn batch_mark(mark: Option<i64>) -> chrono::DateTime<chrono::Utc> {
+    mark.and_then(|ts| chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0))
+        .unwrap_or(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH)
+}
+
+/// Summarize the session finished by `batch` (newest first, already resolved
+/// from store content). Persists the new marker as a side effect (even when
+/// there is no boundary to report), exactly like the old inline closure.
+/// Returns `None` on the first pass ever or when the batch continues the
+/// current session; otherwise `(plays, pbs, best_delta, best_scenario)`.
+fn session_summary(
+    store: &Store,
+    sid: &str,
+    batch: &[PlayRecord],
+    new_last: chrono::DateTime<chrono::Utc>,
+    gap: i64,
+) -> Option<(u32, u32, Option<f64>, String)> {
+    let prev_marker = store
+        .get_meta(SESSION_LAST_KEY)
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<i64>().ok());
+    let is_new_session = match prev_marker {
+        Some(ts) => session_boundary(ts, new_last.timestamp(), gap),
+        None => false, // first pass ever: seed, no toast
+    };
+    let _ = store.set_meta(SESSION_LAST_KEY, &new_last.timestamp().to_string());
+    if !is_new_session {
+        return None;
+    }
+    // The just-finished session's plays: everything in this batch after
+    // (prev marker - gap).
+    let window_start =
+        session_window_start(prev_marker.unwrap_or(new_last.timestamp()), new_last, gap);
+    let mut plays_in_session = 0u32;
+    let mut pbs = 0u32;
+    let mut best_delta: Option<f64> = None;
+    let mut best_scenario = String::new();
+    for play in batch {
+        if play.played_at <= window_start {
+            break; // newest-first order
+        }
+        plays_in_session += 1;
+        let hist = store.plays_history(sid, &play.scenario).ok()?;
+        let prior_best = hist
+            .iter()
+            .take_while(|h| h.played_at < play.played_at)
+            .map(|h| h.score)
+            .fold(-1.0f64, f64::max);
+        if play.score > prior_best {
+            let delta = play.score - prior_best.max(0.0);
+            pbs += 1;
+            if best_delta.is_none_or(|d| delta > d) {
+                best_delta = Some(delta);
+                best_scenario = play.scenario.clone();
+            }
+        }
+    }
+    Some((plays_in_session, pbs, best_delta, best_scenario))
+}
+
 /// Session state owned by the poll loop: the newest play timestamp seen this
 /// run and whether that session still owes a quiet auto-sync.
 ///
-/// Seeded from the meta marker so a previous run's plays don't arm a sync,
-/// armed by every ingested batch, fires once on quiescence (`on_fired`), then
-/// stays quiet until the next batch re-arms it.
+/// The timestamp is the batch high-water mark: a batch is every play in the
+/// store newer than it, regardless of who ingested the rows. Seeded from the
+/// meta marker (or the store's newest play on a first-ever run) so previous
+/// plays don't arm a sync, armed by every new batch, fires once on
+/// quiescence (`on_fired`), then stays quiet until the next batch re-arms it.
 struct SessionTracker {
     last_play_ts: Option<i64>,
     active: bool,
 }
 
 impl SessionTracker {
-    /// Seed from the persisted marker: the newest timestamp is known but no
-    /// session is armed.
+    /// Seed from the persisted marker (or the store's newest play): the
+    /// newest timestamp is known but no session is armed.
     fn seeded(last_play_ts: Option<i64>) -> Self {
         Self {
             last_play_ts,
@@ -101,7 +173,7 @@ impl SessionTracker {
         }
     }
 
-    /// Arm after an ingested batch, keeping the newest timestamp.
+    /// Arm after a batch of new store plays, keeping the newest timestamp.
     fn note_batch(&mut self, ts: i64) {
         self.last_play_ts = Some(self.last_play_ts.map_or(ts, |prev| prev.max(ts)));
         self.active = true;
@@ -232,83 +304,46 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
             }
 
             if sig.is_some() && sig != last_sig {
+                // Resolve the player first: no profile means nothing to scan
+                // or react to (run_csv_scan is a no-op in that case too).
+                let Some(sid) = state.profile().ok().flatten().map(|p| p.steam_id) else {
+                    last_sig = sig;
+                    continue;
+                };
+                // First run ever (no meta marker): adopt the store's newest
+                // play so pre-existing history is never resummarized. Done
+                // before the scan so an empty store leaves the mark unset.
+                if session.last_play_ts.is_none() {
+                    session.last_play_ts = state.store.newest_play_ts(&sid).ok().flatten();
+                }
+                // Resolve the batch mark BEFORE the scan: unseeded + empty
+                // store means epoch, so this first ingest forms a full batch
+                // instead of being swallowed as the seed.
+                let after = batch_mark(session.last_play_ts);
                 let (seen, inserted) = match run_csv_scan(&state.store) {
                     Some(pair) => pair,
                     None => {
-                        // No steam_id connected or cutoff failure: keep the
-                        // baseline so we don't rescan until something changes.
+                        // Cutoff failure mid-tick: keep the baseline so we
+                        // don't rescan until something changes.
                         last_sig = sig;
                         continue;
                     }
                 };
-                if inserted > 0 {
+                // A batch is "plays in the store newer than the tracker's
+                // mark", not "rows this scan inserted": a concurrent smart
+                // sync (Sync button, launch auto-sync, post-connect) may have
+                // ingested it first. The plays table is written only by
+                // CSV-ingest paths, so store content is the reliable signal.
+                let batch = state.store.plays_since(&sid, after).unwrap_or_default();
+                if !batch.is_empty() {
                     // Newest play timestamp of this batch; also arms the
                     // quiet auto-sync once the session goes idle.
-                    let mut newest_ingested: Option<i64> = None;
-                    // Post-session summary: a play above every earlier score
-                    // for its scenario is a PB. A >20 min idle gap before
-                    // this batch marks the end of the previous session; the
-                    // summary covers the just-finished one.
-                    let summary =
-                        state
-                            .profile()
-                            .ok()
-                            .flatten()
-                            .map(|p| p.steam_id)
-                            .and_then(|sid| {
-                                let prev_marker = state
-                                    .store
-                                    .get_meta(SESSION_LAST_KEY)
-                                    .ok()
-                                    .flatten()
-                                    .and_then(|v| v.parse::<i64>().ok());
-                                let plays = state.store.latest_plays(&sid, inserted).ok()?;
-                                let new_last = plays.first()?.played_at;
-                                newest_ingested = Some(new_last.timestamp());
-                                let is_new_session = match prev_marker {
-                                    Some(ts) => session_boundary(ts, new_last.timestamp(), gap),
-                                    None => false, // first pass ever: seed, no toast
-                                };
-                                let _ = state
-                                    .store
-                                    .set_meta(SESSION_LAST_KEY, &new_last.timestamp().to_string());
-                                if !is_new_session {
-                                    return None;
-                                }
-                                // The just-finished session's plays: everything
-                                // ingested after (prev marker - gap).
-                                let window_start = session_window_start(
-                                    prev_marker.unwrap_or(new_last.timestamp()),
-                                    new_last,
-                                    gap,
-                                );
-                                let mut plays_in_session = 0u32;
-                                let mut pbs = 0u32;
-                                let mut best_delta: Option<f64> = None;
-                                let mut best_scenario = String::new();
-                                for play in &plays {
-                                    if play.played_at <= window_start {
-                                        break; // newest-first order
-                                    }
-                                    plays_in_session += 1;
-                                    let hist =
-                                        state.store.plays_history(&sid, &play.scenario).ok()?;
-                                    let prior_best = hist
-                                        .iter()
-                                        .take_while(|h| h.played_at < play.played_at)
-                                        .map(|h| h.score)
-                                        .fold(-1.0f64, f64::max);
-                                    if play.score > prior_best {
-                                        let delta = play.score - prior_best.max(0.0);
-                                        pbs += 1;
-                                        if best_delta.is_none_or(|d| delta > d) {
-                                            best_delta = Some(delta);
-                                            best_scenario = play.scenario.clone();
-                                        }
-                                    }
-                                }
-                                Some((plays_in_session, pbs, best_delta, best_scenario))
-                            });
+                    let new_last = batch[0].played_at;
+                    // Post-session summary: a play above every earlier
+                    // score for its scenario is a PB. A >20 min idle gap
+                    // before this batch marks the end of the previous
+                    // session; the summary covers the just-finished one.
+                    let summary = session_summary(&state.store, &sid, &batch, new_last, gap);
                     let mut payload = serde_json::json!({ "seen": seen, "inserted": inserted });
                     if let Some((plays_count, pbs, best_delta, best_scenario)) = summary {
                         payload["session"] = serde_json::json!({
@@ -322,35 +357,29 @@ pub fn spawn(app: tauri::AppHandle, state: AppState) {
                     // Personal goals: a play that newly crosses its target
                     // emits one `goal-reached` toast event (the UI listener
                     // only shows a toast; it never rebuilds the overview).
-                    if let Some(sid) = state.profile().ok().flatten().map(|p| p.steam_id) {
-                        let goals = state.store.scenario_goals(&sid).unwrap_or_default();
-                        if !goals.is_empty() {
-                            let batch =
-                                state.store.latest_plays(&sid, inserted).unwrap_or_default();
-                            let crossings =
-                                batch_goal_crossings(&batch, &goals, |scenario, before| {
-                                    state
-                                        .store
-                                        .scenario_best_before(&sid, scenario, before)
-                                        .unwrap_or(0.0)
-                                });
-                            for crossing in crossings {
-                                let _ = app.emit(
-                                    "goal-reached",
-                                    serde_json::json!({
-                                        "scenario": crossing.scenario,
-                                        "score": crossing.score,
-                                        "target": crossing.target,
-                                    }),
-                                );
-                            }
+                    let goals = state.store.scenario_goals(&sid).unwrap_or_default();
+                    if !goals.is_empty() {
+                        let crossings = batch_goal_crossings(&batch, &goals, |scenario, before| {
+                            state
+                                .store
+                                .scenario_best_before(&sid, scenario, before)
+                                .unwrap_or(0.0)
+                        });
+                        for crossing in crossings {
+                            let _ = app.emit(
+                                "goal-reached",
+                                serde_json::json!({
+                                    "scenario": crossing.scenario,
+                                    "score": crossing.score,
+                                    "target": crossing.target,
+                                }),
+                            );
                         }
                     }
-                    // Arm the quiet post-session sync (re-arms after every
-                    // new batch; the next idle gap fires exactly one sync).
-                    if let Some(ts) = newest_ingested {
-                        session.note_batch(ts);
-                    }
+                    // Arm the quiet post-session sync (re-arms after
+                    // every new batch; the next idle gap fires exactly
+                    // one sync).
+                    session.note_batch(new_last.timestamp());
                 }
             }
             // Quiescence detection: the existing session summary only fires
@@ -516,6 +545,21 @@ mod tests {
         assert!(!session_closed(Some(last), now, GAP, false));
         // ...a later play re-arms it.
         assert!(session_closed(Some(now), now + GAP, GAP, true));
+    }
+
+    /// An unseeded tracker queries from the epoch so its first batch is
+    /// unbounded (never swallowed as the seed); a real mark is used verbatim.
+    #[test]
+    fn batch_mark_is_unbounded_without_a_mark() {
+        assert_eq!(
+            batch_mark(None),
+            chrono::DateTime::<chrono::Utc>::UNIX_EPOCH,
+            "a first-ever batch must cover every stored play"
+        );
+        assert_eq!(
+            batch_mark(Some(1_700_000_000)),
+            chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0).expect("ts")
+        );
     }
 
     fn batch_play(scenario: &str, secs: i64, score: f64) -> kovaaks_core::PlayRecord {

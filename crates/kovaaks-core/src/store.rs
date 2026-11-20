@@ -248,7 +248,10 @@ impl Store {
     /// Open (creating + migrating as needed) the database at `path`.
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        // Contending readers (e.g. the watcher's post-session summary while a
+        // sync writes) should wait for the writer instead of failing at once
+        // with SQLITE_BUSY; this also softens the two-instance lock panic.
+        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
         Self::migrate(conn)
     }
 
@@ -779,6 +782,51 @@ impl Store {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    /// Plays strictly newer than `after`, newest first (same ordering as
+    /// [`Store::latest_plays`]). Used by the watcher to define an ingest batch
+    /// by store content, whoever wrote it.
+    pub fn plays_since(&self, steam_id: &str, after: DateTime<Utc>) -> Result<Vec<PlayRecord>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare(
+            "SELECT scenario, played_at, score, hit_count, avg_fps
+             FROM plays WHERE steam_id = ?1 AND played_at > ?2
+             ORDER BY played_at DESC, id DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![steam_id, after.to_rfc3339()], |row| {
+                let played: String = row.get(1)?;
+                let played_at = parse_rfc3339_column(1, &played)?;
+                Ok(PlayRecord {
+                    scenario: row.get(0)?,
+                    played_at,
+                    score: row.get(2)?,
+                    hit_count: row.get::<_, i64>(3)? as u64,
+                    avg_fps: row.get(4)?,
+                    source: crate::types::PlaySource::Csv,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Newest `played_at` for a player as a unix timestamp, `None` when the
+    /// player has no plays. Seeds the watcher's high-water mark on a first run.
+    pub fn newest_play_ts(&self, steam_id: &str) -> Result<Option<i64>> {
+        let conn = self.lock();
+        let newest: Option<String> = conn
+            .query_row(
+                "SELECT MAX(played_at) FROM plays WHERE steam_id = ?1",
+                params![steam_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        match newest {
+            Some(text) => Ok(Some(parse_rfc3339_column(0, &text)?.timestamp())),
+            None => Ok(None),
+        }
     }
 
     /// All plays of one scenario for a player, ascending played_at.

@@ -518,6 +518,71 @@ fn plays_history_is_ordered_by_played_at() {
 }
 
 #[test]
+fn plays_since_returns_strictly_newer_plays_newest_first() {
+    let path = temp_db("plays-since");
+    let store = Store::open(&path).unwrap();
+    for (secs, file) in [
+        (1_700_000_100, r"C:\stats\a.csv"),
+        (1_700_000_200, r"C:\stats\b.csv"),
+        (1_700_000_300, r"C:\stats\c.csv"),
+    ] {
+        let record = play("VT Pasu Novice S5", ts(secs), 900.0, 140, 240.0);
+        assert!(store.record_play(SID, &record, file).unwrap());
+    }
+    // Another player's plays never leak into the batch.
+    assert!(store
+        .record_play(
+            "76561190000000002",
+            &play("VT Pasu Novice S5", ts(1_700_000_400), 1.0, 1, 1.0),
+            r"C:\stats\other.csv"
+        )
+        .unwrap());
+
+    let batch = store.plays_since(SID, ts(1_700_000_150)).unwrap();
+    let times: Vec<DateTime<Utc>> = batch.iter().map(|p| p.played_at).collect();
+    assert_eq!(
+        times,
+        vec![ts(1_700_000_300), ts(1_700_000_200)],
+        "newest first, strictly newer than the mark"
+    );
+    // The mark itself is excluded: `after` is strict.
+    assert_eq!(store.plays_since(SID, ts(1_700_000_200)).unwrap().len(), 1);
+    assert!(store
+        .plays_since(SID, ts(1_700_000_300))
+        .unwrap()
+        .is_empty());
+    cleanup_db(&path);
+}
+
+#[test]
+fn newest_play_ts_is_none_without_plays_then_tracks_the_latest() {
+    let path = temp_db("plays-newest");
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.newest_play_ts(SID).unwrap(), None, "no plays yet");
+    let early = play("VT Pasu Novice S5", ts(1_700_000_100), 800.0, 130, 239.0);
+    assert!(store
+        .record_play(SID, &early, r"C:\stats\early.csv")
+        .unwrap());
+    assert_eq!(store.newest_play_ts(SID).unwrap(), Some(1_700_000_100));
+    let late = play(
+        "VT Noviceaj Gridshot S5",
+        ts(1_700_000_500),
+        1200.0,
+        200,
+        240.0,
+    );
+    assert!(store.record_play(SID, &late, r"C:\stats\late.csv").unwrap());
+    assert_eq!(
+        store.newest_play_ts(SID).unwrap(),
+        Some(1_700_000_500),
+        "the newest play wins, not the most recently inserted"
+    );
+    // Another player with no plays still reports None.
+    assert_eq!(store.newest_play_ts("76561190000000002").unwrap(), None);
+    cleanup_db(&path);
+}
+
+#[test]
 fn plays_per_day_groups_by_utc_date_since_boundary() {
     let path = temp_db("plays-per-day");
     let store = Store::open(&path).unwrap();
