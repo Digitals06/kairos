@@ -162,23 +162,27 @@ easing/shadow tokens stay cherry-picked by hand.
   ("#258 · top 0.7%") in the detail chart header, off by default, board sizes
   cached 24 h — the local-only rank engine is untouched
 
-## v0.6.0 — candidates (unscoped)
+## v0.6.0
 
-Pick and order these when the next cycle starts. Nothing here is promised.
+- [ ] Auto-sync on KovaaK's exit: the watcher's session boundary (20-min gap)
+      quietly runs a smart sync so ranks are current the next time the app
+      opens (pairs with the session marker)
+- [ ] Custom-bench polish: per-tier color picker, bench duplication, and a
+      "start from a registry benchmark" preset
+- [ ] Streak calendar: the weekly torch strip expanded to a month heatmap
+- [ ] In-app updater: a "new version available" chip via the GitHub releases
+      API — read-only check, off-switch in settings, no auto-install
+- [ ] Scenario goals: a personal target per scenario ("720 on Pasu by
+      December") with the countdown on the weak-spot strip
 
-- **Scenario goals** — a personal target per scenario ("720 on Pasu by December")
-  with the countdown on the weak-spot strip
-- **Streak calendar** — the weekly torch strip expanded to a month heatmap
-- **Auto-sync on exit** — when KovaaK's closes, run a quiet sync so ranks are
-  current the next time the app opens (pairs with the session marker)
-- **In-app updater** — a "new version available" chip via the GitHub releases
-  API, so users stop re-downloading installers by hand
+## Later candidates (unscoped)
+
+Pick and order these when a later cycle starts. Nothing here is promised.
+
 - **Taskbar jump list** — right-click the icon for Launch KovaaK's and your
   three favourite benchmarks
 - **Localization skeleton** — all UI strings in one module (English + French
   first), so translations don't mean a refactor later
-- **Custom-bench polish** — per-tier colour picker, bench duplication, and a
-  "start from a registry benchmark" preset
 
 ## Housekeeping
 
