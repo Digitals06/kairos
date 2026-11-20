@@ -1142,50 +1142,6 @@ pub mod commands {
     /// Next-rank delta uses the category ladder sum (same additive model the
     /// API's `benchmark_progress` uses) — now in the same units, so deltas
     /// are meaningful.
-    /// Rebuild an API-shaped [`BenchmarkProgress`] from a stored snapshot so
-    /// the rank engine can consume it. Stored scores and rank_maxes are
-    /// display units (already ÷100 from the API); the engine works in display
-    /// units too, so no scaling. Scenario order follows the stored
-    /// `api_order` (category × 10 000 + index), matching evxl's ordering.
-    fn stored_to_progress(
-        snap: &kovaaks_core::store::StoredSnapshot,
-    ) -> kovaaks_core::types::BenchmarkProgress {
-        use kovaaks_core::types::{CategoryProgress, ScenarioEntry};
-        let mut categories: Vec<(String, CategoryProgress)> = Vec::new();
-        // Stored rows are ordered by (category, order_idx); rebuild the API's
-        // per-category scenario maps in that same document order.
-        for row in &snap.scenarios {
-            // Stored scores and rank_maxes are display units (already ÷100
-            // from the API); the engine works in display units too — no scaling.
-            let entry = ScenarioEntry {
-                score: row.score as f64,
-                leaderboard_rank: row.leaderboard_rank.max(0) as u64,
-                scenario_rank: row.scenario_rank.max(0) as u32,
-                rank_maxes: row.rank_maxes.clone(),
-                leaderboard_id: 0,
-            };
-            match categories.last_mut() {
-                Some((name, cat)) if *name == row.category => {
-                    cat.scenarios.push((row.scenario.clone(), entry));
-                }
-                _ => categories.push((
-                    row.category.clone(),
-                    CategoryProgress {
-                        benchmark_progress: 0.0,
-                        category_rank: row.category_rank.max(0) as u32,
-                        rank_maxes: Vec::new(),
-                        scenarios: vec![(row.scenario.clone(), entry)],
-                    },
-                )),
-            }
-        }
-        kovaaks_core::types::BenchmarkProgress {
-            benchmark_progress: snap.benchmark_progress as f64,
-            overall_rank: snap.overall_rank.max(0) as u32,
-            categories,
-        }
-    }
-
     fn build_card(
         state: &AppState,
         steam_id: &str,
@@ -1207,7 +1163,7 @@ pub mod commands {
             .unwrap_or(false);
         let rank_tier = if scored_any {
             latest.and_then(|snap| {
-                let api_progress = stored_to_progress(snap);
+                let api_progress = kovaaks_core::stored_to_progress(snap);
                 // Engine-first only: the stored server rank is stale-prone
                 // (it ranks 1-of-32-scored snapshots "Serenity"), so it is no
                 // longer a fallback tier. The engine's coverage gate decides.
@@ -1289,7 +1245,7 @@ pub mod commands {
         let Some(latest) = history.last() else {
             return Ok(None);
         };
-        let base = stored_to_progress(latest);
+        let base = kovaaks_core::stored_to_progress(latest);
         let result = kovaaks_core::grind::next_targets(&base, bench, &difficulty);
         let complete = result.targets.is_empty() && result.next_rank == result.current_rank;
         // Consistency (CV/plateau) per scenario from its merged play/snapshot
@@ -2258,7 +2214,7 @@ pub mod commands {
                 else {
                     continue;
                 };
-                let progress = stored_to_progress(&snap);
+                let progress = kovaaks_core::stored_to_progress(&snap);
                 let grind = kovaaks_core::grind::next_targets(&progress, def, &diff);
                 let plateaued = {
                     // complete tiers can't plateau: a meaningless tag would

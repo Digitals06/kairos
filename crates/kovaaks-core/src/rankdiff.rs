@@ -86,8 +86,8 @@ pub fn compute_rank_changes(
 /// the rank engine can consume it. Stored scores and rank_maxes are display
 /// units; the engine works in display units too — no scaling. Scenario order
 /// follows the stored `api_order` (category × 10 000 + index), matching
-/// evxl's ordering. (Port of the GUI's `stored_to_progress` — the single
-/// shared implementation; the GUI adapter calls this.)
+/// evxl's ordering. The single shared implementation of this adapter: both
+/// the rank-change engine and the GUI call this.
 pub fn stored_to_progress(snap: &StoredSnapshot) -> crate::types::BenchmarkProgress {
     use crate::types::{BenchmarkProgress, CategoryProgress, ScenarioEntry};
     let mut categories: Vec<(String, CategoryProgress)> = Vec::new();

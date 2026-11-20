@@ -39,7 +39,8 @@ fn live_rankcheck_voltaic_s3_and_s5() {
             report.push_str(&format!("{}: no snapshot\n", bench.name));
             continue;
         };
-        // Mirror the app's stored_to_progress conversion.
+        // Mirror kovaaks_core::stored_to_progress (inlined here for this
+        // standalone live check).
         use kovaaks_core::types::{CategoryProgress, ScenarioEntry};
         let mut categories: Vec<(String, CategoryProgress)> = Vec::new();
         for row in &snap.scenarios {
